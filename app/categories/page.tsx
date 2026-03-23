@@ -39,20 +39,20 @@ function buildTree(categories: Category[]): CategoryWithChildren[] {
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([])
-  const [loading, setLoading]       = useState(true)
+  const [loading, setLoading] = useState(true)
 
   // Modal crear/editar
-  const [modal, setModal]           = useState(false)
-  const [editCat, setEditCat]       = useState<Category | null>(null)
-  const [formName, setFormName]     = useState('')
+  const [modal, setModal] = useState(false)
+  const [editCat, setEditCat] = useState<Category | null>(null)
+  const [formName, setFormName] = useState('')
   const [formParent, setFormParent] = useState('')
-  const [formError, setFormError]   = useState('')
-  const [saving, setSaving]         = useState(false)
+  const [formError, setFormError] = useState('')
+  const [saving, setSaving] = useState(false)
 
   // Modal eliminar
-  const [deleteModal, setDeleteModal]   = useState(false)
-  const [deleteCat, setDeleteCat]       = useState<Category | null>(null)
-  const [deleting, setDeleting]         = useState(false)
+  const [deleteModal, setDeleteModal] = useState(false)
+  const [deleteCat, setDeleteCat] = useState<Category | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const fetchCategories = useCallback(async () => {
     setLoading(true)
@@ -86,7 +86,7 @@ export default function CategoriesPage() {
     setSaving(true)
     try {
       const payload = {
-        name:      formName.trim(),
+        name: formName.trim(),
         parent_id: formParent || null,
       }
       if (editCat) {
@@ -234,11 +234,13 @@ export default function CategoriesPage() {
           <p className="text-xs text-[var(--text3)]">
             Dejá vacío para crear una categoría principal, o elegí una padre para crear una subcategoría.
           </p>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="secondary" onClick={() => setModal(false)} disabled={saving}>Cancelar</Button>
-            <Button onClick={handleSave} loading={saving}>
-              {editCat ? 'Guardar cambios' : 'Crear categoría'}
-            </Button>
+          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setModal(false)} disabled={saving}>Cancelar</Button>
+              <Button onClick={handleSave} loading={saving}>
+                {editCat ? 'Guardar cambios' : 'Crear categoría'}
+              </Button>
+            </div>
           </div>
         </div>
       </Modal>

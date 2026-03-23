@@ -11,32 +11,32 @@ import { Search, Plus, X, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface OrderItem {
-  product:   Product
-  quantity:  number
+  product: Product
+  quantity: number
   unit_cost: number
 }
 
 interface PurchaseOrderModalProps {
-  open:    boolean
+  open: boolean
   onClose: () => void
   onSaved: () => void
 }
 
 export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModalProps) {
-  const [suppliers, setSuppliers]   = useState<Supplier[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [supplierId, setSupplierId] = useState('')
-  const [notes, setNotes]           = useState('')
-  const [items, setItems]           = useState<OrderItem[]>([])
-  const [saving, setSaving]         = useState(false)
+  const [notes, setNotes] = useState('')
+  const [items, setItems] = useState<OrderItem[]>([])
+  const [saving, setSaving] = useState(false)
 
   // Búsqueda de productos
-  const [query, setQuery]       = useState('')
-  const [results, setResults]   = useState<Product[]>([])
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<Product[]>([])
   const [searching, setSearching] = useState(false)
 
   useEffect(() => {
     if (!open) return
-    api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => {})
+    api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => { })
   }, [open])
 
   // Reset al cerrar
@@ -69,7 +69,7 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
   const addItem = (product: Product) => {
     setItems(prev => [...prev, {
       product,
-      quantity:  1,
+      quantity: 1,
       unit_cost: product.cost_price,
     }])
     setQuery('')
@@ -94,11 +94,11 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
     try {
       await api.post('/api/purchases', {
         supplier_id: supplierId || null,
-        notes:       notes.trim() || null,
+        notes: notes.trim() || null,
         items: items.map(i => ({
           product_id: i.product.id,
-          quantity:   i.quantity,
-          unit_cost:  i.unit_cost,
+          quantity: i.quantity,
+          unit_cost: i.unit_cost,
         })),
       })
       toast.success('Orden de compra creada')
@@ -239,13 +239,14 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
         )}
 
         {/* Acciones */}
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
-          <Button onClick={handleSave} loading={saving} disabled={items.length === 0}>
-            Crear orden
-          </Button>
+        <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
+            <Button onClick={handleSave} loading={saving} disabled={items.length === 0}>
+              Crear orden
+            </Button>
+          </div>
         </div>
-
       </div>
     </Modal>
   )

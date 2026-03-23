@@ -8,16 +8,16 @@ import { toast } from 'sonner'
 import type { CustomerSummary } from '@/app/customers/page'
 
 interface CustomerModalProps {
-  open:      boolean
-  onClose:   () => void
-  onSaved:   () => void
+  open: boolean
+  onClose: () => void
+  onSaved: () => void
   customer?: CustomerSummary | null
 }
 
 const empty = { full_name: '', document: '', phone: '', email: '', address: '', credit_limit: '', notes: '' }
 
 export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModalProps) {
-  const [form, setForm]     = useState(empty)
+  const [form, setForm] = useState(empty)
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const isEdit = !!customer
@@ -25,13 +25,13 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
   useEffect(() => {
     if (customer) {
       setForm({
-        full_name:    customer.full_name,
-        document:     customer.document     ?? '',
-        phone:        customer.phone        ?? '',
-        email:        customer.email        ?? '',
-        address:      '',
+        full_name: customer.full_name,
+        document: customer.document ?? '',
+        phone: customer.phone ?? '',
+        email: customer.email ?? '',
+        address: '',
         credit_limit: customer.credit_limit > 0 ? String(customer.credit_limit) : '',
-        notes:        customer.notes        ?? '',
+        notes: customer.notes ?? '',
       })
     } else {
       setForm(empty)
@@ -49,13 +49,13 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
     setSaving(true)
     try {
       const payload = {
-        full_name:    form.full_name.trim(),
-        document:     form.document.trim()     || null,
-        phone:        form.phone.trim()        || null,
-        email:        form.email.trim()        || null,
-        address:      form.address.trim()      || null,
+        full_name: form.full_name.trim(),
+        document: form.document.trim() || null,
+        phone: form.phone.trim() || null,
+        email: form.email.trim() || null,
+        address: form.address.trim() || null,
         credit_limit: Number(form.credit_limit) || 0,
-        notes:        form.notes.trim()        || null,
+        notes: form.notes.trim() || null,
       }
       if (isEdit) {
         await api.patch(`/api/customers/${customer!.id}`, payload)
@@ -98,10 +98,14 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
             placeholder="Observaciones del cliente..."
             className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] resize-none" />
         </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
-          <Button onClick={handleSave} loading={saving}>{isEdit ? 'Guardar cambios' : 'Crear cliente'}</Button>
+        <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
+            <Button onClick={handleSave} loading={saving}>{isEdit ? 'Guardar cambios' : 'Crear cliente'}</Button>
+          </div>
+
         </div>
+
       </div>
     </Modal>
   )

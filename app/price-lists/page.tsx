@@ -314,11 +314,13 @@ export default function PriceListsPage() {
             <span className="text-sm text-[var(--text2)]">Usar como lista por defecto en el POS</span>
           </label>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setModal(false)} disabled={saving}>Cancelar</Button>
-            <Button onClick={handleSave} loading={saving}>
-              {editList ? 'Guardar cambios' : 'Crear lista'}
-            </Button>
+          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setModal(false)} disabled={saving}>Cancelar</Button>
+              <Button onClick={handleSave} loading={saving}>
+                {editList ? 'Guardar cambios' : 'Crear lista'}
+              </Button>
+            </div>
           </div>
         </div>
       </Modal>
@@ -342,9 +344,11 @@ export default function PriceListsPage() {
             ))}
           </div>
           <p className="text-xs text-[var(--text3)]">Podés modificar los márgenes después.</p>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="secondary" onClick={() => setPresetsModal(false)}>Omitir</Button>
-            <Button onClick={handleCreatePresets} loading={creatingPresets}>Crear listas</Button>
+          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setPresetsModal(false)}>Omitir</Button>
+              <Button onClick={handleCreatePresets} loading={creatingPresets}>Crear listas</Button>
+            </div>
           </div>
         </div>
       </Modal>
