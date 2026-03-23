@@ -7,71 +7,74 @@ import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import type { Product, Category, Supplier } from '@/types'
+import type { PriceList } from '@/app/price-lists/page'
 
 interface ProductModalProps {
-  open:     boolean
-  onClose:  () => void
-  onSaved:  () => void
+  open: boolean
+  onClose: () => void
+  onSaved: () => void
   product?: Product | null   // null = crear, Product = editar
 }
 
 const UNITS = [
-  { value: 'unidad',  label: 'Unidad' },
-  { value: 'kg',      label: 'Kilogramo' },
-  { value: 'litro',   label: 'Litro' },
-  { value: 'gramo',   label: 'Gramo' },
-  { value: 'metro',   label: 'Metro' },
-  { value: 'caja',    label: 'Caja' },
-  { value: 'pack',    label: 'Pack' },
+  { value: 'unidad', label: 'Unidad' },
+  { value: 'kg', label: 'Kilogramo' },
+  { value: 'litro', label: 'Litro' },
+  { value: 'gramo', label: 'Gramo' },
+  { value: 'metro', label: 'Metro' },
+  { value: 'caja', label: 'Caja' },
+  { value: 'pack', label: 'Pack' },
 ]
 
 const emptyForm = {
-  name:          '',
-  barcode:       '',
-  sku:           '',
-  description:   '',
-  category_id:   '',
-  supplier_id:   '',
-  cost_price:    '',
-  sell_price:    '',
+  name: '',
+  barcode: '',
+  sku: '',
+  description: '',
+  category_id: '',
+  supplier_id: '',
+  cost_price: '',
   stock_current: '',
-  stock_min:     '',
-  stock_max:     '',
-  unit:          'unidad',
+  stock_min: '',
+  stock_max: '',
+  unit: 'unidad',
 }
 
 export function ProductModal({ open, onClose, onSaved, product }: ProductModalProps) {
-  const [form, setForm]           = useState(emptyForm)
+  const [form, setForm] = useState(emptyForm)
   const [categories, setCategories] = useState<Category[]>([])
-  const [suppliers, setSuppliers]   = useState<Supplier[]>([])
-  const [saving, setSaving]         = useState(false)
-  const [errors, setErrors]         = useState<Record<string, string>>({})
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [saving, setSaving] = useState(false)
+  const [errors, setErrors] = useState<Record<string, string>>({})
+  const [priceLists, setPriceLists] = useState<PriceList[]>([])
+
 
   const isEdit = !!product
 
   // Cargar categorías y proveedores
   useEffect(() => {
     if (!open) return
-    api.get<Category[]>('/api/products/categories').then(setCategories).catch(() => {})
-    api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => {})
+    api.get<Category[]>('/api/products/categories').then(setCategories).catch(() => { })
+    api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => { })
+    api.get<PriceList[]>('/api/price-lists').then(setPriceLists).catch(() => { })  // ← agregar
+
   }, [open])
 
   // Pre-cargar datos al editar
   useEffect(() => {
     if (product) {
       setForm({
-        name:          product.name,
-        barcode:       product.barcode       ?? '',
-        sku:           product.sku           ?? '',
-        description:   product.description   ?? '',
-        category_id:   product.category_id   ?? '',
-        supplier_id:   product.supplier_id   ?? '',
-        cost_price:    String(product.cost_price),
-        sell_price:    String(product.sell_price),
+        name: product.name,
+        barcode: product.barcode ?? '',
+        sku: product.sku ?? '',
+        description: product.description ?? '',
+        category_id: product.category_id ?? '',
+        supplier_id: product.supplier_id ?? '',
+        cost_price: String(product.cost_price),
         stock_current: String(product.stock_current),
-        stock_min:     String(product.stock_min),
-        stock_max:     String(product.stock_max),
-        unit:          product.unit,
+        stock_min: String(product.stock_min),
+        stock_max: String(product.stock_max),
+        unit: product.unit,
       })
     } else {
       setForm(emptyForm)
@@ -86,11 +89,9 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
 
   const validate = () => {
     const errs: Record<string, string> = {}
-    if (!form.name.trim())       errs.name       = 'El nombre es obligatorio'
-    if (!form.sell_price)        errs.sell_price = 'El precio de venta es obligatorio'
-    if (Number(form.sell_price) < 0) errs.sell_price = 'Debe ser mayor a 0'
+    if (!form.name.trim()) errs.name = 'El nombre es obligatorio'
     if (Number(form.cost_price) < 0) errs.cost_price = 'Debe ser mayor a 0'
-    if (Number(form.stock_min)  < 0) errs.stock_min  = 'Debe ser mayor o igual a 0'
+    if (Number(form.stock_min) < 0) errs.stock_min = 'Debe ser mayor o igual a 0'
     return errs
   }
 
@@ -101,18 +102,17 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     setSaving(true)
     try {
       const payload = {
-        name:          form.name.trim(),
-        barcode:       form.barcode.trim()     || null,
-        sku:           form.sku.trim()         || null,
-        description:   form.description.trim() || null,
-        category_id:   form.category_id        || null,
-        supplier_id:   form.supplier_id        || null,
-        cost_price:    Number(form.cost_price)  || 0,
-        sell_price:    Number(form.sell_price),
+        name: form.name.trim(),
+        barcode: form.barcode.trim() || null,
+        sku: form.sku.trim() || null,
+        description: form.description.trim() || null,
+        category_id: form.category_id || null,
+        supplier_id: form.supplier_id || null,
+        cost_price: Number(form.cost_price) || 0,
         stock_current: Number(form.stock_current) || 0,
-        stock_min:     Number(form.stock_min)     || 0,
-        stock_max:     Number(form.stock_max)     || 9999,
-        unit:          form.unit,
+        stock_min: Number(form.stock_min) || 0,
+        stock_max: Number(form.stock_max) || 9999,
+        unit: form.unit,
       }
 
       if (isEdit) {
@@ -133,7 +133,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   }
 
   const categoryOptions = categories.map(c => ({ value: c.id, label: c.name }))
-  const supplierOptions  = suppliers.map(s => ({ value: s.id, label: s.name }))
+  const supplierOptions = suppliers.map(s => ({ value: s.id, label: s.name }))
 
   return (
     <Modal
@@ -209,29 +209,29 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
             placeholder="0.00"
             error={errors.cost_price}
           />
-          <Input
-            label="Precio de venta *"
-            type="number"
-            min="0"
-            step="0.01"
-            value={form.sell_price}
-            onChange={set('sell_price')}
-            placeholder="0.00"
-            error={errors.sell_price}
-          />
         </div>
 
-        {/* Margen calculado */}
-        {form.cost_price && form.sell_price && Number(form.sell_price) > 0 && (
-          <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] text-sm">
-            <span className="text-[var(--text3)]">Margen: </span>
-            <span className="font-semibold text-[var(--accent)]">
-              {Math.round((Number(form.sell_price) - Number(form.cost_price)) / Number(form.sell_price) * 100)}%
-            </span>
-            <span className="text-[var(--text3)] ml-3">Ganancia: </span>
-            <span className="font-semibold text-[var(--text)]">
-              ${(Number(form.sell_price) - Number(form.cost_price)).toFixed(2)}
-            </span>
+        {/* Precios por lista */}
+        {form.cost_price && Number(form.cost_price) > 0 && categories.length >= 0 && (
+          <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
+            <p className="text-xs font-medium text-[var(--text3)] mb-1">Precio según lista</p>
+            {priceLists.slice(0, 3).map(list => {
+              const price = Math.round(Number(form.cost_price) * (1 + list.margin_pct / 100) * 100) / 100
+              const gain = price - Number(form.cost_price)
+              return (
+                <div key={list.id} className="flex items-center justify-between text-sm">
+                  <span className="text-[var(--text2)]">{list.name}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-[var(--text3)]">
+                      +{list.margin_pct}% · ganancia ${gain.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    </span>
+                    <span className="font-semibold mono text-[var(--accent)]">
+                      ${price.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
 

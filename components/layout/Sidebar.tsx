@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, Boxes, ShoppingCart,
-  Truck, BarChart3, Settings, Sun, Moon, LogOut, Zap, Tag, Users
+  Truck, BarChart3, Settings, Sun, Moon, LogOut, Zap, Tag, Users, PercentCircle
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { href: '/purchases', label: 'Compras', icon: Truck },
   { href: '/finances', label: 'Finanzas', icon: BarChart3 },
   { href: '/customers', label: 'Cuentas', icon: Users },
+  { href: '/price-lists', label: 'Precios',    icon: PercentCircle },
   { href: '/settings', label: 'Config', icon: Settings },
 ]
 
