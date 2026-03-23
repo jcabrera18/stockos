@@ -42,7 +42,7 @@ NEXT_PUBLIC_POSTHOG_HOST=https://app.posthog.com
 
 ```
 app/
-├── login/          → Pantalla de login
+├── login/          → Pantalla de auth login
 ├── dashboard/      → Stats del día, ventas recientes, alertas
 ├── products/       → ABM de productos con filtros y paginación
 ├── stock/          → Inventario completo con alertas
