@@ -46,6 +46,7 @@ export default function POSPage() {
   const [query, setQuery]         = useState('')
   const [results, setResults]     = useState<Product[]>([])
   const [searching, setSearching] = useState(false)
+  const [activeResultIndex, setActiveResultIndex] = useState(-1)
   const searchRef = useRef<HTMLInputElement>(null)
 
   // Carrito
@@ -90,8 +91,11 @@ export default function POSPage() {
           limit: 8,
         })
         setResults(res.data)
-      } catch { setResults([]) }
-      finally { setSearching(false) }
+        setActiveResultIndex(res.data.length > 0 ? 0 : -1)
+      } catch {
+        setResults([])
+        setActiveResultIndex(-1)
+      } finally { setSearching(false) }
     }, 300)
     return () => clearTimeout(timer)
   }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -278,7 +282,28 @@ export default function POSPage() {
             <input
               ref={searchRef}
               value={query}
-              onChange={e => setQuery(e.target.value)}
+              onChange={e => {
+                setQuery(e.target.value)
+                setActiveResultIndex(-1)
+              }}
+              onKeyDown={e => {
+                if (results.length === 0) return
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault()
+                  setActiveResultIndex(prev => Math.min(prev + 1, results.length - 1))
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault()
+                  setActiveResultIndex(prev => Math.max(prev - 1, -1))
+                }
+                if (e.key === 'Enter') {
+                  if (activeResultIndex >= 0 && activeResultIndex < results.length) {
+                    e.preventDefault()
+                    addToCart(results[activeResultIndex])
+                    setActiveResultIndex(-1)
+                  }
+                }
+              }}
               placeholder="Buscar producto o escanear código de barras..."
               className="w-full pl-10 pr-4 py-3 text-sm rounded-[var(--radius-lg)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] focus:bg-[var(--surface)] transition-all"
             />
@@ -289,12 +314,15 @@ export default function POSPage() {
         <div className="flex-1 overflow-y-auto p-4">
           {results.length > 0 ? (
             <div className="space-y-1">
-              {results.map(product => (
+                {results.map((product, index) => (
                 <button
                   key={product.id}
-                  onClick={() => addToCart(product)}
+                  onClick={() => {
+                    addToCart(product)
+                    setActiveResultIndex(-1)
+                  }}
                   disabled={product.stock_current <= 0}
-                  className="w-full flex items-center justify-between px-4 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group"
+                  className={"w-full flex items-center justify-between px-4 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group " + (index === activeResultIndex ? 'ring-2 ring-[var(--accent)]' : 'hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]')}
                 >
                   <div>
                     <p className="text-sm font-medium text-[var(--text)] group-hover:text-[var(--accent)]">{product.name}</p>
