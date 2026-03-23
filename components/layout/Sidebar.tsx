@@ -3,20 +3,22 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, Boxes, ShoppingCart,
-  Truck, BarChart3, Settings, Sun, Moon, LogOut, Zap
+  Truck, BarChart3, Settings, Sun, Moon, LogOut, Zap, Tag, Users
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
 
 const NAV_ITEMS = [
-  { href: '/dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
-  { href: '/products',   label: 'Productos',   icon: Package },
-  { href: '/stock',      label: 'Stock',       icon: Boxes },
-  { href: '/sales',      label: 'Ventas',      icon: ShoppingCart },
-  { href: '/purchases',  label: 'Compras',     icon: Truck },
-  { href: '/finances',   label: 'Finanzas',    icon: BarChart3 },
-  { href: '/settings',   label: 'Config',      icon: Settings },
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/products', label: 'Productos', icon: Package },
+  { href: '/stock', label: 'Stock', icon: Boxes },
+  { href: '/sales', label: 'Ventas', icon: ShoppingCart },
+  { href: '/customers', label: 'Cuentas', icon: Users },
+  { href: '/categories', label: 'Categorías', icon: Tag },
+  { href: '/purchases', label: 'Compras', icon: Truck },
+  { href: '/finances', label: 'Finanzas', icon: BarChart3 },
+  { href: '/settings', label: 'Config', icon: Settings },
 ]
 
 export function Sidebar() {
