@@ -12,56 +12,65 @@ import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { api } from '@/lib/api'
-import { formatCurrency, formatDate, getPeriodDates, getPaymentMethodLabel } from '@/lib/utils'
-import type { FinanceSummary, Expense, PaginatedResponse, Pagination as PaginationType } from '@/types'
+import { formatCurrency, formatDate, formatDateTime, getPeriodDates, getPaymentMethodLabel } from '@/lib/utils'
+import type { FinanceSummary, Expense, Sale, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import { TrendingUp, TrendingDown, DollarSign, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 
-type Tab    = 'ingresos' | 'gastos' | 'balance'
+type Tab = 'ingresos' | 'gastos' | 'balance'
 type Period = 'week' | 'month' | 'year'
 
 const EXPENSE_CATEGORIES = [
   { value: 'proveedores', label: 'Proveedores' },
-  { value: 'personal',    label: 'Personal' },
-  { value: 'alquiler',    label: 'Alquiler' },
-  { value: 'servicios',   label: 'Servicios' },
-  { value: 'impuestos',   label: 'Impuestos' },
-  { value: 'marketing',   label: 'Marketing' },
-  { value: 'otro',        label: 'Otro' },
+  { value: 'personal', label: 'Personal' },
+  { value: 'alquiler', label: 'Alquiler' },
+  { value: 'servicios', label: 'Servicios' },
+  { value: 'impuestos', label: 'Impuestos' },
+  { value: 'marketing', label: 'Marketing' },
+  { value: 'otro', label: 'Otro' },
 ]
 
 export default function FinancesPage() {
-  const [tab, setTab]               = useState<Tab>('balance')
-  const [period, setPeriod]         = useState<Period>('month')
-  const [summary, setSummary]       = useState<FinanceSummary | null>(null)
-  const [expenses, setExpenses]     = useState<Expense[]>([])
-  const [expPagination, setExpPag]  = useState<PaginationType>({ total: 0, page: 1, limit: 50, pages: 0 })
-  const [expPage, setExpPage]       = useState(1)
-  const [loading, setLoading]       = useState(true)
-  const [addModal, setAddModal]     = useState(false)
-  const [saving, setSaving]         = useState(false)
-  const [form, setForm]             = useState({ category: 'otro', amount: '', description: '' })
+  const [tab, setTab] = useState<Tab>('balance')
+  const [period, setPeriod] = useState<Period>('month')
+  const [summary, setSummary] = useState<FinanceSummary | null>(null)
+  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [expPagination, setExpPag] = useState<PaginationType>({ total: 0, page: 1, limit: 50, pages: 0 })
+  const [expPage, setExpPage] = useState(1)
+  const [loading, setLoading] = useState(true)
+  const [addModal, setAddModal] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({ category: 'otro', amount: '', description: '' })
+  // Agregar estados para ingresos
+  const [income, setIncome] = useState<Sale[]>([])
+  const [incomePag, setIncomePag] = useState<PaginationType>({ total: 0, page: 1, limit: 50, pages: 0 })
+  const [incomePage, setIncomePage] = useState(1)
 
   const dates = getPeriodDates(period)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [sum, exp] = await Promise.all([
+      const [sum, exp, inc] = await Promise.all([
         api.get<FinanceSummary>('/api/finances/summary', { from: dates.from, to: dates.to }),
         api.get<PaginatedResponse<Expense>>('/api/finances/expenses', {
           from: dates.from, to: dates.to, page: expPage, limit: 50
+        }),
+        api.get<PaginatedResponse<Sale>>('/api/finances/income', {
+          from: dates.from, to: dates.to, page: incomePage, limit: 50
         }),
       ])
       setSummary(sum)
       setExpenses(exp.data)
       setExpPag(exp.pagination)
+      setIncome(inc.data)
+      setIncomePag(inc.pagination)
     } catch (err) {
       console.error(err)
     } finally {
       setLoading(false)
     }
-  }, [period, expPage]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [period, expPage, incomePage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { fetchData() }, [fetchData])
   useEffect(() => { setExpPage(1) }, [period])
@@ -71,8 +80,8 @@ export default function FinancesPage() {
     setSaving(true)
     try {
       await api.post('/api/finances/expenses', {
-        category:    form.category,
-        amount:      parseFloat(form.amount),
+        category: form.category,
+        amount: parseFloat(form.amount),
         description: form.description,
       })
       toast.success('Gasto registrado')
@@ -87,15 +96,15 @@ export default function FinancesPage() {
   }
 
   const periods: { key: Period; label: string }[] = [
-    { key: 'week',  label: 'Semana' },
+    { key: 'week', label: 'Semana' },
     { key: 'month', label: 'Mes' },
-    { key: 'year',  label: 'Año' },
+    { key: 'year', label: 'Año' },
   ]
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: 'balance',  label: 'Balance' },
+    { key: 'balance', label: 'Balance' },
     { key: 'ingresos', label: 'Ingresos' },
-    { key: 'gastos',   label: 'Gastos' },
+    { key: 'gastos', label: 'Gastos' },
   ]
 
   return (
@@ -114,9 +123,8 @@ export default function FinancesPage() {
         <div className="flex gap-2">
           {periods.map(p => (
             <button key={p.key} onClick={() => setPeriod(p.key)}
-              className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${
-                period === p.key ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-              }`}>
+              className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${period === p.key ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                }`}>
               {p.label}
             </button>
           ))}
@@ -127,7 +135,7 @@ export default function FinancesPage() {
             {/* Stats rápidas */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <StatCard title="Ingresos" value={formatCurrency(summary?.revenue ?? 0)} icon={TrendingUp} accent />
-              <StatCard title="Gastos"   value={formatCurrency(summary?.expenses ?? 0)} icon={TrendingDown} />
+              <StatCard title="Gastos" value={formatCurrency(summary?.expenses ?? 0)} icon={TrendingDown} />
               <StatCard
                 title="Ganancia neta"
                 value={formatCurrency(summary?.net ?? 0)}
@@ -158,11 +166,10 @@ export default function FinancesPage() {
             <div className="flex border-b border-[var(--border)]">
               {tabs.map(t => (
                 <button key={t.key} onClick={() => setTab(t.key)}
-                  className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
-                    tab === t.key
-                      ? 'border-[var(--accent)] text-[var(--accent)]'
-                      : 'border-transparent text-[var(--text3)] hover:text-[var(--text)]'
-                  }`}>
+                  className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${tab === t.key
+                    ? 'border-[var(--accent)] text-[var(--accent)]'
+                    : 'border-transparent text-[var(--text3)] hover:text-[var(--text)]'
+                    }`}>
                   {t.label}
                 </button>
               ))}
@@ -194,6 +201,48 @@ export default function FinancesPage() {
                   </div>
                 </Card>
               </div>
+            )}
+
+            {tab === 'ingresos' && (
+              income.length === 0 ? (
+                <p className="text-sm text-[var(--text3)] text-center py-8">Sin ingresos en el período</p>
+              ) : (
+                <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[var(--border)]">
+                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Fecha</th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Vendedor</th>
+                        <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Método</th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Descuento</th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)]">
+                      {income.map(sale => (
+                        <tr key={sale.id} className="hover:bg-[var(--surface2)] transition-colors">
+                          <td className="px-4 py-3 text-xs mono text-[var(--text2)]">
+                            {formatDateTime(sale.created_at)}
+                          </td>
+                          <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
+                            {(sale.users as { full_name: string } | undefined)?.full_name ?? '—'}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <Badge variant="default">{getPaymentMethodLabel(sale.payment_method)}</Badge>
+                          </td>
+                          <td className="px-4 py-3 text-right mono text-[var(--text3)] hidden sm:table-cell">
+                            {Number(sale.discount) > 0 ? `- ${formatCurrency(sale.discount)}` : '—'}
+                          </td>
+                          <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)]">
+                            {formatCurrency(sale.total)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <Pagination pagination={incomePag} onPageChange={setIncomePage} />
+                </div>
+              )
             )}
 
             {/* Tab: Gastos */}

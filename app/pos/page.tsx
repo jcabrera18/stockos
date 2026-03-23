@@ -6,35 +6,36 @@ import { formatCurrency } from '@/lib/utils'
 import type { Product } from '@/types'
 import type { CustomerSummary } from '@/app/customers/page'
 import type { PriceList } from '@/app/price-lists/page'
-import { Search, Plus, Minus, Trash2, X, ShoppingCart, Zap, ChevronLeft } from 'lucide-react'
+import { Search, Plus, Minus, Trash2, X, ShoppingCart, Zap, ChevronLeft, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { POSTicket } from '@/components/modules/POSTicket'
+import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
 
 // ─── Tipos internos del POS ───────────────────────────────
 interface CartItem {
-  product:   Product
-  quantity:  number
+  product: Product
+  quantity: number
   unit_price: number
-  discount:  number  // descuento por ítem en $
+  discount: number  // descuento por ítem en $
 }
 
 interface CompletedSale {
-  id:             string
-  total:          number
-  subtotal:       number
-  discount:       number
+  id: string
+  total: number
+  subtotal: number
+  discount: number
   payment_method: string
-  installments:   number
-  items:          CartItem[]
-  created_at:     string
+  installments: number
+  items: CartItem[]
+  created_at: string
 }
 
 const PAYMENT_METHODS = [
-  { value: 'efectivo',      label: 'Efectivo',       icon: '💵' },
-  { value: 'debito',        label: 'Débito',          icon: '💳' },
-  { value: 'credito',       label: 'Crédito',         icon: '💳' },
-  { value: 'transferencia', label: 'Transferencia',   icon: '🏦' },
-  { value: 'qr',            label: 'QR',              icon: '📱' },
+  { value: 'efectivo', label: 'Efectivo', icon: '💵' },
+  { value: 'debito', label: 'Débito', icon: '💳' },
+  { value: 'credito', label: 'Crédito', icon: '💳' },
+  { value: 'transferencia', label: 'Transferencia', icon: '🏦' },
+  { value: 'qr', label: 'QR', icon: '📱' },
   { value: 'cuenta_corriente', label: 'Cuenta corriente', icon: '📒' },
 ]
 
@@ -44,32 +45,35 @@ export default function POSPage() {
   const router = useRouter()
 
   // Búsqueda
-  const [query, setQuery]         = useState('')
-  const [results, setResults]     = useState<Product[]>([])
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<Product[]>([])
   const [searching, setSearching] = useState(false)
   const [activeResultIndex, setActiveResultIndex] = useState(-1)
   const searchRef = useRef<HTMLInputElement>(null)
 
   // Carrito
-  const [cart, setCart]           = useState<CartItem[]>([])
+  const [cart, setCart] = useState<CartItem[]>([])
   const [saleDiscount, setSaleDiscount] = useState(0)
 
   // Checkout
-  const [step, setStep]           = useState<'cart' | 'payment' | 'ticket'>('cart')
+  const [step, setStep] = useState<'cart' | 'payment' | 'ticket'>('cart')
   const [paymentMethod, setPaymentMethod] = useState('efectivo')
-  const [installments, setInstallments]   = useState(1)
-  const [processing, setProcessing]       = useState(false)
+  const [installments, setInstallments] = useState(1)
+  const [processing, setProcessing] = useState(false)
   const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null)
 
   // Clientes para cuenta corriente en POS
+  const [customerQuery, setCustomerQuery] = useState('')
+  const [customerResults, setCustomerResults] = useState<CustomerSummary[]>([])
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSummary | null>(null)
-  const [customerQuery, setCustomerQuery]       = useState('')
-  const [customerResults, setCustomerResults]   = useState<CustomerSummary[]>([])
   const [searchingCustomer, setSearchingCustomer] = useState(false)
+  const [quickCustomerModal, setQuickCustomerModal] = useState(false)
+
 
   // Listas de precio
-  const [priceLists, setPriceLists]     = useState<PriceList[]>([])
+  const [priceLists, setPriceLists] = useState<PriceList[]>([])
   const [selectedList, setSelectedList] = useState<PriceList | null>(null)
+
 
   // Focus automático en el buscador
   useEffect(() => { searchRef.current?.focus() }, [])
@@ -81,7 +85,7 @@ export default function POSPage() {
       // Seleccionar la lista por defecto automáticamente
       const def = lists.find(l => l.is_default)
       if (def) setSelectedList(def)
-    }).catch(() => {})
+    }).catch(() => { })
   }, [])
 
   // Búsqueda con debounce
@@ -98,7 +102,7 @@ export default function POSPage() {
             setQuery('')
             setResults([])
             return
-          } catch {}
+          } catch { }
         }
         // Búsqueda por nombre
         const res = await api.get<{ data: Product[] }>('/api/products', {
@@ -117,23 +121,39 @@ export default function POSPage() {
 
   // Búsqueda de cliente con debounce (para cuenta corriente)
   useEffect(() => {
-    if (!customerQuery.trim() || customerQuery.trim().length < 2) {
+    if (!customerQuery.trim() || customerQuery.length < 2) {
       setCustomerResults([])
       return
     }
-
     const timer = setTimeout(async () => {
       setSearchingCustomer(true)
       try {
-        const customers = await api.get<CustomerSummary[]>('/api/customers/search', { q: customerQuery.trim() })
-        setCustomerResults(customers)
-      } catch {
-        setCustomerResults([])
-      } finally {
-        setSearchingCustomer(false)
-      }
+        const data = await api.get<CustomerSummary[]>(
+          `/api/customers/search?q=${encodeURIComponent(customerQuery)}`
+        )
+        setCustomerResults(data)
+      } catch { setCustomerResults([]) }
+      finally { setSearchingCustomer(false) }
     }, 300)
+    return () => clearTimeout(timer)
+  }, [customerQuery])
 
+  // 3. Búsqueda de clientes con debounce
+  useEffect(() => {
+    if (!customerQuery.trim() || customerQuery.length < 2) {
+      setCustomerResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setSearchingCustomer(true)
+      try {
+        const data = await api.get<CustomerSummary[]>(
+          `/api/customers/search?q=${encodeURIComponent(customerQuery)}`
+        )
+        setCustomerResults(data)
+      } catch { setCustomerResults([]) }
+      finally { setSearchingCustomer(false) }
+    }, 300)
     return () => clearTimeout(timer)
   }, [customerQuery])
 
@@ -158,9 +178,9 @@ export default function POSPage() {
       }
       return [...prev, {
         product,
-        quantity:   1,
+        quantity: 1,
         unit_price: getPriceForList(product.cost_price),
-        discount:   0,
+        discount: 0,
       }]
     })
     setResults([])
@@ -190,9 +210,9 @@ export default function POSPage() {
   }
 
   // ─── Totales ───────────────────────────────────────────
-  const subtotal     = cart.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
+  const subtotal = cart.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
   const totalDiscount = saleDiscount
-  const total        = Math.max(0, subtotal - totalDiscount)
+  const total = Math.max(0, subtotal - totalDiscount)
 
   // Función para calcular precio según lista seleccionada
   const getPriceForList = (costPrice: number): number => {
@@ -208,14 +228,14 @@ export default function POSPage() {
       const payload = {
         items: cart.map(i => ({
           product_id: i.product.id,
-          quantity:   i.quantity,
+          quantity: i.quantity,
           unit_price: i.unit_price,
-          discount:   i.discount,
+          discount: i.discount,
         })),
-        discount:       saleDiscount,
+        discount: saleDiscount,
         payment_method: paymentMethod,
-        installments:   paymentMethod === 'credito' ? installments : 1,
-        price_list_id:  selectedList?.id ?? null,
+        installments: paymentMethod === 'credito' ? installments : 1,
+        price_list_id: selectedList?.id ?? null,
       }
 
       let sale: CompletedSale
@@ -231,7 +251,7 @@ export default function POSPage() {
 
         await api.post(`/api/customers/${selectedCustomer.id}/charge`, {
           sale_id: sale.id,
-          amount:  total,
+          amount: total,
         })
 
         toast.success('Venta registrada y cargada a cuenta corriente')
@@ -312,11 +332,10 @@ export default function POSPage() {
                       ) / 100
                     })))
                   }}
-                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${
-                    selectedList?.id === list.id
-                      ? 'bg-[var(--accent)] text-white'
-                      : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)]'
-                  }`}
+                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedList?.id === list.id
+                    ? 'bg-[var(--accent)] text-white'
+                    : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)]'
+                    }`}
                 >
                   {list.name} (+{list.margin_pct}%)
                 </button>
@@ -339,21 +358,59 @@ export default function POSPage() {
                 setQuery(e.target.value)
                 setActiveResultIndex(-1)
               }}
-              onKeyDown={e => {
-                if (results.length === 0) return
+              onKeyDown={async e => {
                 if (e.key === 'ArrowDown') {
                   e.preventDefault()
                   setActiveResultIndex(prev => Math.min(prev + 1, results.length - 1))
+                  return
                 }
                 if (e.key === 'ArrowUp') {
                   e.preventDefault()
                   setActiveResultIndex(prev => Math.max(prev - 1, -1))
+                  return
                 }
                 if (e.key === 'Enter') {
-                  if (activeResultIndex >= 0 && activeResultIndex < results.length) {
-                    e.preventDefault()
+                  e.preventDefault()
+
+                  // Caso 1: hay un resultado seleccionado con las flechas → agregar ese
+                  if (activeResultIndex >= 0 && results[activeResultIndex]) {
                     addToCart(results[activeResultIndex])
                     setActiveResultIndex(-1)
+                    return
+                  }
+
+                  // Caso 2: hay un solo resultado → agregarlo directamente
+                  if (results.length === 1) {
+                    addToCart(results[0])
+                    setActiveResultIndex(-1)
+                    return
+                  }
+
+                  // Caso 3: lector de código de barras — buscar inmediatamente sin debounce
+                  // El lector envía el código completo + Enter casi instantáneo
+                  if (query.trim()) {
+                    setSearching(true)
+                    try {
+                      // Intentar primero por código de barras exacto
+                      if (/^\d{8,14}$/.test(query.trim())) {
+                        const product = await api.get<Product>(`/api/products/barcode/${query.trim()}`)
+                        addToCart(product)
+                        return
+                      }
+                      // Si no es código de barras, buscar por nombre
+                      const res = await api.get<{ data: Product[] }>('/api/products', {
+                        search: query.trim(),
+                        limit: 8,
+                      })
+                      setResults(res.data)
+                      if (res.data.length === 1) {
+                        addToCart(res.data[0])
+                      }
+                    } catch {
+                      setResults([])
+                    } finally {
+                      setSearching(false)
+                    }
                   }
                 }
               }}
@@ -367,7 +424,7 @@ export default function POSPage() {
         <div className="flex-1 overflow-y-auto p-4">
           {results.length > 0 ? (
             <div className="space-y-1">
-                {results.map((product, index) => (
+              {results.map((product, index) => (
                 <button
                   key={product.id}
                   onClick={() => {
@@ -407,6 +464,106 @@ export default function POSPage() {
 
       {/* ── Panel derecho: carrito ── */}
       <div className="w-96 flex flex-col bg-[var(--surface)] flex-shrink-0">
+
+        {/* Selector de cliente */}
+        <div className="px-3 py-3 border-b border-[var(--border)]">
+          {selectedCustomer ? (
+            // Cliente seleccionado
+            <div className="flex items-center justify-between px-3 py-2 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)]">
+              <div>
+                <p className="text-xs font-semibold text-[var(--accent)]">{selectedCustomer.full_name}</p>
+                <p className="text-xs text-[var(--text3)]">
+                  Saldo: {formatCurrency(selectedCustomer.current_balance)}
+                  {selectedCustomer.credit_limit > 0 && ` · Límite: ${formatCurrency(selectedCustomer.credit_limit)}`}
+                </p>
+              </div>
+              <button
+                onClick={() => { setSelectedCustomer(null); setCustomerQuery('') }}
+                className="text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+          ) : (
+            // Buscador de clientes
+            <div className="relative">
+              <Users size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
+              {searchingCustomer && (
+                <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
+              )}
+              <input
+                value={customerQuery}
+                onChange={e => setCustomerQuery(e.target.value)}
+                placeholder="Cliente (opcional)..."
+                className="w-full pl-7 pr-3 py-2 text-xs rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+              />
+
+              {/* Resultados de búsqueda */}
+              {customerQuery.length >= 2 && (
+                <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 overflow-hidden">
+                  {customerResults.length > 0 ? (
+                    <>
+                      {customerResults.map(c => (
+                        <button
+                          key={c.id}
+                          onClick={() => {
+                            setSelectedCustomer(c)
+                            setCustomerQuery('')
+                            setCustomerResults([])
+                          }}
+                          className="w-full flex items-center justify-between px-3 py-2 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0"
+                        >
+                          <div>
+                            <p className="text-xs font-medium text-[var(--text)]">{c.full_name}</p>
+                            {c.document && <p className="text-xs text-[var(--text3)]">{c.document}</p>}
+                          </div>
+                          {Number(c.current_balance) > 0 && (
+                            <span className="text-xs mono text-[var(--danger)]">
+                              {formatCurrency(c.current_balance)}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                      {/* Siempre mostrar opción de crear */}
+                      <button
+                        onClick={() => setQuickCustomerModal(true)}
+                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--accent-subtle)] transition-colors text-left border-t border-[var(--border)]"
+                      >
+                        <Plus size={12} className="text-[var(--accent)]" />
+                        <span className="text-xs text-[var(--accent)] font-medium">
+                          Crear "{customerQuery}"
+                        </span>
+                      </button>
+                    </>
+                  ) : (
+                    // Sin resultados → directo a crear
+                    <button
+                      onClick={() => setQuickCustomerModal(true)}
+                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--accent-subtle)] transition-colors text-left"
+                    >
+                      <Plus size={12} className="text-[var(--accent)]" />
+                      <span className="text-xs text-[var(--accent)] font-medium">
+                        Crear cliente "{customerQuery}"
+                      </span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Modal crear cliente rápido */}
+        <QuickCustomerModal
+          open={quickCustomerModal}
+          onClose={() => setQuickCustomerModal(false)}
+          onCreated={(customer) => {
+            setSelectedCustomer(customer)
+            setCustomerQuery('')
+            setCustomerResults([])
+          }}
+          initialName={customerQuery}
+        />
 
         {/* Header carrito */}
         <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between">
@@ -572,69 +729,16 @@ export default function POSPage() {
                       setCustomerResults([])
                     }
                   }}
-                  className={`flex flex-col items-center gap-1 py-3 rounded-[var(--radius-md)] border text-xs font-medium transition-all ${
-                    paymentMethod === m.value
-                      ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'
-                  }`}
+                  className={`flex flex-col items-center gap-1 py-3 rounded-[var(--radius-md)] border text-xs font-medium transition-all ${paymentMethod === m.value
+                    ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'
+                    }`}
                 >
                   <span className="text-lg">{m.icon}</span>
                   {m.label}
                 </button>
               ))}
             </div>
-
-            {paymentMethod === 'cuenta_corriente' && (
-              <div className="space-y-1">
-                <label className="text-xs text-[var(--text3)] font-medium">Seleccionar cliente</label>
-                <div className="relative">
-                  <input
-                    value={customerQuery}
-                    onChange={e => { setCustomerQuery(e.target.value); setSelectedCustomer(null) }}
-                    placeholder="Buscar cliente..."
-                    className="w-full text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-3 py-2 focus:outline-none focus:border-[var(--accent)]"
-                  />
-                  {customerResults.length > 0 && (
-                    <div className="absolute z-20 w-full mt-1 max-h-44 overflow-y-auto rounded border border-[var(--border)] bg-[var(--surface)] shadow-[0_2px_10px_rgba(0,0,0,0.08)]">
-                      {customerResults.map(customer => (
-                        <button
-                          key={customer.id}
-                          onClick={() => {
-                            setSelectedCustomer(customer)
-                            setCustomerResults([])
-                            setCustomerQuery(customer.full_name)
-                          }}
-                          className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--surface2)] transition-colors"
-                        >
-                          <span className="font-medium">{customer.full_name}</span>
-                          <span className="ml-2 text-xs text-[var(--text3)]">{formatCurrency(customer.current_balance)}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                {searchingCustomer && <p className="text-xs text-[var(--text3)]">Buscando...</p>}
-
-                {selectedCustomer && (
-                  <div className="flex items-center justify-between rounded border border-[var(--accent)] bg-[var(--accent-subtle)] p-2">
-                    <div>
-                      <p className="text-xs font-medium">{selectedCustomer.full_name}</p>
-                      <p className="text-xs text-[var(--text3)]">Saldo: {formatCurrency(selectedCustomer.current_balance)}</p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setSelectedCustomer(null)
-                        setCustomerQuery('')
-                        setCustomerResults([])
-                      }}
-                      className="text-xs text-[var(--danger)] hover:text-[var(--danger)]"
-                    >
-                      Quitar
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Cuotas para crédito */}
             {paymentMethod === 'credito' && (
@@ -645,11 +749,10 @@ export default function POSPage() {
                     <button
                       key={n}
                       onClick={() => setInstallments(n)}
-                      className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${
-                        installments === n
-                          ? 'bg-[var(--accent)] text-white'
-                          : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-                      }`}
+                      className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${installments === n
+                        ? 'bg-[var(--accent)] text-white'
+                        : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                        }`}
                     >
                       {n}x
                     </button>
