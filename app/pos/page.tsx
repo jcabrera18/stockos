@@ -12,39 +12,39 @@ import { POSTicket } from '@/components/modules/POSTicket'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
 
 interface CartItem {
-  product:         Product
-  quantity:        number
-  unit_price:      number
-  discount:        number
-  applied_list?:   string
+  product: Product
+  quantity: number
+  unit_price: number
+  discount: number
+  applied_list?: string
   applied_margin?: number
 }
 
 interface CompletedSale {
-  id:             string
-  total:          number
-  subtotal:       number
-  discount:       number
+  id: string
+  total: number
+  subtotal: number
+  discount: number
   payment_method: string
-  installments:   number
-  items:          CartItem[]
-  created_at:     string
+  installments: number
+  items: CartItem[]
+  created_at: string
 }
 
 const PAYMENT_METHODS = [
-  { value: 'efectivo',         label: 'Efectivo',       icon: '💵' },
-  { value: 'debito',           label: 'Débito',         icon: '💳' },
-  { value: 'credito',          label: 'Crédito',        icon: '💳' },
-  { value: 'transferencia',    label: 'Transferencia',  icon: '🏦' },
-  { value: 'qr',               label: 'QR',             icon: '📱' },
-  { value: 'cuenta_corriente', label: 'Cta. Cte.',      icon: '📒' },
+  { value: 'efectivo', label: 'Efectivo', icon: '💵' },
+  { value: 'debito', label: 'Débito', icon: '💳' },
+  { value: 'credito', label: 'Crédito', icon: '💳' },
+  { value: 'transferencia', label: 'Transferencia', icon: '🏦' },
+  { value: 'qr', label: 'QR', icon: '📱' },
+  { value: 'cuenta_corriente', label: 'Cta. Cte.', icon: '📒' },
 ]
 
 // Fuera del componente — sin closure stale
 async function getPriceForQuantity(productId: string, quantity: number): Promise<{
-  price:       number
-  list_name:   string
-  margin_pct:  number
+  price: number
+  list_name: string
+  margin_pct: number
   rule_source: string
 }> {
   return api.get('/api/products/price', { product_id: productId, quantity })
@@ -54,11 +54,11 @@ export default function POSPage() {
   const router = useRouter()
 
   // Búsqueda
-  const [query, setQuery]                         = useState('')
-  const [results, setResults]                     = useState<Product[]>([])
-  const [searching, setSearching]                 = useState(false)
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<Product[]>([])
+  const [searching, setSearching] = useState(false)
   const [activeResultIndex, setActiveResultIndex] = useState(-1)
-  const searchRef   = useRef<HTMLInputElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isAddingRef = useRef(false)
 
@@ -68,32 +68,32 @@ export default function POSPage() {
   const qtyRef = useRef<HTMLInputElement>(null)
 
   // Carrito
-  const [cart, setCart]               = useState<CartItem[]>([])
+  const [cart, setCart] = useState<CartItem[]>([])
   const [saleDiscount, setSaleDiscount] = useState(0)
 
   // Checkout
-  const [step, setStep]                   = useState<'cart' | 'payment' | 'ticket'>('cart')
+  const [step, setStep] = useState<'cart' | 'payment' | 'ticket'>('cart')
   const [paymentMethod, setPaymentMethod] = useState('efectivo')
-  const [installments, setInstallments]   = useState(1)
-  const [processing, setProcessing]       = useState(false)
+  const [installments, setInstallments] = useState(1)
+  const [processing, setProcessing] = useState(false)
   const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null)
 
   // Clientes
-  const [customerQuery, setCustomerQuery]           = useState('')
-  const [customerResults, setCustomerResults]       = useState<CustomerSummary[]>([])
-  const [selectedCustomer, setSelectedCustomer]     = useState<CustomerSummary | null>(null)
-  const [searchingCustomer, setSearchingCustomer]   = useState(false)
+  const [customerQuery, setCustomerQuery] = useState('')
+  const [customerResults, setCustomerResults] = useState<CustomerSummary[]>([])
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerSummary | null>(null)
+  const [searchingCustomer, setSearchingCustomer] = useState(false)
   const [quickCustomerModal, setQuickCustomerModal] = useState(false)
 
   // Listas de precio
-  const [priceLists, setPriceLists]   = useState<PriceList[]>([])
+  const [priceLists, setPriceLists] = useState<PriceList[]>([])
   const [selectedList, setSelectedList] = useState<PriceList | null>(null)
 
   // Factura
   const [invoiceModal, setInvoiceModal] = useState(false)
 
   // Focus inicial en cantidad
-  useEffect(() => { qtyRef.current?.focus() }, [])
+  useEffect(() => { searchRef.current?.focus() }, [])
 
   // Cargar listas de precio
   useEffect(() => {
@@ -101,7 +101,7 @@ export default function POSPage() {
       setPriceLists(lists)
       const def = lists.find(l => l.is_default)
       if (def) setSelectedList(def)
-    }).catch(() => {})
+    }).catch(() => { })
   }, [])
 
   // Búsqueda de productos con debounce
@@ -119,7 +119,7 @@ export default function POSPage() {
             setQuery('')
             setResults([])
             return
-          } catch {}
+          } catch { }
         }
         const res = await api.get<{ data: Product[] }>('/api/products', {
           search: query.trim(), limit: 8,
@@ -190,9 +190,9 @@ export default function POSPage() {
         setCart(prev => [...prev, {
           product,
           quantity,
-          unit_price:     pricing.price,
-          discount:       0,
-          applied_list:   pricing.list_name,
+          unit_price: pricing.price,
+          discount: 0,
+          applied_list: pricing.list_name,
           applied_margin: pricing.margin_pct,
         }])
       }
@@ -202,7 +202,7 @@ export default function POSPage() {
       pendingQtyRef.current = 1
       setResults([])
       setQuery('')
-      setTimeout(() => qtyRef.current?.focus(), 50)
+      setTimeout(() => searchRef.current?.focus(), 50)
     } finally {
       isAddingRef.current = false
     }
@@ -230,7 +230,7 @@ export default function POSPage() {
     setCart(prev => prev.filter(i => i.product.id !== id))
 
   const subtotal = cart.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
-  const total    = Math.max(0, subtotal - saleDiscount)
+  const total = Math.max(0, subtotal - saleDiscount)
 
   const handleConfirm = async () => {
     if (cart.length === 0) return
@@ -239,14 +239,14 @@ export default function POSPage() {
       const payload = {
         items: cart.map(i => ({
           product_id: i.product.id,
-          quantity:   i.quantity,
+          quantity: i.quantity,
           unit_price: i.unit_price,
-          discount:   i.discount,
+          discount: i.discount,
         })),
-        discount:       saleDiscount,
+        discount: saleDiscount,
         payment_method: paymentMethod,
-        installments:   paymentMethod === 'credito' ? installments : 1,
-        price_list_id:  selectedList?.id ?? null,
+        installments: paymentMethod === 'credito' ? installments : 1,
+        price_list_id: selectedList?.id ?? null,
       }
 
       let sale: CompletedSale
@@ -321,16 +321,15 @@ export default function POSPage() {
                     setSelectedList(list)
                     setCart(prev => prev.map(item => ({
                       ...item,
-                      unit_price:     Math.round(item.product.cost_price * (1 + list.margin_pct / 100) * 100) / 100,
-                      applied_list:   list.name,
+                      unit_price: Math.round(item.product.cost_price * (1 + list.margin_pct / 100) * 100) / 100,
+                      applied_list: list.name,
                       applied_margin: list.margin_pct,
                     })))
                   }}
-                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${
-                    selectedList?.id === list.id
-                      ? 'bg-[var(--accent)] text-white'
-                      : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)]'
-                  }`}>
+                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedList?.id === list.id
+                    ? 'bg-[var(--accent)] text-white'
+                    : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)]'
+                    }`}>
                   {list.name} (+{list.margin_pct}%)
                 </button>
               ))}
@@ -390,7 +389,7 @@ export default function POSPage() {
                 }}
                 onKeyDown={async e => {
                   if (e.key === 'ArrowDown') { e.preventDefault(); setActiveResultIndex(prev => Math.min(prev + 1, results.length - 1)); return }
-                  if (e.key === 'ArrowUp')   { e.preventDefault(); setActiveResultIndex(prev => Math.max(prev - 1, -1)); return }
+                  if (e.key === 'ArrowUp') { e.preventDefault(); setActiveResultIndex(prev => Math.max(prev - 1, -1)); return }
                   if (e.key === 'Enter') {
                     e.preventDefault()
                     if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null }
@@ -436,11 +435,10 @@ export default function POSPage() {
                 <button key={product.id}
                   onClick={() => { addToCart(product, pendingQtyRef.current); setActiveResultIndex(-1) }}
                   disabled={product.stock_current <= 0}
-                  className={`w-full flex items-center justify-between px-4 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group ${
-                    index === activeResultIndex
-                      ? 'ring-2 ring-[var(--accent)] border-[var(--accent)]'
-                      : 'border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]'
-                  }`}>
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group ${index === activeResultIndex
+                    ? 'ring-2 ring-[var(--accent)] border-[var(--accent)]'
+                    : 'border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]'
+                    }`}>
                   <div>
                     <p className="text-sm font-medium text-[var(--text)] group-hover:text-[var(--accent)]">{product.name}</p>
                     <p className="text-xs text-[var(--text3)]">
@@ -649,11 +647,10 @@ export default function POSPage() {
             <div className="grid grid-cols-3 gap-2">
               {PAYMENT_METHODS.map(m => (
                 <button key={m.value} onClick={() => setPaymentMethod(m.value)}
-                  className={`flex flex-col items-center gap-1 py-3 rounded-[var(--radius-md)] border text-xs font-medium transition-all ${
-                    paymentMethod === m.value
-                      ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'
-                  }`}>
+                  className={`flex flex-col items-center gap-1 py-3 rounded-[var(--radius-md)] border text-xs font-medium transition-all ${paymentMethod === m.value
+                    ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'
+                    }`}>
                   <span className="text-lg">{m.icon}</span>
                   {m.label}
                 </button>
@@ -670,9 +667,8 @@ export default function POSPage() {
                 <div className="flex gap-1">
                   {[1, 3, 6, 12, 18, 24].map(n => (
                     <button key={n} onClick={() => setInstallments(n)}
-                      className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${
-                        installments === n ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-                      }`}>
+                      className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${installments === n ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                        }`}>
                       {n}x
                     </button>
                   ))}
