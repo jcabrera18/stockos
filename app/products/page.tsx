@@ -12,7 +12,7 @@ import { ProductModal } from '@/components/modules/ProductModal'
 import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
 import { api } from '@/lib/api'
 import { formatCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
-import type { StockSummary, Product, PaginatedResponse, Pagination as PaginationType } from '@/types'
+import type { StockSummary, Product, Category, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import { Plus, Search, Package, Pencil, Trash2, SlidersHorizontal, Tag } from 'lucide-react'
 import { toast } from 'sonner'
 import { ProductPriceRulesModal } from '@/components/modules/ProductPriceRulesModal'
@@ -36,6 +36,8 @@ export default function ProductsPage() {
   const [priceRulesModal, setPriceRulesModal] = useState(false)
   const [priceRulesProduct, setPriceRulesProduct] = useState<Product | null>(null)
 
+  const [allCategories, setAllCategories] = useState<Category[]>([])
+
   const fetchProducts = useCallback(async () => {
     setLoading(true)
     try {
@@ -55,6 +57,22 @@ export default function ProductsPage() {
 
   useEffect(() => { fetchProducts() }, [fetchProducts])
   useEffect(() => { setPage(1) }, [search])
+
+  useEffect(() => {
+    api.get<Category[]>('/api/products/categories').then(setAllCategories).catch(() => { })
+  }, [])
+
+  function getCategoryPath(categoryId: string | undefined, categories: Category[]): string {
+    if (!categoryId) return '—'
+    const map = new Map(categories.map(c => [c.id, c]))
+    const path: string[] = []
+    let current = map.get(categoryId)
+    while (current) {
+      path.unshift(current.name)
+      current = current.parent_id ? map.get(current.parent_id) : undefined
+    }
+    return path.join(' › ')
+  }
 
   const handleEdit = async (item: StockSummary) => {
     // Traer producto completo para tener todos los campos
@@ -150,7 +168,7 @@ export default function ProductsPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
-                        {product.category_name ?? '—'}
+                        {getCategoryPath(product.category_id, allCategories)}
                       </td>
                       <td className="px-4 py-3 text-right mono font-bold text-base" style={{ color: getStockStatusColor(product.stock_status) }}>
                         {product.stock_current}

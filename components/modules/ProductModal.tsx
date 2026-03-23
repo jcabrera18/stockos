@@ -135,6 +135,25 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const categoryOptions = categories.map(c => ({ value: c.id, label: c.name }))
   const supplierOptions = suppliers.map(s => ({ value: s.id, label: s.name }))
 
+  interface CategoryWithChildren extends Category {
+    children: CategoryWithChildren[]
+  }
+
+  function buildCategoryTree(categories: Category[]): CategoryWithChildren[] {
+    const map = new Map<string, CategoryWithChildren>()
+    const roots: CategoryWithChildren[] = []
+    categories.forEach(c => map.set(c.id, { ...c, children: [] }))
+    categories.forEach(c => {
+      const node = map.get(c.id)!
+      if (c.parent_id && map.has(c.parent_id)) {
+        map.get(c.parent_id)!.children.push(node)
+      } else {
+        roots.push(node)
+      }
+    })
+    return roots
+  }
+
   return (
     <Modal
       open={open}
@@ -181,13 +200,31 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
 
         {/* Fila 3: Categoría + Proveedor */}
         <div className="grid grid-cols-2 gap-3">
-          <Select
-            label="Categoría"
-            options={categoryOptions}
-            value={form.category_id}
-            onChange={set('category_id')}
-            placeholder="Sin categoría"
-          />
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-[var(--text2)]">Categoría</label>
+            <select
+              value={form.category_id}
+              onChange={set('category_id')}
+              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+            >
+              <option value="">Sin categoría</option>
+              {buildCategoryTree(categories).map(parent => (
+                <optgroup key={parent.id} label={parent.name}>
+                  <option value={parent.id}>{parent.name}</option>
+                  {parent.children.flatMap(child => [
+                    <option key={child.id} value={child.id}>
+                      {'  › '}{child.name}
+                    </option>,
+                    ...(child.children?.map(grandchild => (
+                      <option key={grandchild.id} value={grandchild.id}>
+                        {'    › '}{grandchild.name}
+                      </option>
+                    )) ?? [])
+                  ])}
+                </optgroup>
+              ))}
+            </select>
+          </div>
           <Select
             label="Proveedor"
             options={supplierOptions}

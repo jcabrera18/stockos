@@ -12,7 +12,7 @@ import { formatCurrency, formatDateTime, getPaymentMethodLabel, getPeriodDates }
 import type { Sale, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import { Plus, ShoppingCart } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-
+import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 
 type Period = 'today' | 'week' | 'month'
 
@@ -22,23 +22,53 @@ export default function SalesPage() {
   const [period, setPeriod] = useState<Period>('today')
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [detailSaleId, setDetailSaleId] = useState<string | null>(null)
+  const [detailModal, setDetailModal] = useState(false)
+  const [paymentFilter, setPaymentFilter] = useState('')
+  const [minAmount, setMinAmount] = useState('')
+  const [maxAmount, setMaxAmount] = useState('')
+  const [customerFilter, setCustomerFilter] = useState<{ id: string; full_name: string } | null>(null)
+  const [customerSearch, setCustomerSearch] = useState('')
+  const [customerOptions, setCustomerOptions] = useState<{ id: string; full_name: string }[]>([])
+  const [searchingCustomers, setSearchingCustomers] = useState(false)
 
   const fetchSales = useCallback(async () => {
     setLoading(true)
     try {
       const { from, to } = getPeriodDates(period)
-      const res = await api.get<PaginatedResponse<Sale>>('/api/sales', { from, to, page, limit: 20 })
+      const params: Record<string, string | number | undefined> = {
+        from, to, page, limit: 20,
+      }
+      if (paymentFilter) params.payment_method = paymentFilter
+      if (minAmount) params.min_amount = Number(minAmount)
+      if (maxAmount) params.max_amount = Number(maxAmount)
+      if (customerFilter) params.customer_id = customerFilter.id
+
+      const res = await api.get<PaginatedResponse<Sale>>('/api/sales', params)
       setData(res.data)
       setPagination(res.pagination)
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoading(false)
-    }
-  }, [period, page])
+    } catch (err) { console.error(err) }
+    finally { setLoading(false) }
+  }, [period, paymentFilter, minAmount, maxAmount, page])
 
   useEffect(() => { fetchSales() }, [fetchSales])
   useEffect(() => { setPage(1) }, [period])
+  useEffect(() => { setPage(1) }, [period, paymentFilter, minAmount, maxAmount])
+
+  useEffect(() => {
+    if (!customerSearch.trim() || customerSearch.length < 2) { setCustomerOptions([]); return }
+    const timer = setTimeout(async () => {
+      setSearchingCustomers(true)
+      try {
+        const data = await api.get<{ id: string; full_name: string }[]>(
+          `/api/customers/search?q=${encodeURIComponent(customerSearch)}`
+        )
+        setCustomerOptions(data)
+      } catch { setCustomerOptions([]) }
+      finally { setSearchingCustomers(false) }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [customerSearch])
 
   const totalRevenue = data.reduce((a, s) => a + Number(s.total), 0)
 
@@ -63,20 +93,109 @@ export default function SalesPage() {
       />
 
       <div className="p-5 space-y-4">
-        {/* Filtro período */}
-        <div className="flex gap-2">
+        {/* Filtros */}
+        <div className="flex flex-wrap gap-2 items-center">
+
+          {/* Período */}
           {periods.map(p => (
-            <button
-              key={p.key}
-              onClick={() => setPeriod(p.key)}
-              className={`px-4 py-1.5 text-xs rounded-full font-medium transition-colors ${period === p.key
-                  ? 'bg-[var(--accent)] text-white'
-                  : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-                }`}
-            >
+            <button key={p.key} onClick={() => setPeriod(p.key)}
+              className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${period === p.key ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                }`}>
               {p.label}
             </button>
           ))}
+
+          {/* Separador */}
+          <div className="w-px h-5 bg-[var(--border)]" />
+
+          {/* Método de pago */}
+          <select
+            value={paymentFilter}
+            onChange={e => setPaymentFilter(e.target.value)}
+            className="text-xs px-3 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text2)] focus:outline-none focus:border-[var(--accent)] cursor-pointer"
+          >
+            <option value="">Todos los métodos</option>
+            <option value="efectivo">Efectivo</option>
+            <option value="debito">Débito</option>
+            <option value="credito">Crédito</option>
+            <option value="transferencia">Transferencia</option>
+            <option value="qr">QR</option>
+            <option value="cuenta_corriente">Cta. Cte.</option>
+          </select>
+
+          {/* Filtro por cliente */}
+          {customerFilter ? (
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--accent-subtle)] border border-[var(--accent)] text-xs">
+              <span className="text-[var(--accent)] font-medium">{customerFilter.full_name}</span>
+              <button onClick={() => { setCustomerFilter(null); setCustomerSearch('') }}
+                className="text-[var(--accent)] hover:text-[var(--danger)]">✕</button>
+            </div>
+          ) : (
+            <div className="relative">
+              <input
+                value={customerSearch}
+                onChange={e => setCustomerSearch(e.target.value)}
+                placeholder="Filtrar por cliente..."
+                className="text-xs px-3 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] w-40"
+              />
+              {searchingCustomers && (
+                <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 border border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
+              )}
+              {customerOptions.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 min-w-48 overflow-hidden">
+                  {customerOptions.map(c => (
+                    <button key={c.id}
+                      onClick={() => { setCustomerFilter(c); setCustomerSearch(''); setCustomerOptions([]) }}
+                      className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--surface2)] transition-colors border-b border-[var(--border)] last:border-0">
+                      {c.full_name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Monto mínimo */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-[var(--text3)]">Desde $</span>
+            <input
+              type="number"
+              min="0"
+              placeholder="0"
+              value={minAmount}
+              onChange={e => setMinAmount(e.target.value)}
+              className="w-24 text-xs px-2 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+            />
+          </div>
+
+          {/* Monto máximo */}
+          <div className="flex items-center gap-1">
+            <span className="text-xs text-[var(--text3)]">Hasta $</span>
+            <input
+              type="number"
+              min="0"
+              placeholder="∞"
+              value={maxAmount}
+              onChange={e => setMaxAmount(e.target.value)}
+              className="w-24 text-xs px-2 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+            />
+          </div>
+
+          {/* Limpiar filtros */}
+          {(paymentFilter || minAmount || maxAmount) && (
+            <button
+              onClick={() => { setPaymentFilter(''); setMinAmount(''); setMaxAmount(''); setCustomerFilter(null); setCustomerSearch('') }} className="text-xs text-[var(--danger)] hover:underline"
+            >
+              Limpiar
+            </button>
+          )}
+
+          {/* Total filtrado */}
+          {!loading && (
+            <span className="ml-auto text-xs text-[var(--text3)]">
+              {pagination.total} ventas · {formatCurrency(totalRevenue)}
+            </span>
+          )}
         </div>
 
         {loading ? <PageLoader /> : data.length === 0 ? (
@@ -100,7 +219,11 @@ export default function SalesPage() {
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
                   {data.map(sale => (
-                    <tr key={sale.id} className="hover:bg-[var(--surface2)] transition-colors cursor-pointer">
+                    <tr
+                      key={sale.id}
+                      onClick={() => { setDetailSaleId(sale.id); setDetailModal(true) }}
+                      className="hover:bg-[var(--surface2)] transition-colors cursor-pointer"
+                    >
                       <td className="px-4 py-3 text-[var(--text2)] text-xs mono">
                         {formatDateTime(sale.created_at)}
                       </td>
@@ -124,6 +247,13 @@ export default function SalesPage() {
             <Pagination pagination={pagination} onPageChange={setPage} />
           </div>
         )}
+
+        <SaleDetailModal
+          open={detailModal}
+          onClose={() => { setDetailModal(false); setDetailSaleId(null) }}
+          saleId={detailSaleId}
+        />
+
       </div>
     </AppShell>
   )

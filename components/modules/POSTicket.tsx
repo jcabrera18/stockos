@@ -1,223 +1,379 @@
 'use client'
 import { useRef, useState } from 'react'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
-import { Printer, Plus, X } from 'lucide-react'
+import { Printer, Plus, X, CheckCircle, CreditCard, Package } from 'lucide-react'
 
 interface CartItem {
-  product: { name: string; unit: string }
-  quantity: number
+  product:    { name: string; unit: string; barcode?: string }
+  quantity:   number
   unit_price: number
-  discount: number
+  discount:   number
+  applied_list?:   string
+  applied_margin?: number
 }
 
 interface TicketSale {
-  id: string
-  total: number
-  subtotal: number
-  discount: number
+  id:             string
+  total:          number
+  subtotal:       number
+  discount:       number
   payment_method: string
-  installments: number
-  items: CartItem[]
-  created_at: string
-  price_list_name?: string
+  installments:   number
+  items:          CartItem[]
+  created_at:     string
 }
 
 interface POSTicketProps {
-  sale: TicketSale
+  sale:      TicketSale
   onNewSale: () => void
-  onClose: () => void
+  onClose:   () => void
 }
 
 export function POSTicket({ sale, onNewSale, onClose }: POSTicketProps) {
-  const printRef = useRef<HTMLDivElement>(null)
-const [invoiceModal, setInvoiceModal] = useState(false)  // ← agregar esta línea
+  const printRef              = useRef<HTMLDivElement>(null)
+  const [invoiceModal, setInvoiceModal] = useState(false)
+
+  const itemsSubtotal = sale.items.reduce(
+    (a, i) => a + i.unit_price * i.quantity - i.discount, 0
+  )
+  const itemCount = sale.items.reduce((a, i) => a + i.quantity, 0)
 
   const handlePrint = () => {
     const content = printRef.current
     if (!content) return
-
-    const win = window.open('', '_blank', 'width=400,height=600')
+    const win = window.open('', '_blank', 'width=420,height=700')
     if (!win) return
-
     win.document.write(`
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8">
-        <title>Ticket de venta</title>
+        <title>Ticket StockOS</title>
         <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
+          @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap');
+          * { margin:0; padding:0; box-sizing:border-box; }
           body {
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            color: #000;
+            font-family: 'Inter', sans-serif;
             background: #fff;
-            padding: 16px;
-            width: 300px;
+            color: #1a1a18;
+            padding: 0;
+            width: 380px;
           }
-          .center { text-align: center; }
-          .bold { font-weight: bold; }
-          .divider { border-top: 1px dashed #000; margin: 8px 0; }
-          .row { display: flex; justify-content: space-between; margin: 3px 0; }
-          .total-row { font-size: 15px; font-weight: bold; }
-          .logo { font-size: 18px; font-weight: bold; margin-bottom: 4px; }
-          .item-name { flex: 1; margin-right: 8px; }
+          .mono { font-family: 'IBM Plex Mono', monospace; }
         </style>
       </head>
-      <body>
-        ${content.innerHTML}
-      </body>
+      <body>${content.innerHTML}</body>
       </html>
     `)
     win.document.close()
     win.focus()
-    setTimeout(() => { win.print(); win.close() }, 300)
+    setTimeout(() => { win.print(); win.close() }, 400)
   }
 
-  const itemsSubtotal = sale.items.reduce(
-    (a, i) => a + i.unit_price * i.quantity - i.discount, 0
-  )
-
   return (
-    <div className="min-h-screen bg-[var(--bg)] flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-[var(--bg)] flex items-start justify-center p-4 pt-8">
+      <div className="w-full max-w-sm space-y-4">
 
-        {/* Acciones */}
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-[var(--text)]">Venta registrada ✓</h2>
-          <button onClick={onClose} className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)]">
+        {/* Éxito */}
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-[var(--accent-subtle)] flex items-center justify-center flex-shrink-0">
+            <CheckCircle size={20} className="text-[var(--accent)]" />
+          </div>
+          <div>
+            <p className="text-base font-semibold text-[var(--text)]">Venta registrada</p>
+            <p className="text-xs text-[var(--text3)]">{formatDateTime(sale.created_at)}</p>
+          </div>
+          <button onClick={onClose} className="ml-auto p-1.5 rounded-lg text-[var(--text3)] hover:bg-[var(--surface2)]">
             <X size={16} />
           </button>
         </div>
 
-        {/* Ticket */}
-        <div className="bg-white text-black rounded-[var(--radius-lg)] shadow-xl overflow-hidden">
-          <div ref={printRef} style={{ fontFamily: "'Courier New', monospace", fontSize: '13px', padding: '20px', color: '#000' }}>
-
-            {/* Header */}
-            <div className="center" style={{ textAlign: 'center', marginBottom: '12px' }}>
-              <div className="logo" style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '4px' }}>⚡ StockOS</div>
-              <div style={{ fontSize: '11px', color: '#555' }}>Punto de Venta</div>
-              <div style={{ fontSize: '11px', color: '#555', marginTop: '2px' }}>
-                {formatDateTime(sale.created_at)}
+        {/* ── Ticket visual ── */}
+        <div
+          ref={printRef}
+          style={{
+            background: '#ffffff',
+            color: '#1a1a18',
+            fontFamily: "'Inter', sans-serif",
+            borderRadius: '16px',
+            overflow: 'hidden',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.12)',
+          }}
+        >
+          {/* Header con degradado */}
+          <div style={{
+            background: 'linear-gradient(135deg, #15803d 0%, #16a34a 60%, #22c55e 100%)',
+            padding: '24px 20px 20px',
+            color: '#fff',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '2px', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  StockOS · Punto de Venta
+                </div>
+                <div style={{ fontSize: '13px', opacity: 0.9 }}>{formatDateTime(sale.created_at)}</div>
               </div>
-              <div style={{ fontSize: '10px', color: '#999', marginTop: '2px' }}>
-                #{sale.id.slice(-8).toUpperCase()}
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '10px', opacity: 0.7, marginBottom: '2px' }}>Comprobante</div>
+                <div style={{ fontFamily: 'monospace', fontSize: '13px', fontWeight: 600, letterSpacing: '0.08em' }}>
+                  #{sale.id.slice(-8).toUpperCase()}
+                </div>
               </div>
             </div>
 
-            <div className="divider" style={{ borderTop: '1px dashed #000', margin: '10px 0' }} />
+            {/* Total grande */}
+            <div style={{ marginTop: '20px', textAlign: 'center' }}>
+              <div style={{ fontSize: '11px', opacity: 0.8, marginBottom: '4px', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                Total pagado
+              </div>
+              <div style={{ fontSize: '40px', fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1 }}>
+                {formatCurrency(sale.total)}
+              </div>
+            </div>
 
-            {/* Items */}
-            <div style={{ marginBottom: '8px' }}>
-              {sale.items.map((item, i) => (
-                <div key={i}>
-                  <div className="row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px' }}>
-                    <span className="item-name" style={{ flex: 1, marginRight: '8px' }}>{item.product.name}</span>
-                    <span style={{ whiteSpace: 'nowrap', fontWeight: 'bold' }}>
-                      {formatCurrency(item.unit_price * item.quantity - item.discount)}
-                    </span>
+            {/* Método de pago */}
+            <div style={{
+              marginTop: '16px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(255,255,255,0.2)',
+              borderRadius: '20px',
+              padding: '5px 14px',
+              fontSize: '12px',
+              fontWeight: 600,
+            }}>
+              {sale.payment_method === 'efectivo'         && '💵'}
+              {sale.payment_method === 'debito'           && '💳'}
+              {sale.payment_method === 'credito'          && '💳'}
+              {sale.payment_method === 'transferencia'    && '🏦'}
+              {sale.payment_method === 'qr'               && '📱'}
+              {sale.payment_method === 'cuenta_corriente' && '📒'}
+              {' '}{getPaymentMethodLabel(sale.payment_method)}
+              {sale.payment_method === 'credito' && sale.installments > 1 && ` · ${sale.installments} cuotas`}
+            </div>
+          </div>
+
+          {/* Separador dentado */}
+          <div style={{
+            background: '#f5f5f4',
+            height: '16px',
+            position: 'relative',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              position: 'absolute',
+              top: '-8px',
+              left: 0,
+              right: 0,
+              height: '16px',
+              background: 'radial-gradient(circle at 50% 0%, #f5f5f4 8px, transparent 8px)',
+              backgroundSize: '20px 16px',
+              backgroundRepeat: 'repeat-x',
+            }} />
+          </div>
+
+          {/* Cuerpo del ticket */}
+          <div style={{ background: '#f5f5f4', padding: '0 20px 20px' }}>
+
+            {/* Resumen */}
+            <div style={{
+              display: 'flex',
+              gap: '8px',
+              marginBottom: '16px',
+              paddingTop: '4px',
+            }}>
+              <div style={{
+                flex: 1,
+                background: '#fff',
+                borderRadius: '10px',
+                padding: '10px 12px',
+                textAlign: 'center',
+              }}>
+                <div style={{ fontSize: '18px', fontWeight: 700, fontFamily: 'monospace' }}>{itemCount}</div>
+                <div style={{ fontSize: '10px', color: '#6a6a64', marginTop: '1px' }}>
+                  {itemCount === 1 ? 'producto' : 'productos'}
+                </div>
+              </div>
+              <div style={{
+                flex: 1,
+                background: '#fff',
+                borderRadius: '10px',
+                padding: '10px 12px',
+                textAlign: 'center',
+              }}>
+                <div style={{ fontSize: '18px', fontWeight: 700, fontFamily: 'monospace' }}>{sale.items.length}</div>
+                <div style={{ fontSize: '10px', color: '#6a6a64', marginTop: '1px' }}>
+                  {sale.items.length === 1 ? 'artículo' : 'artículos'}
+                </div>
+              </div>
+              {sale.discount > 0 && (
+                <div style={{
+                  flex: 1,
+                  background: '#fff',
+                  borderRadius: '10px',
+                  padding: '10px 12px',
+                  textAlign: 'center',
+                }}>
+                  <div style={{ fontSize: '18px', fontWeight: 700, fontFamily: 'monospace', color: '#dc2626' }}>
+                    -{formatCurrency(sale.discount).replace('$', '')}
                   </div>
-                  <div style={{ color: '#666', fontSize: '11px', marginBottom: '4px' }}>
-                    {item.quantity} {item.product.unit} × {formatCurrency(item.unit_price)}
-                    {item.discount > 0 && ` − ${formatCurrency(item.discount)}`}
+                  <div style={{ fontSize: '10px', color: '#6a6a64', marginTop: '1px' }}>descuento</div>
+                </div>
+              )}
+            </div>
+
+            {/* Lista de productos */}
+            <div style={{
+              background: '#fff',
+              borderRadius: '10px',
+              overflow: 'hidden',
+              marginBottom: '12px',
+            }}>
+              <div style={{
+                padding: '10px 14px',
+                borderBottom: '1px solid #e5e5e2',
+                fontSize: '10px',
+                fontWeight: 600,
+                color: '#6a6a64',
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
+                display: 'flex',
+                justifyContent: 'space-between',
+              }}>
+                <span>Detalle</span>
+                <span>Importe</span>
+              </div>
+              {sale.items.map((item, i) => (
+                <div key={i} style={{
+                  padding: '10px 14px',
+                  borderBottom: i < sale.items.length - 1 ? '1px solid #f5f5f4' : 'none',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  gap: '8px',
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '12px', fontWeight: 600, color: '#1a1a18' }}>
+                      {item.product.name}
+                    </div>
+                    <div style={{ fontSize: '10px', color: '#8a8a84', marginTop: '2px' }}>
+                      {item.quantity} {item.product.unit} × {formatCurrency(item.unit_price)}
+                      {item.discount > 0 && (
+                        <span style={{ color: '#dc2626' }}> − {formatCurrency(item.discount)}</span>
+                      )}
+                    </div>
+                    {item.applied_list && (
+                      <div style={{ fontSize: '9px', color: '#16a34a', marginTop: '1px' }}>
+                        Lista {item.applied_list}{item.applied_margin !== undefined ? ` (+${item.applied_margin}%)` : ''}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{
+                    fontSize: '13px',
+                    fontFamily: 'monospace',
+                    fontWeight: 600,
+                    color: '#1a1a18',
+                    flexShrink: 0,
+                  }}>
+                    {formatCurrency(item.unit_price * item.quantity - item.discount)}
                   </div>
                 </div>
               ))}
             </div>
 
-            <div className="divider" style={{ borderTop: '1px dashed #000', margin: '10px 0' }} />
-
-            {/* Subtotal y descuentos */}
-            {sale.discount > 0 && (
-              <>
-                <div className="row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px' }}>
+            {/* Totales */}
+            <div style={{ background: '#fff', borderRadius: '10px', padding: '12px 14px', marginBottom: '12px' }}>
+              {sale.discount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#6a6a64', marginBottom: '6px' }}>
                   <span>Subtotal</span>
-                  <span>{formatCurrency(itemsSubtotal)}</span>
+                  <span style={{ fontFamily: 'monospace' }}>{formatCurrency(itemsSubtotal)}</span>
                 </div>
-                <div className="row" style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '3px', color: '#c00' }}>
+              )}
+              {sale.discount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#dc2626', marginBottom: '8px' }}>
                   <span>Descuento</span>
-                  <span>− {formatCurrency(sale.discount)}</span>
+                  <span style={{ fontFamily: 'monospace' }}>− {formatCurrency(sale.discount)}</span>
                 </div>
-              </>
-            )}
-
-            {/* Total */}
-            <div className="row total-row" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '16px', fontWeight: 'bold', marginTop: '6px' }}>
-              <span>TOTAL</span>
-              <span>{formatCurrency(sale.total)}</span>
-            </div>
-
-            {/* Método de pago */}
-            <div style={{ marginTop: '6px', color: '#555', fontSize: '11px', textAlign: 'center' }}>
-              {getPaymentMethodLabel(sale.payment_method)}
-              {sale.payment_method === 'credito' && sale.installments > 1 && ` — ${sale.installments} cuotas`}
-            </div>
-
-            {/* Lista de precios */}
-            {sale.price_list_name && (
-              <div style={{ textAlign: 'center', fontSize: '11px', color: '#888' }}>
-                Lista: {sale.price_list_name}
+              )}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: '15px',
+                fontWeight: 700,
+                paddingTop: sale.discount > 0 ? '8px' : '0',
+                borderTop: sale.discount > 0 ? '1px dashed #e5e5e2' : 'none',
+              }}>
+                <span>Total</span>
+                <span style={{ fontFamily: 'monospace', color: '#15803d' }}>{formatCurrency(sale.total)}</span>
               </div>
-            )}
-
-            <div className="divider" style={{ borderTop: '1px dashed #000', margin: '12px 0 8px' }} />
+            </div>
 
             {/* Footer */}
-            <div style={{ textAlign: 'center', fontSize: '11px', color: '#888' }}>
-              ¡Gracias por su compra!
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '12px', color: '#8a8a84', marginBottom: '6px' }}>
+                ¡Gracias por su compra!
+              </div>
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '10px',
+                color: '#b4b2a9',
+              }}>
+                <span>⚡</span>
+                <span>Powered by StockOS</span>
+              </div>
             </div>
-
           </div>
         </div>
 
         {/* Botones */}
-        <div className="flex gap-3 mt-5">
+        <div className="flex gap-2">
           <button
             onClick={handlePrint}
-            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-sm font-medium text-[var(--text)] hover:bg-[var(--surface2)] transition-colors"
+            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-sm font-medium text-[var(--text)] hover:bg-[var(--surface2)] transition-colors active:scale-95"
           >
-            <Printer size={16} />
-            Imprimir ticket
+            <Printer size={15} />
+            Imprimir
           </button>
           <button
             onClick={() => setInvoiceModal(true)}
-            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-sm font-medium text-[var(--text)] hover:bg-[var(--surface2)] transition-colors"
+            className="flex items-center justify-center gap-2 px-4 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-sm font-medium text-[var(--text)] hover:bg-[var(--surface2)] transition-colors active:scale-95"
           >
-            📄 Emitir factura
+            <CreditCard size={15} />
+            Factura
           </button>
           <button
             onClick={onNewSale}
             className="flex-1 flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--accent)] text-white text-sm font-semibold hover:bg-[var(--accent-hover)] transition-colors active:scale-95"
           >
-            <Plus size={16} />
+            <Plus size={15} />
             Nueva venta
           </button>
         </div>
 
-        {/* Modal factura */}
-        {invoiceModal && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
-            style={{ background: 'rgba(0,0,0,0.6)' }}
-            onClick={() => setInvoiceModal(false)}
-          >
-            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6 max-w-sm w-full">
-              <h3 className="text-base font-semibold text-[var(--text)] mb-4">Emitir factura</h3>
-              <p className="text-sm text-[var(--text3)] mb-4">
-                Integración AFIP en configuración. Próximamente disponible.
-              </p>
-              <button
-                onClick={() => setInvoiceModal(false)}
-                className="w-full py-2 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] text-sm text-[var(--text2)]"
-              >
-                Cerrar
-              </button>
-            </div>
-          </div>
-        )}
-
       </div>
+
+      {/* Modal factura */}
+      {invoiceModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.6)' }}
+          onClick={() => setInvoiceModal(false)}
+        >
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6 max-w-sm w-full">
+            <h3 className="text-base font-semibold text-[var(--text)] mb-4">Emitir factura</h3>
+            <p className="text-sm text-[var(--text3)] mb-4">
+              Integración AFIP en configuración. Próximamente disponible.
+            </p>
+            <button onClick={() => setInvoiceModal(false)}
+              className="w-full py-2 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] text-sm text-[var(--text2)]">
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
