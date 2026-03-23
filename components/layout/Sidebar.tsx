@@ -14,10 +14,10 @@ const NAV_ITEMS = [
   { href: '/products', label: 'Productos', icon: Package },
   { href: '/stock', label: 'Stock', icon: Boxes },
   { href: '/sales', label: 'Ventas', icon: ShoppingCart },
-  { href: '/customers', label: 'Cuentas', icon: Users },
   { href: '/categories', label: 'Categorías', icon: Tag },
   { href: '/purchases', label: 'Compras', icon: Truck },
   { href: '/finances', label: 'Finanzas', icon: BarChart3 },
+  { href: '/customers', label: 'Cuentas', icon: Users },
   { href: '/settings', label: 'Config', icon: Settings },
 ]
 

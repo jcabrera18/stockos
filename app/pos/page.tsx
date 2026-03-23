@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import type { Product } from '@/types'
+import type { CustomerSummary } from '@/app/customers/page'
 import { Search, Plus, Minus, Trash2, X, ShoppingCart, Zap, ChevronLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { POSTicket } from '@/components/modules/POSTicket'
@@ -33,7 +34,9 @@ const PAYMENT_METHODS = [
   { value: 'credito',       label: 'Crédito',         icon: '💳' },
   { value: 'transferencia', label: 'Transferencia',   icon: '🏦' },
   { value: 'qr',            label: 'QR',              icon: '📱' },
+  { value: 'cuenta_corriente', label: 'Cuenta corriente', icon: '📒' },
 ]
+
 
 // ─── Componente principal ─────────────────────────────────
 export default function POSPage() {
@@ -55,6 +58,12 @@ export default function POSPage() {
   const [installments, setInstallments]   = useState(1)
   const [processing, setProcessing]       = useState(false)
   const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null)
+
+  // Clientes para cuenta corriente en POS
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerSummary | null>(null)
+  const [customerQuery, setCustomerQuery]       = useState('')
+  const [customerResults, setCustomerResults]   = useState<CustomerSummary[]>([])
+  const [searchingCustomer, setSearchingCustomer] = useState(false)
 
   // Focus automático en el buscador
   useEffect(() => { searchRef.current?.focus() }, [])
@@ -86,6 +95,28 @@ export default function POSPage() {
     }, 300)
     return () => clearTimeout(timer)
   }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Búsqueda de cliente con debounce (para cuenta corriente)
+  useEffect(() => {
+    if (!customerQuery.trim() || customerQuery.trim().length < 2) {
+      setCustomerResults([])
+      return
+    }
+
+    const timer = setTimeout(async () => {
+      setSearchingCustomer(true)
+      try {
+        const customers = await api.get<CustomerSummary[]>('/api/customers/search', { q: customerQuery.trim() })
+        setCustomerResults(customers)
+      } catch {
+        setCustomerResults([])
+      } finally {
+        setSearchingCustomer(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timer)
+  }, [customerQuery])
 
   // ─── Carrito ───────────────────────────────────────────
   const addToCart = useCallback((product: Product) => {
@@ -149,7 +180,7 @@ export default function POSPage() {
     if (cart.length === 0) return
     setProcessing(true)
     try {
-      const sale = await api.post<CompletedSale>('/api/sales', {
+      const payload = {
         items: cart.map(i => ({
           product_id: i.product.id,
           quantity:   i.quantity,
@@ -159,14 +190,35 @@ export default function POSPage() {
         discount:       saleDiscount,
         payment_method: paymentMethod,
         installments:   paymentMethod === 'credito' ? installments : 1,
-      })
+      }
+
+      let sale: CompletedSale
+
+      if (paymentMethod === 'cuenta_corriente') {
+        if (!selectedCustomer) throw new Error('Seleccione un cliente para cuenta corriente')
+
+        sale = await api.post<CompletedSale>('/api/sales', {
+          ...payload,
+          payment_method: 'transferencia',
+          installments: 1,
+        })
+
+        await api.post(`/api/customers/${selectedCustomer.id}/charge`, {
+          sale_id: sale.id,
+          amount:  total,
+        })
+
+        toast.success('Venta registrada y cargada a cuenta corriente')
+      } else {
+        sale = await api.post<CompletedSale>('/api/sales', payload)
+        toast.success('Venta registrada')
+      }
 
       setCompletedSale({
         ...sale,
         items: cart,
       })
       setStep('ticket')
-      toast.success('Venta registrada')
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al procesar la venta')
     } finally {
@@ -431,7 +483,14 @@ export default function POSPage() {
               {PAYMENT_METHODS.map(m => (
                 <button
                   key={m.value}
-                  onClick={() => setPaymentMethod(m.value)}
+                  onClick={() => {
+                    setPaymentMethod(m.value)
+                    if (m.value !== 'cuenta_corriente') {
+                      setSelectedCustomer(null)
+                      setCustomerQuery('')
+                      setCustomerResults([])
+                    }
+                  }}
                   className={`flex flex-col items-center gap-1 py-3 rounded-[var(--radius-md)] border text-xs font-medium transition-all ${
                     paymentMethod === m.value
                       ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
@@ -443,6 +502,58 @@ export default function POSPage() {
                 </button>
               ))}
             </div>
+
+            {paymentMethod === 'cuenta_corriente' && (
+              <div className="space-y-1">
+                <label className="text-xs text-[var(--text3)] font-medium">Seleccionar cliente</label>
+                <div className="relative">
+                  <input
+                    value={customerQuery}
+                    onChange={e => { setCustomerQuery(e.target.value); setSelectedCustomer(null) }}
+                    placeholder="Buscar cliente..."
+                    className="w-full text-sm bg-[var(--surface)] border border-[var(--border)] rounded px-3 py-2 focus:outline-none focus:border-[var(--accent)]"
+                  />
+                  {customerResults.length > 0 && (
+                    <div className="absolute z-20 w-full mt-1 max-h-44 overflow-y-auto rounded border border-[var(--border)] bg-[var(--surface)] shadow-[0_2px_10px_rgba(0,0,0,0.08)]">
+                      {customerResults.map(customer => (
+                        <button
+                          key={customer.id}
+                          onClick={() => {
+                            setSelectedCustomer(customer)
+                            setCustomerResults([])
+                            setCustomerQuery(customer.full_name)
+                          }}
+                          className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--surface2)] transition-colors"
+                        >
+                          <span className="font-medium">{customer.full_name}</span>
+                          <span className="ml-2 text-xs text-[var(--text3)]">{formatCurrency(customer.current_balance)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {searchingCustomer && <p className="text-xs text-[var(--text3)]">Buscando...</p>}
+
+                {selectedCustomer && (
+                  <div className="flex items-center justify-between rounded border border-[var(--accent)] bg-[var(--accent-subtle)] p-2">
+                    <div>
+                      <p className="text-xs font-medium">{selectedCustomer.full_name}</p>
+                      <p className="text-xs text-[var(--text3)]">Saldo: {formatCurrency(selectedCustomer.current_balance)}</p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setSelectedCustomer(null)
+                        setCustomerQuery('')
+                        setCustomerResults([])
+                      }}
+                      className="text-xs text-[var(--danger)] hover:text-[var(--danger)]"
+                    >
+                      Quitar
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Cuotas para crédito */}
             {paymentMethod === 'credito' && (
@@ -468,7 +579,7 @@ export default function POSPage() {
 
             <button
               onClick={handleConfirm}
-              disabled={processing}
+              disabled={processing || (paymentMethod === 'cuenta_corriente' && !selectedCustomer)}
               className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-[var(--radius-md)] transition-colors disabled:opacity-60 active:scale-95 flex items-center justify-center gap-2"
             >
               {processing ? (
