@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+/* ─── Design tokens ──────────────────────────────────────── */
+:root {
+  --bg:       #ffffff;
+  --surface:  #f5f5f4;
+  --surface2: #eeeeec;
+  --surface3: #e5e5e2;
+  --border:   #d6d6d2;
+  --text:     #1a1a18;
+  --text2:    #4a4a46;
+  --text3:    #8a8a84;
+
+  --accent:        #16a34a;
+  --accent-hover:  #15803d;
+  --accent-subtle: #dcfce7;
+  --danger:        #dc2626;
+  --danger-subtle: #fee2e2;
+  --warning:       #d97706;
+  --warning-subtle:#fef3c7;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+[data-theme="dark"] {
+  --bg:       #1a1a18;
+  --surface:  #242422;
+  --surface2: #2e2e2b;
+  --surface3: #383835;
+  --border:   #3f3f3b;
+  --text:     #ececea;
+  --text2:    #a8a8a2;
+  --text3:    #6a6a64;
+
+  --accent-subtle: #14532d;
+  --danger-subtle: #450a0a;
+  --warning-subtle:#451a03;
+}
+
+/* ─── Utility classes ────────────────────────────────────── */
+.bg-app      { background-color: var(--bg); }
+.bg-surface  { background-color: var(--surface); }
+.bg-surface2 { background-color: var(--surface2); }
+.bg-surface3 { background-color: var(--surface3); }
+.border-app  { border-color: var(--border); }
+.text-app    { color: var(--text); }
+.text-app2   { color: var(--text2); }
+.text-app3   { color: var(--text3); }
+
+/* ─── Base ───────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+
+html {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  margin: 0;
+  min-height: 100dvh;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 99px;
+}
+
+/* ─── Focus ring ─────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ─── Mono numbers ───────────────────────────────────────── */
+.mono { font-family: var(--font-mono); }
