@@ -19,6 +19,7 @@ interface TicketSale {
   installments:   number
   items:          CartItem[]
   created_at:     string
+  price_list_name?: string
 }
 
 interface POSTicketProps {
@@ -151,6 +152,13 @@ export function POSTicket({ sale, onNewSale, onClose }: POSTicketProps) {
               {getPaymentMethodLabel(sale.payment_method)}
               {sale.payment_method === 'credito' && sale.installments > 1 && ` — ${sale.installments} cuotas`}
             </div>
+
+            {/* Lista de precios */}
+            {sale.price_list_name && (
+              <div style={{ textAlign: 'center', fontSize: '11px', color: '#888' }}>
+                Lista: {sale.price_list_name}
+              </div>
+            )}
 
             <div className="divider" style={{ borderTop: '1px dashed #000', margin: '12px 0 8px' }} />
 

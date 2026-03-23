@@ -5,6 +5,7 @@ import { api } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import type { Product } from '@/types'
 import type { CustomerSummary } from '@/app/customers/page'
+import type { PriceList } from '@/app/price-lists/page'
 import { Search, Plus, Minus, Trash2, X, ShoppingCart, Zap, ChevronLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { POSTicket } from '@/components/modules/POSTicket'
@@ -66,8 +67,22 @@ export default function POSPage() {
   const [customerResults, setCustomerResults]   = useState<CustomerSummary[]>([])
   const [searchingCustomer, setSearchingCustomer] = useState(false)
 
+  // Listas de precio
+  const [priceLists, setPriceLists]     = useState<PriceList[]>([])
+  const [selectedList, setSelectedList] = useState<PriceList | null>(null)
+
   // Focus automático en el buscador
   useEffect(() => { searchRef.current?.focus() }, [])
+
+  // Cargar listas de precio
+  useEffect(() => {
+    api.get<PriceList[]>('/api/price-lists').then(lists => {
+      setPriceLists(lists)
+      // Seleccionar la lista por defecto automáticamente
+      const def = lists.find(l => l.is_default)
+      if (def) setSelectedList(def)
+    }).catch(() => {})
+  }, [])
 
   // Búsqueda con debounce
   useEffect(() => {
@@ -144,7 +159,7 @@ export default function POSPage() {
       return [...prev, {
         product,
         quantity:   1,
-        unit_price: product.sell_price,
+        unit_price: getPriceForList(product.cost_price),
         discount:   0,
       }]
     })
@@ -179,6 +194,12 @@ export default function POSPage() {
   const totalDiscount = saleDiscount
   const total        = Math.max(0, subtotal - totalDiscount)
 
+  // Función para calcular precio según lista seleccionada
+  const getPriceForList = (costPrice: number): number => {
+    if (!selectedList) return costPrice  // fallback
+    return Math.round(costPrice * (1 + selectedList.margin_pct / 100) * 100) / 100
+  }
+
   // ─── Confirmar venta ───────────────────────────────────
   const handleConfirm = async () => {
     if (cart.length === 0) return
@@ -194,6 +215,7 @@ export default function POSPage() {
         discount:       saleDiscount,
         payment_method: paymentMethod,
         installments:   paymentMethod === 'credito' ? installments : 1,
+        price_list_id:  selectedList?.id ?? null,
       }
 
       let sale: CompletedSale
@@ -271,6 +293,37 @@ export default function POSPage() {
           </div>
           <span className="text-sm font-bold text-[var(--text)]">StockOS POS</span>
         </div>
+
+        {/* Selector de lista de precios */}
+        {priceLists.length > 1 && (
+          <div className="px-4 py-2 border-b border-[var(--border)] bg-[var(--surface2)]">
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <span className="text-xs text-[var(--text3)] flex-shrink-0">Lista:</span>
+              {priceLists.map(list => (
+                <button
+                  key={list.id}
+                  onClick={() => {
+                    setSelectedList(list)
+                    // Recalcular precios del carrito existente
+                    setCart(prev => prev.map(item => ({
+                      ...item,
+                      unit_price: Math.round(
+                        item.product.cost_price * (1 + list.margin_pct / 100) * 100
+                      ) / 100
+                    })))
+                  }}
+                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${
+                    selectedList?.id === list.id
+                      ? 'bg-[var(--accent)] text-white'
+                      : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)]'
+                  }`}
+                >
+                  {list.name} (+{list.margin_pct}%)
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Buscador */}
         <div className="px-4 py-3 border-b border-[var(--border)]">
