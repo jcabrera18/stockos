@@ -12,7 +12,7 @@ export async function updateSession(request: NextRequest) {
         getAll() {
           return request.cookies.getAll()
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options?: object }[]) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           )
@@ -27,7 +27,6 @@ export async function updateSession(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  // Rutas protegidas — redirigir a login si no hay sesión
   const isProtected = !request.nextUrl.pathname.startsWith('/login')
     && !request.nextUrl.pathname.startsWith('/auth')
     && request.nextUrl.pathname !== '/'
@@ -38,7 +37,6 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Si ya está logueado y va a /login, redirigir a dashboard
   if (request.nextUrl.pathname === '/login' && user) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
