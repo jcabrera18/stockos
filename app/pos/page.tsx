@@ -18,6 +18,7 @@ interface CartItem {
   unit_price: number
   discount: number
   applied_list?: string
+  applied_margin?: number
 }
 
 interface CompletedSale {
@@ -217,6 +218,7 @@ export default function POSPage() {
         unit_price: pricing.price,
         discount: 0,
         applied_list: pricing.list_name,
+        applied_margin: pricing.margin_pct,
       }])
     }
 
@@ -650,8 +652,8 @@ export default function POSPage() {
 
               {item.applied_list && (
                 <span className="text-xs text-[var(--text3)]">
-                  Lista: <span className="text-[var(--accent)]">{item.applied_list.name}</span>
-                  {' '}(+{item.applied_list.margin_pct}%)
+                  Lista: <span className="text-[var(--accent)]">{item.applied_list}</span>
+                  {item.applied_margin !== undefined && ` (+${item.applied_margin}%)`}
                 </span>
               )}
 
