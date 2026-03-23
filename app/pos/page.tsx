@@ -51,6 +51,7 @@ export default function POSPage() {
   const [searching, setSearching] = useState(false)
   const [activeResultIndex, setActiveResultIndex] = useState(-1)
   const searchRef = useRef<HTMLInputElement>(null)
+  const isAddingRef = useRef(false)
 
   // Carrito
   const [cart, setCart] = useState<CartItem[]>([])
@@ -76,7 +77,7 @@ export default function POSPage() {
   const [selectedList, setSelectedList] = useState<PriceList | null>(null)
 
   const [invoiceModal, setInvoiceModal] = useState(false)
-
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Focus automático en el buscador
   useEffect(() => { searchRef.current?.focus() }, [])
@@ -94,7 +95,11 @@ export default function POSPage() {
   // Búsqueda con debounce
   useEffect(() => {
     if (!query.trim()) { setResults([]); return }
-    const timer = setTimeout(async () => {
+
+    // Cancelar debounce anterior
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+
+    debounceRef.current = setTimeout(async () => {
       setSearching(true)
       try {
         // Buscar por código de barras exacto primero
@@ -119,7 +124,10 @@ export default function POSPage() {
         setActiveResultIndex(-1)
       } finally { setSearching(false) }
     }, 300)
-    return () => clearTimeout(timer)
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
   }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Búsqueda de cliente con debounce (para cuenta corriente)
@@ -178,6 +186,10 @@ export default function POSPage() {
 
   // ─── Carrito ───────────────────────────────────────────
   const addToCart = useCallback(async (product: Product) => {
+
+    if (isAddingRef.current) return  // ← bloquear si ya está procesando
+    isAddingRef.current = true        // ← marcar como procesando
+
     if (product.stock_current <= 0) {
       toast.error(`${product.name} sin stock`)
       return
@@ -211,6 +223,7 @@ export default function POSPage() {
     setResults([])
     setQuery('')
     searchRef.current?.focus()
+    isAddingRef.current = false
   }, [cart, getPriceForQuantity]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateQty = async (id: string, delta: number) => {
@@ -395,6 +408,12 @@ export default function POSPage() {
                 }
                 if (e.key === 'Enter') {
                   e.preventDefault()
+
+                  // Cancelar el debounce para que no se ejecute después
+                  if (debounceRef.current) {
+                    clearTimeout(debounceRef.current)
+                    debounceRef.current = null
+                  }
 
                   // Caso 1: hay un resultado seleccionado con las flechas → agregar ese
                   if (activeResultIndex >= 0 && results[activeResultIndex]) {
