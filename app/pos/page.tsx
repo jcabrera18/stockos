@@ -16,7 +16,8 @@ interface CartItem {
   product: Product
   quantity: number
   unit_price: number
-  discount: number  // descuento por ítem en $
+  discount: number
+  applied_list?: string
 }
 
 interface CompletedSale {
@@ -73,6 +74,8 @@ export default function POSPage() {
   // Listas de precio
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
   const [selectedList, setSelectedList] = useState<PriceList | null>(null)
+
+  const [invoiceModal, setInvoiceModal] = useState(false)
 
 
   // Focus automático en el buscador
@@ -157,42 +160,69 @@ export default function POSPage() {
     return () => clearTimeout(timer)
   }, [customerQuery])
 
+  // Función para calcular precio según lista seleccionada
+  async function getPriceForQuantity(productId: string, quantity: number): Promise<{
+    price: number
+    list_name: string
+    margin_pct: number
+    rule_source: string
+  }> {
+    const data = await api.get<{
+      price: number
+      list_name: string
+      margin_pct: number
+      rule_source: string
+    }>('/api/products/price', { product_id: productId, quantity })
+    return data
+  }
+
   // ─── Carrito ───────────────────────────────────────────
-  const addToCart = useCallback((product: Product) => {
+  const addToCart = useCallback(async (product: Product) => {
     if (product.stock_current <= 0) {
       toast.error(`${product.name} sin stock`)
       return
     }
-    setCart(prev => {
-      const existing = prev.find(i => i.product.id === product.id)
-      if (existing) {
-        if (existing.quantity >= product.stock_current) {
-          toast.error(`Stock máximo disponible: ${product.stock_current}`)
-          return prev
-        }
-        return prev.map(i =>
-          i.product.id === product.id
-            ? { ...i, quantity: i.quantity + 1 }
-            : i
-        )
+
+    const existing = cart.find(i => i.product.id === product.id)
+
+    if (existing) {
+      if (existing.quantity >= product.stock_current) {
+        toast.error(`Stock máximo disponible: ${product.stock_current}`)
+        return
       }
-      return [...prev, {
+      const newQty = existing.quantity + 1
+      const pricing = await getPriceForQuantity(product.id, newQty)
+      setCart(prev => prev.map(i =>
+        i.product.id === product.id
+          ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name }
+          : i
+      ))
+    } else {
+      const pricing = await getPriceForQuantity(product.id, 1)
+      setCart(prev => [...prev, {
         product,
         quantity: 1,
-        unit_price: getPriceForList(product.cost_price),
+        unit_price: pricing.price,
         discount: 0,
-      }]
-    })
+        applied_list: pricing.list_name,
+      }])
+    }
+
     setResults([])
     setQuery('')
     searchRef.current?.focus()
-  }, [])
+  }, [cart, getPriceForQuantity]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const updateQty = (id: string, delta: number) => {
-    setCart(prev => prev
-      .map(i => i.product.id === id ? { ...i, quantity: Math.max(1, i.quantity + delta) } : i)
-      .filter(i => i.quantity > 0)
-    )
+  const updateQty = async (id: string, delta: number) => {
+    const item = cart.find(i => i.product.id === id)
+    if (!item) return
+    const newQty = Math.max(1, item.quantity + delta)
+    const pricing = await getPriceForQuantity(id, newQty)
+    setCart(prev => prev.map(i =>
+      i.product.id === id
+        ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name }
+        : i
+    ))
   }
 
   const updateItemDiscount = (id: string, value: string) => {
@@ -213,12 +243,6 @@ export default function POSPage() {
   const subtotal = cart.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
   const totalDiscount = saleDiscount
   const total = Math.max(0, subtotal - totalDiscount)
-
-  // Función para calcular precio según lista seleccionada
-  const getPriceForList = (costPrice: number): number => {
-    if (!selectedList) return costPrice  // fallback
-    return Math.round(costPrice * (1 + selectedList.margin_pct / 100) * 100) / 100
-  }
 
   // ─── Confirmar venta ───────────────────────────────────
   const handleConfirm = async () => {
@@ -604,6 +628,13 @@ export default function POSPage() {
                   <X size={13} />
                 </button>
               </div>
+
+              {item.applied_list && (
+                <span className="text-xs text-[var(--text3)]">
+                  Lista: <span className="text-[var(--accent)]">{item.applied_list.name}</span>
+                  {' '}(+{item.applied_list.margin_pct}%)
+                </span>
+              )}
 
               {/* Cantidad + precio + descuento */}
               <div className="flex items-center gap-2">

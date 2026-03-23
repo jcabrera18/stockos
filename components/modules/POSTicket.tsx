@@ -1,35 +1,36 @@
 'use client'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
 import { Printer, Plus, X } from 'lucide-react'
 
 interface CartItem {
-  product:    { name: string; unit: string }
-  quantity:   number
+  product: { name: string; unit: string }
+  quantity: number
   unit_price: number
-  discount:   number
+  discount: number
 }
 
 interface TicketSale {
-  id:             string
-  total:          number
-  subtotal:       number
-  discount:       number
+  id: string
+  total: number
+  subtotal: number
+  discount: number
   payment_method: string
-  installments:   number
-  items:          CartItem[]
-  created_at:     string
+  installments: number
+  items: CartItem[]
+  created_at: string
   price_list_name?: string
 }
 
 interface POSTicketProps {
-  sale:       TicketSale
-  onNewSale:  () => void
-  onClose:    () => void
+  sale: TicketSale
+  onNewSale: () => void
+  onClose: () => void
 }
 
 export function POSTicket({ sale, onNewSale, onClose }: POSTicketProps) {
   const printRef = useRef<HTMLDivElement>(null)
+const [invoiceModal, setInvoiceModal] = useState(false)  // ← agregar esta línea
 
   const handlePrint = () => {
     const content = printRef.current
@@ -180,6 +181,12 @@ export function POSTicket({ sale, onNewSale, onClose }: POSTicketProps) {
             Imprimir ticket
           </button>
           <button
+            onClick={() => setInvoiceModal(true)}
+            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-sm font-medium text-[var(--text)] hover:bg-[var(--surface2)] transition-colors"
+          >
+            📄 Emitir factura
+          </button>
+          <button
             onClick={onNewSale}
             className="flex-1 flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--accent)] text-white text-sm font-semibold hover:bg-[var(--accent-hover)] transition-colors active:scale-95"
           >
@@ -187,6 +194,28 @@ export function POSTicket({ sale, onNewSale, onClose }: POSTicketProps) {
             Nueva venta
           </button>
         </div>
+
+        {/* Modal factura */}
+        {invoiceModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: 'rgba(0,0,0,0.6)' }}
+            onClick={() => setInvoiceModal(false)}
+          >
+            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6 max-w-sm w-full">
+              <h3 className="text-base font-semibold text-[var(--text)] mb-4">Emitir factura</h3>
+              <p className="text-sm text-[var(--text3)] mb-4">
+                Integración AFIP en configuración. Próximamente disponible.
+              </p>
+              <button
+                onClick={() => setInvoiceModal(false)}
+                className="w-full py-2 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] text-sm text-[var(--text2)]"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

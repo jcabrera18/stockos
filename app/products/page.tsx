@@ -13,24 +13,28 @@ import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
 import { api } from '@/lib/api'
 import { formatCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
 import type { StockSummary, Product, PaginatedResponse, Pagination as PaginationType } from '@/types'
-import { Plus, Search, Package, Pencil, Trash2, SlidersHorizontal } from 'lucide-react'
+import { Plus, Search, Package, Pencil, Trash2, SlidersHorizontal, Tag } from 'lucide-react'
 import { toast } from 'sonner'
+import { ProductPriceRulesModal } from '@/components/modules/ProductPriceRulesModal'
 
 export default function ProductsPage() {
-  const [data, setData]               = useState<StockSummary[]>([])
-  const [pagination, setPagination]   = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
-  const [search, setSearch]           = useState('')
-  const [page, setPage]               = useState(1)
-  const [loading, setLoading]         = useState(true)
+  const [data, setData] = useState<StockSummary[]>([])
+  const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [loading, setLoading] = useState(true)
 
   // Modales
-  const [productModal, setProductModal]     = useState(false)
-  const [editProduct, setEditProduct]       = useState<Product | null>(null)
-  const [adjustModal, setAdjustModal]       = useState(false)
-  const [adjustProduct, setAdjustProduct]   = useState<Product | null>(null)
-  const [deleteModal, setDeleteModal]       = useState(false)
-  const [deleteProduct, setDeleteProduct]   = useState<StockSummary | null>(null)
-  const [deleting, setDeleting]             = useState(false)
+  const [productModal, setProductModal] = useState(false)
+  const [editProduct, setEditProduct] = useState<Product | null>(null)
+  const [adjustModal, setAdjustModal] = useState(false)
+  const [adjustProduct, setAdjustProduct] = useState<Product | null>(null)
+  const [deleteModal, setDeleteModal] = useState(false)
+  const [deleteProduct, setDeleteProduct] = useState<StockSummary | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const [priceRulesModal, setPriceRulesModal] = useState(false)
+  const [priceRulesProduct, setPriceRulesProduct] = useState<Product | null>(null)
 
   const fetchProducts = useCallback(async () => {
     setLoading(true)
@@ -159,8 +163,8 @@ export default function ProductsPage() {
                       </td>
                       <td className="px-4 py-3 text-center">
                         <Badge variant={
-                          product.stock_status === 'ok'      ? 'success' :
-                          product.stock_status === 'bajo'    ? 'warning' : 'danger'
+                          product.stock_status === 'ok' ? 'success' :
+                            product.stock_status === 'bajo' ? 'warning' : 'danger'
                         }>
                           {getStockStatusLabel(product.stock_status)}
                         </Badge>
@@ -182,6 +186,17 @@ export default function ProductsPage() {
                             className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
                           >
                             <Pencil size={14} />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              const p = await api.get<Product>(`/api/products/${product.id}`)
+                              setPriceRulesProduct(p)
+                              setPriceRulesModal(true)
+                            }}
+                            title="Reglas de precio"
+                            className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
+                          >
+                            <Tag size={14} />
                           </button>
                           {/* Eliminar */}
                           <button
@@ -229,6 +244,12 @@ export default function ProductsPage() {
         confirmLabel="Eliminar"
         loading={deleting}
         danger
+      />
+
+      <ProductPriceRulesModal
+        open={priceRulesModal}
+        onClose={() => { setPriceRulesModal(false); setPriceRulesProduct(null) }}
+        product={priceRulesProduct}
       />
 
     </AppShell>

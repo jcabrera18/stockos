@@ -14,39 +14,40 @@ import { Plus, Tag, Pencil, Trash2, Star, TrendingUp } from 'lucide-react'
 import { toast } from 'sonner'
 
 export interface PriceList {
-  id:          string
+  id: string
   business_id: string
-  name:        string
+  name: string
   description?: string
-  margin_pct:  number
-  is_default:  boolean
-  is_active:   boolean
-  created_at:  string
+  margin_pct: number
+  min_quantity: number
+  is_default: boolean
+  is_active: boolean
+  created_at: string
 }
 
 const PRESET_LISTS = [
-  { name: 'Minorista',  description: 'Precio de venta al público general', margin_pct: 40,  is_default: true },
-  { name: 'Mayorista',  description: 'Precio para compras al por mayor',   margin_pct: 20,  is_default: false },
+  { name: 'Minorista', description: 'Precio de venta al público general', margin_pct: 40, is_default: true },
+  { name: 'Mayorista', description: 'Precio para compras al por mayor', margin_pct: 20, is_default: false },
   { name: 'Especial / VIP', description: 'Precio preferencial para clientes VIP', margin_pct: 30, is_default: false },
 ]
 
-const emptyForm = { name: '', description: '', margin_pct: '', is_default: false }
+const emptyForm = { name: '', description: '', margin_pct: '', min_quantity: '1', is_default: false }
 
 export default function PriceListsPage() {
-  const [lists, setLists]     = useState<PriceList[]>([])
+  const [lists, setLists] = useState<PriceList[]>([])
   const [loading, setLoading] = useState(true)
 
   // Modal crear/editar
-  const [modal, setModal]         = useState(false)
-  const [editList, setEditList]   = useState<PriceList | null>(null)
-  const [form, setForm]           = useState(emptyForm)
-  const [saving, setSaving]       = useState(false)
-  const [errors, setErrors]       = useState<Record<string, string>>({})
+  const [modal, setModal] = useState(false)
+  const [editList, setEditList] = useState<PriceList | null>(null)
+  const [form, setForm] = useState(emptyForm)
+  const [saving, setSaving] = useState(false)
+  const [errors, setErrors] = useState<Record<string, string>>({})
 
   // Modal eliminar
   const [deleteModal, setDeleteModal] = useState(false)
-  const [deleteList, setDeleteList]   = useState<PriceList | null>(null)
-  const [deleting, setDeleting]       = useState(false)
+  const [deleteList, setDeleteList] = useState<PriceList | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   // Modal presets (primera vez sin listas)
   const [presetsModal, setPresetsModal] = useState(false)
@@ -74,10 +75,11 @@ export default function PriceListsPage() {
   const openEdit = (list: PriceList) => {
     setEditList(list)
     setForm({
-      name:        list.name,
+      name: list.name,
       description: list.description ?? '',
-      margin_pct:  String(list.margin_pct),
-      is_default:  list.is_default,
+      margin_pct: String(list.margin_pct),
+      is_default: list.is_default,
+      min_quantity: String(list.min_quantity ?? 1),
     })
     setErrors({})
     setModal(true)
@@ -89,10 +91,11 @@ export default function PriceListsPage() {
     setSaving(true)
     try {
       const payload = {
-        name:        form.name.trim(),
+        name: form.name.trim(),
         description: form.description.trim() || null,
-        margin_pct:  Number(form.margin_pct),
-        is_default:  form.is_default,
+        margin_pct: Number(form.margin_pct),
+        is_default: form.is_default,
+        min_quantity: Number(form.min_quantity) || 1,
       }
       if (editList) {
         await api.patch(`/api/price-lists/${editList.id}`, payload)
@@ -179,11 +182,10 @@ export default function PriceListsPage() {
             {lists.map(list => (
               <div
                 key={list.id}
-                className={`bg-[var(--surface)] border rounded-[var(--radius-lg)] p-4 group transition-all hover:shadow-sm ${
-                  list.is_default
-                    ? 'border-[var(--accent)]'
-                    : 'border-[var(--border)]'
-                }`}
+                className={`bg-[var(--surface)] border rounded-[var(--radius-lg)] p-4 group transition-all hover:shadow-sm ${list.is_default
+                  ? 'border-[var(--accent)]'
+                  : 'border-[var(--border)]'
+                  }`}
               >
                 {/* Header */}
                 <div className="flex items-start justify-between gap-2 mb-3">
@@ -219,6 +221,11 @@ export default function PriceListsPage() {
                   </span>
                   <span className="text-xs text-[var(--text3)] mb-1.5">margen sobre costo</span>
                 </div>
+
+                {/* Debajo del margen grande, antes del ejemplo */}
+                <p className="text-xs text-[var(--text3)] -mt-2 mb-2">
+                  Desde <span className="font-semibold text-[var(--text)]">{list.min_quantity}</span> {list.min_quantity === 1 ? 'unidad' : 'unidades'}
+                </p>
 
                 {/* Ejemplo */}
                 <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] text-xs">
@@ -273,6 +280,15 @@ export default function PriceListsPage() {
               placeholder="Ej: 40 para 40%"
               error={errors.margin_pct}
               hint="Puede ser negativo para hacer descuentos"
+            />
+            <Input
+              label="Cantidad mínima"
+              type="number"
+              min="1"
+              step="1"
+              value={form.min_quantity}
+              onChange={e => setForm(f => ({ ...f, min_quantity: e.target.value }))}
+              hint="Aplica esta lista cuando se venden X o más unidades del mismo producto"
             />
             {/* Preview en tiempo real */}
             {form.margin_pct !== '' && !isNaN(Number(form.margin_pct)) && (
