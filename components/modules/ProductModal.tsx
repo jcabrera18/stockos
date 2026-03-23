@@ -283,13 +283,14 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         </div>
 
         {/* Acciones */}
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>
-            Cancelar
-          </Button>
-          <Button onClick={handleSave} loading={saving}>
-            {isEdit ? 'Guardar cambios' : 'Crear producto'}
-          </Button>
+        {/* Footer sticky dentro del scroll */}
+        <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
+            <Button onClick={handleSave} loading={saving}>
+              {isEdit ? 'Guardar cambios' : 'Crear producto'}
+            </Button>
+          </div>
         </div>
 
       </div>
