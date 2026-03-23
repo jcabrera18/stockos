@@ -123,41 +123,65 @@ export default function CategoriesPage() {
 
   const tree = buildTree(categories)
 
+  function flattenTree(cats: CategoryWithChildren[], depth = 0): { value: string; label: string }[] {
+    return cats.flatMap(cat => [
+      {
+        value: cat.id,
+        label: `${'—'.repeat(depth)} ${cat.name}`.trim(),
+      },
+      ...flattenTree(cat.children, depth + 1),
+    ])
+  }
+
   // Opciones para el select de padre (excluye la categoría que se está editando)
-  const parentOptions = categories
-    .filter(c => c.id !== editCat?.id)
-    .map(c => ({ value: c.id, label: c.name }))
+  const parentOptions = flattenTree(
+    buildTree(categories.filter(c => c.id !== editCat?.id))
+  )
 
   // Contar productos por categoría no disponible sin join extra — mostramos solo el árbol
   const renderCategory = (cat: CategoryWithChildren, depth = 0) => (
     <div key={cat.id}>
       <div
-        className={`flex items-center justify-between px-4 py-3 hover:bg-[var(--surface2)] transition-colors group border-b border-[var(--border)] last:border-0`}
-        style={{ paddingLeft: `${16 + depth * 24}px` }}
+        className="flex items-center justify-between hover:bg-[var(--surface2)] transition-colors group border-b border-[var(--border)] last:border-0"
+        style={{ paddingLeft: `${16 + depth * 20}px`, paddingRight: '16px', paddingTop: '10px', paddingBottom: '10px' }}
       >
         <div className="flex items-center gap-2 min-w-0">
-          {depth > 0 && <ChevronRight size={13} className="text-[var(--text3)] flex-shrink-0" />}
-          <Tag size={14} className={`flex-shrink-0 ${depth === 0 ? 'text-[var(--accent)]' : 'text-[var(--text3)]'}`} />
+          {depth > 0 && (
+            <div className="flex items-center flex-shrink-0" style={{ marginLeft: `-4px` }}>
+              {/* Línea vertical de conexión */}
+              <span className="text-[var(--border)] text-xs select-none">{'└'}</span>
+            </div>
+          )}
+          <Tag
+            size={13}
+            className="flex-shrink-0"
+            style={{ color: depth === 0 ? 'var(--accent)' : `hsl(${200 + depth * 30}, 60%, 55%)` }}
+          />
           <span className={`text-sm truncate ${depth === 0 ? 'font-semibold text-[var(--text)]' : 'text-[var(--text2)]'}`}>
             {cat.name}
           </span>
           {cat.children.length > 0 && (
-            <span className="text-xs text-[var(--text3)] ml-1">({cat.children.length})</span>
+            <span className="text-xs text-[var(--text3)] ml-1 flex-shrink-0">
+              ({cat.children.length})
+            </span>
+          )}
+          {/* Badge de nivel */}
+          {depth > 0 && (
+            <span className="text-xs text-[var(--text3)] bg-[var(--surface2)] px-1.5 py-0.5 rounded flex-shrink-0">
+              nivel {depth + 1}
+            </span>
           )}
         </div>
 
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          {/* Agregar subcategoría */}
-          {depth === 0 && (
-            <button
-              onClick={() => openCreate(cat.id)}
-              title="Agregar subcategoría"
-              className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
-            >
-              <Plus size={13} />
-            </button>
-          )}
-          {/* Editar */}
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+          {/* Agregar subcategoría — disponible en todos los niveles */}
+          <button
+            onClick={() => openCreate(cat.id)}
+            title="Agregar subcategoría"
+            className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
+          >
+            <Plus size={13} />
+          </button>
           <button
             onClick={() => openEdit(cat)}
             title="Editar"
@@ -165,7 +189,6 @@ export default function CategoriesPage() {
           >
             <Pencil size={13} />
           </button>
-          {/* Eliminar */}
           <button
             onClick={() => { setDeleteCat(cat); setDeleteModal(true) }}
             title="Eliminar"
@@ -176,7 +199,7 @@ export default function CategoriesPage() {
         </div>
       </div>
 
-      {/* Subcategorías */}
+      {/* Hijos — recursivo sin límite de profundidad */}
       {cat.children.map(child => renderCategory(child, depth + 1))}
     </div>
   )
