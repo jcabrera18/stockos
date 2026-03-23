@@ -11,15 +11,17 @@ import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel, getPeriodDates } from '@/lib/utils'
 import type { Sale, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import { Plus, ShoppingCart } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+
 
 type Period = 'today' | 'week' | 'month'
 
 export default function SalesPage() {
-  const [data, setData]             = useState<Sale[]>([])
+  const [data, setData] = useState<Sale[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
-  const [period, setPeriod]         = useState<Period>('today')
-  const [page, setPage]             = useState(1)
-  const [loading, setLoading]       = useState(true)
+  const [period, setPeriod] = useState<Period>('today')
+  const [page, setPage] = useState(1)
+  const [loading, setLoading] = useState(true)
 
   const fetchSales = useCallback(async () => {
     setLoading(true)
@@ -42,9 +44,11 @@ export default function SalesPage() {
 
   const periods: { key: Period; label: string }[] = [
     { key: 'today', label: 'Hoy' },
-    { key: 'week',  label: 'Semana' },
+    { key: 'week', label: 'Semana' },
     { key: 'month', label: 'Mes' },
   ]
+
+  const router = useRouter()
 
   return (
     <AppShell>
@@ -52,7 +56,7 @@ export default function SalesPage() {
         title="Ventas"
         description={loading ? '...' : `${pagination.total} ventas · ${formatCurrency(totalRevenue)}`}
         action={
-          <Button onClick={() => { /* TODO: abrir POS */ }}>
+          <Button onClick={() => router.push('/pos')}>
             <Plus size={15} /> Nueva venta
           </Button>
         }
@@ -65,11 +69,10 @@ export default function SalesPage() {
             <button
               key={p.key}
               onClick={() => setPeriod(p.key)}
-              className={`px-4 py-1.5 text-xs rounded-full font-medium transition-colors ${
-                period === p.key
+              className={`px-4 py-1.5 text-xs rounded-full font-medium transition-colors ${period === p.key
                   ? 'bg-[var(--accent)] text-white'
                   : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-              }`}
+                }`}
             >
               {p.label}
             </button>
