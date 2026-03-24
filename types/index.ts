@@ -100,8 +100,9 @@ export interface Sale {
   installments: number
   notes?: string
   created_at: string
-  // joins
   users?: { full_name: string }
+  branches?: { name: string }
+  registers?: { name: string }
   sale_items?: SaleItem[]
 }
 

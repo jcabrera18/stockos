@@ -20,6 +20,15 @@ export function Sidebar() {
   const [cajaAbierta, setCajaAbierta] = useState(false)
   const { workstation } = useWorkstation()
 
+  useEffect(() => {
+    const params = workstation?.register_id
+      ? `?register_id=${workstation.register_id}`
+      : ''
+    api.get(`/api/cash-register/current${params}`)
+      .then((data: unknown) => setCajaAbierta(data !== null))
+      .catch(() => { })
+  }, [workstation])
+
   const ALL_NAV_ITEMS = [
     { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'admin'] },
     { href: '/pos', label: 'POS', icon: Zap, roles: ['owner', 'admin', 'cashier'] },
@@ -37,12 +46,6 @@ export function Sidebar() {
     { href: '/categories', label: 'Categorías', icon: Layers, roles: ['owner', 'admin'] },]
 
   const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
-
-  useEffect(() => {
-    api.get('/api/cash-register/current')
-      .then((data: unknown) => setCajaAbierta(data !== null))
-      .catch(() => { })
-  }, [])
 
   return (
     <aside className="hidden md:flex flex-col w-56 h-screen bg-[var(--surface)] border-r border-[var(--border)] sticky top-0 flex-shrink-0">

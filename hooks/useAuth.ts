@@ -1,9 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { api } from '@/lib/api'
-import { useWorkstation } from '@/hooks/useWorkstation'
-
 
 interface UserProfile {
   id:          string
@@ -16,52 +14,33 @@ interface UserProfile {
 
 export function useAuth() {
   const supabase = createClient()
-  const [user, setUser] = useState<UserProfile | null>(null)
+  const [user, setUser]       = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
-  const { clearWorkstation } = useWorkstation()
 
-
-  useEffect(() => {
-    // Cargar sesión y perfil
-    const loadProfile = async () => {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session) {
-        try {
-          const profile = await api.get<UserProfile>('/api/auth/me')
-          setUser(profile)
-        } catch {
-          setUser(null)
-        }
+  const loadProfile = useCallback(async () => {
+    try {
+      const { data: { user: authUser } } = await supabase.auth.getUser()
+      if (authUser) {
+        const profile = await api.get<UserProfile>('/api/auth/me')
+        setUser(profile)
       } else {
         setUser(null)
       }
+    } catch {
+      setUser(null)
+    } finally {
       setLoading(false)
     }
-
-    loadProfile()
-
-    // Escuchar cambios de sesión
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session) {
-        try {
-          const profile = await api.get<UserProfile>('/api/auth/me')
-          setUser(profile)
-        } catch {
-          setUser(null)
-        }
-      } else {
-        setUser(null)
-      }
-      setLoading(false)
-    })
-
-    return () => subscription.unsubscribe()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    loadProfile()
+  }, [loadProfile])
 
   const signOut = async () => {
     await supabase.auth.signOut()
     setUser(null)
-    window.location.href = '/login'
+    window.location.replace('/login')
   }
 
   return { user, loading, signOut }

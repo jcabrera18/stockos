@@ -1,9 +1,10 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
@@ -11,9 +12,10 @@ import { Pagination } from '@/components/ui/Pagination'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import type { Pagination as PaginationType } from '@/types'
-import { DollarSign, CheckCircle, Clock, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { DollarSign, CheckCircle, Clock, TrendingUp, TrendingDown, Minus, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { useWorkstation } from '@/hooks/useWorkstation'
+import { useAuth } from '@/hooks/useAuth'
 
 interface Branch { id: string; name: string }
 interface Register { id: string; name: string; branch_id: string }
@@ -33,6 +35,7 @@ interface CashRegister {
   system_credito: number
   system_transferencia: number
   system_qr: number
+  system_cuenta_corriente: number
   system_total: number
   difference?: number
   opened_at: string
@@ -43,14 +46,21 @@ interface CashRegister {
   registers?: { name: string }
 }
 
-export default function CashRegisterPage() {
-  const { workstation } = useWorkstation()
+const RESTRICTED_ROLES = ['cashier', 'stocker', 'seller']
 
-  const [current, setCurrent] = useState<CashRegister | null>(null)
+export default function CashRegisterPage() {
+  const { workstation, loaded } = useWorkstation()
+  const { user } = useAuth()
+  const isRestrictedRef = useRef(false)
+
+  const [openRegisters, setOpenRegisters] = useState<CashRegister[]>([])
   const [history, setHistory] = useState<CashRegister[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
+
+  // Target para cerrar (para owner/admin que puede cerrar cualquier caja)
+  const [closeTarget, setCloseTarget] = useState<CashRegister | null>(null)
 
   // Sucursales y cajas para el selector
   const [branches, setBranches] = useState<Branch[]>([])
@@ -70,7 +80,20 @@ export default function CashRegisterPage() {
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // Precargar sucursal y caja del workstation al montar
+  // Refresh
+  const [refreshing, setRefreshing] = useState(false)
+
+  // Caja del cajero actual
+  const current = openRegisters.find(r =>
+    workstation ? r.register_id === workstation.register_id : true
+  ) ?? null
+  const isMyCaja = !isRestrictedRef.current || current?.register_id === workstation?.register_id
+
+  useEffect(() => {
+    isRestrictedRef.current = RESTRICTED_ROLES.includes(user?.role ?? '')
+  }, [user])
+
+  // Precargar sucursal y caja del workstation
   useEffect(() => {
     if (workstation) {
       setOpenBranchId(workstation.branch_id)
@@ -79,35 +102,49 @@ export default function CashRegisterPage() {
   }, [workstation])
 
   const fetchData = useCallback(async () => {
+    if (!loaded) return
     setLoading(true)
     try {
-      const currentParams = workstation?.register_id
-        ? `?register_id=${workstation.register_id}`
-        : ''
-      const cashParams = workstation?.register_id
+      const cashParams = workstation?.register_id && isRestrictedRef.current
         ? { page, limit: 20, register_id: workstation.register_id }
         : { page, limit: 20 }
 
-      const [curr, hist, br, regs] = await Promise.all([
-        api.get<CashRegister | null>(`/api/cash-register/current${currentParams}`),
+      const [hist, br, regs, opens] = await Promise.all([
         api.get<{ data: CashRegister[]; pagination: PaginationType }>('/api/cash-register', cashParams),
         api.get<Branch[]>('/api/branches'),
         api.get<Register[]>('/api/branches/all-registers'),
+        api.get<CashRegister[]>('/api/cash-register/open'),
       ])
-      setCurrent(curr)
+
+      setOpenRegisters(opens)
       setHistory(hist.data)
       setPagination(hist.pagination)
       setBranches(br)
       setRegisters(regs)
-    } catch (err) { console.error(err) }
-    finally { setLoading(false) }
-  }, [page, workstation])
+    } catch (err) {
+      console.error('fetchData error:', err)  // ← ver el error real
+    } finally {
+      setLoading(false)   // ← siempre se ejecuta
+      setRefreshing(false) // ← también acá por si acaso
+    }
+  }, [page, workstation?.register_id, loaded])
+
+  const fetchDataRef = useRef(fetchData)
+  useEffect(() => { fetchDataRef.current = fetchData }, [fetchData])
+
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await fetchDataRef.current()
+    setRefreshing(false)
+  }
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // Cajas disponibles para la sucursal seleccionada
+  // Cajas disponibles para abrir (excluir las ya abiertas)
+  const openRegisterIds = new Set(openRegisters.map(r => r.register_id))
   const availableRegisters = registers.filter(r =>
-    (!openBranchId || r.branch_id === openBranchId)
+    (!openBranchId || r.branch_id === openBranchId) &&
+    !openRegisterIds.has(r.id)
   )
 
   const handleOpen = async () => {
@@ -133,21 +170,30 @@ export default function CashRegisterPage() {
   }
 
   const handleClose = async () => {
-    if (!current) return
+    const target = closeTarget ?? current
+    if (!target) return
     if (closingAmount === '') { toast.error('Ingresá el efectivo en caja'); return }
     setSaving(true)
     try {
-      await api.post(`/api/cash-register/${current.id}/close`, {
+      await api.post(`/api/cash-register/${target.id}/close`, {
         closing_amount: Number(closingAmount),
         notes: notes.trim() || null,
       })
       toast.success('Caja cerrada correctamente')
       setCloseModal(false)
+      setCloseTarget(null)
       setClosingAmount(''); setNotes('')
       fetchData()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al cerrar caja')
     } finally { setSaving(false) }
+  }
+
+  const openCloseModal = (register: CashRegister) => {
+    setCloseTarget(register)
+    setClosingAmount('')
+    setNotes('')
+    setCloseModal(true)
   }
 
   const diffColor = (diff?: number) => {
@@ -162,6 +208,8 @@ export default function CashRegisterPage() {
     return diff > 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />
   }
 
+  const modalTarget = closeTarget ?? current
+
   return (
     <AppShell>
       <PageHeader
@@ -171,68 +219,133 @@ export default function CashRegisterPage() {
           : 'Apertura y cierre de caja'
         }
         action={
-          current ? (
-            <Button variant="danger" onClick={() => { setNotes(''); setClosingAmount(''); setCloseModal(true) }}>
-              Cerrar caja
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={handleRefresh} loading={refreshing}>
+              <RefreshCw size={15} /> Actualizar
             </Button>
-          ) : (
             <Button onClick={() => { setNotes(''); setOpeningAmount(''); setOpenModal(true) }}>
               <DollarSign size={15} /> Abrir caja
             </Button>
-          )
+          </div>
         }
       />
 
       <div className="p-5 space-y-5">
         {loading ? <PageLoader /> : (
           <>
-            {/* Estado actual */}
-            {current ? (
-              <div className="bg-[var(--surface)] border-2 border-[var(--accent)] rounded-[var(--radius-lg)] p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full bg-[var(--accent)] animate-pulse" />
-                    <span className="text-sm font-semibold text-[var(--accent)]">Caja abierta</span>
-                    {(current.branches as { name: string } | undefined)?.name && (
-                      <span className="text-xs text-[var(--text3)]">
-                        · {(current.branches as { name: string }).name}
-                        {(current.registers as { name: string } | undefined)?.name &&
-                          ` · ${(current.registers as { name: string }).name}`
-                        }
+            {/* ── Cajas abiertas ── */}
+            {openRegisters.length > 0 ? (
+              <div>
+                {/* Para owner/admin: cards de todas las cajas abiertas */}
+                {!isRestrictedRef.current && openRegisters.length > 1 ? (
+                  <div>
+                    <h2 className="text-sm font-semibold text-[var(--text)] mb-3 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse" />
+                      Cajas abiertas ahora
+                    </h2>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {openRegisters.map(r => (
+                        <div key={r.id}
+                          className="bg-[var(--surface)] border-2 border-[var(--accent)] rounded-[var(--radius-lg)] p-4 space-y-3">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="text-sm font-semibold text-[var(--text)]">
+                                {(r.registers as { name: string } | undefined)?.name ?? 'Caja'}
+                              </p>
+                              <p className="text-xs text-[var(--text3)]">
+                                {(r.branches as { name: string } | undefined)?.name ?? ''}
+                              </p>
+                            </div>
+                            <Badge variant="success">Abierta</Badge>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            {[
+                              { label: 'Fondo', value: r.opening_amount, accent: false },
+                              { label: 'Efectivo', value: r.system_efectivo, accent: false },
+                              { label: 'Débito', value: r.system_debito, accent: false },
+                              { label: 'Crédito', value: r.system_credito, accent: false },
+                              { label: 'Transferencia', value: r.system_transferencia, accent: false },
+                              { label: 'QR', value: r.system_qr, accent: false },
+                              { label: 'Cta. Cte.', value: (r as CashRegister & { system_cuenta_corriente?: number }).system_cuenta_corriente ?? 0, accent: false },
+                              { label: 'Total', value: r.system_total, accent: false },
+                            ].map(card => (
+                              <div key={card.label}
+                                className={`rounded p-2 ${card.accent ? 'bg-[var(--accent-subtle)]' : 'bg-[var(--surface2)]'}`}>
+                                <p className={`text-[10px] ${card.accent ? 'text-[var(--accent)]' : 'text-[var(--text3)]'}`}>{card.label}</p>
+                                <p className={`mono font-semibold ${card.accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>
+                                  {formatCurrency(card.value)}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="text-xs text-[var(--text3)]">Desde {formatDateTime(r.opened_at)}</p>
+                          <Button variant="danger" onClick={() => openCloseModal(r)} className="w-full">
+                            Cerrar caja
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : current ? (
+                  // Vista cajero o owner con una sola caja
+                  <div className="bg-[var(--surface)] border-2 border-[var(--accent)] rounded-[var(--radius-lg)] p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full bg-[var(--accent)] animate-pulse" />
+                        <span className="text-sm font-semibold text-[var(--accent)]">Caja abierta</span>
+                        {(current.branches as { name: string } | undefined)?.name && (
+                          <span className="text-xs text-[var(--text3)]">
+                            · {(current.branches as { name: string }).name}
+                            {(current.registers as { name: string } | undefined)?.name &&
+                              ` · ${(current.registers as { name: string }).name}`
+                            }
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-[var(--text3)]">Desde {formatDateTime(current.opened_at)}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                      {[
+                        { label: 'Fondo inicial', value: current.opening_amount, accent: false },
+                        { label: 'Efectivo', value: current.system_efectivo, accent: true },
+                        { label: 'Débito', value: current.system_debito, accent: false },
+                        { label: 'Crédito', value: current.system_credito, accent: false },
+                        { label: 'Transferencia', value: current.system_transferencia, accent: false },
+                        { label: 'QR', value: current.system_qr, accent: false },
+                        { label: 'Cuenta Corriente', value: current.system_cuenta_corriente, accent: false },
+                        { label: 'Total vendido', value: current.system_total, accent: false },
+                      ].map(card => (
+                        <div key={card.label}
+                          className={`rounded-[var(--radius-md)] p-3 ${card.accent ? 'bg-[var(--accent-subtle)] border border-[var(--accent)]' : 'bg-[var(--surface2)]'}`}>
+                          <p className={`text-xs mb-1 ${card.accent ? 'text-[var(--accent)]' : 'text-[var(--text3)]'}`}>{card.label}</p>
+                          <p className={`text-lg font-bold mono ${card.accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>
+                            {formatCurrency(card.value)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-3 text-xs text-[var(--text3)]">
+                      Efectivo esperado en caja:{' '}
+                      <span className="font-semibold text-[var(--text)] mono">
+                        {formatCurrency(Number(current.opening_amount) + current.system_efectivo)}
                       </span>
+                      {' '}(fondo + ventas en efectivo)
+                    </div>
+
+                    {isMyCaja && (
+                      <div className="mt-4 flex justify-end">
+                        <Button variant="danger" onClick={() => openCloseModal(current)}>
+                          Cerrar caja
+                        </Button>
+                      </div>
                     )}
                   </div>
-                  <span className="text-xs text-[var(--text3)]">Desde {formatDateTime(current.opened_at)}</span>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                  {[
-                    { label: 'Fondo inicial', value: current.opening_amount, accent: false },
-                    { label: 'Efectivo', value: current.system_efectivo, accent: true },
-                    { label: 'Débito', value: current.system_debito, accent: false },
-                    { label: 'Crédito', value: current.system_credito, accent: false },
-                    { label: 'Transf. / QR', value: current.system_transferencia + current.system_qr, accent: false },
-                    { label: 'Total vendido', value: current.system_total, accent: false },
-                  ].map(card => (
-                    <div key={card.label}
-                      className={`rounded-[var(--radius-md)] p-3 ${card.accent ? 'bg-[var(--accent-subtle)] border border-[var(--accent)]' : 'bg-[var(--surface2)]'}`}>
-                      <p className={`text-xs mb-1 ${card.accent ? 'text-[var(--accent)]' : 'text-[var(--text3)]'}`}>{card.label}</p>
-                      <p className={`text-lg font-bold mono ${card.accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>
-                        {formatCurrency(card.value)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="mt-3 text-xs text-[var(--text3)]">
-                  Efectivo esperado en caja:{' '}
-                  <span className="font-semibold text-[var(--text)] mono">
-                    {formatCurrency(Number(current.opening_amount) + current.system_efectivo)}
-                  </span>
-                  {' '}(fondo + ventas en efectivo)
-                </div>
+                ) : null}
               </div>
             ) : (
+              // Sin cajas abiertas
               <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-5 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-[var(--surface2)] flex items-center justify-center">
@@ -249,7 +362,7 @@ export default function CashRegisterPage() {
               </div>
             )}
 
-            {/* Historial */}
+            {/* ── Historial ── */}
             <div>
               <h2 className="text-sm font-semibold text-[var(--text)] mb-3">Historial de cierres</h2>
               {history.filter(r => r.status === 'closed').length === 0 ? (
@@ -308,52 +421,31 @@ export default function CashRegisterPage() {
             Ingresá el efectivo con el que arrancás el día (fondo de caja).
           </div>
 
-          {/* Sucursal */}
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-[var(--text2)]">Sucursal *</label>
-            <select
-              value={openBranchId}
+            <select value={openBranchId}
               onChange={e => { setOpenBranchId(e.target.value); setOpenRegisterId('') }}
-              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-            >
+              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]">
               <option value="">Seleccionar sucursal...</option>
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
+              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
 
-          {/* Caja */}
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-[var(--text2)]">Caja *</label>
-            <select
-              value={openRegisterId}
+            <select value={openRegisterId}
               onChange={e => setOpenRegisterId(e.target.value)}
               disabled={!openBranchId}
-              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50"
-            >
+              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50">
               <option value="">{openBranchId ? 'Seleccionar caja...' : 'Primero elegí la sucursal'}</option>
-              {availableRegisters.map(r => (
-                <option key={r.id} value={r.id}>{r.name}</option>
-              ))}
+              {availableRegisters.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           </div>
 
-          <Input
-            label="Fondo inicial *"
-            type="number"
-            min="0"
-            step="100"
-            value={openingAmount}
-            onChange={e => setOpeningAmount(e.target.value)}
-            placeholder="Ej: 5000"
-          />
-          <Input
-            label="Notas"
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            placeholder="Observaciones (opcional)"
-          />
+          <Input label="Fondo inicial *" type="number" min="0" step="100"
+            value={openingAmount} onChange={e => setOpeningAmount(e.target.value)} placeholder="Ej: 5000" />
+          <Input label="Notas" value={notes}
+            onChange={e => setNotes(e.target.value)} placeholder="Observaciones (opcional)" />
 
           <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
             <div className="flex justify-end gap-2">
@@ -365,20 +457,32 @@ export default function CashRegisterPage() {
       </Modal>
 
       {/* ── Modal cerrar caja ── */}
-      <Modal open={closeModal} onClose={() => setCloseModal(false)} title="Cerrar caja" size="sm">
-        {current && (
+      <Modal open={closeModal} onClose={() => { setCloseModal(false); setCloseTarget(null) }} title="Cerrar caja" size="sm">
+        {modalTarget && (
           <div className="space-y-4">
+            {/* Info de la caja */}
+            {(modalTarget.branches as { name: string } | undefined)?.name && (
+              <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)]">
+                <p className="text-sm font-semibold text-[var(--text)]">
+                  {(modalTarget.branches as { name: string }).name}
+                </p>
+                <p className="text-xs text-[var(--text3)]">
+                  {(modalTarget.registers as { name: string } | undefined)?.name ?? ''}
+                </p>
+              </div>
+            )}
+
             <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden">
               <div className="px-3 py-2 border-b border-[var(--border)]">
                 <p className="text-xs font-medium text-[var(--text3)]">Ventas registradas en el sistema</p>
               </div>
               <div className="divide-y divide-[var(--border)]">
                 {[
-                  { label: 'Efectivo', value: current.system_efectivo },
-                  { label: 'Débito', value: current.system_debito },
-                  { label: 'Crédito', value: current.system_credito },
-                  { label: 'Transferencia', value: current.system_transferencia },
-                  { label: 'QR', value: current.system_qr },
+                  { label: 'Efectivo', value: modalTarget.system_efectivo },
+                  { label: 'Débito', value: modalTarget.system_debito },
+                  { label: 'Crédito', value: modalTarget.system_credito },
+                  { label: 'Transferencia', value: modalTarget.system_transferencia },
+                  { label: 'QR', value: modalTarget.system_qr },
                 ].map(row => (
                   <div key={row.label} className="flex justify-between px-3 py-2 text-sm">
                     <span className="text-[var(--text2)]">{row.label}</span>
@@ -387,36 +491,28 @@ export default function CashRegisterPage() {
                 ))}
                 <div className="flex justify-between px-3 py-2.5 text-sm font-bold">
                   <span className="text-[var(--text)]">Total</span>
-                  <span className="mono text-[var(--accent)]">{formatCurrency(current.system_total)}</span>
+                  <span className="mono text-[var(--accent)]">{formatCurrency(modalTarget.system_total)}</span>
                 </div>
               </div>
             </div>
 
             <div className="flex justify-between text-sm px-1">
               <span className="text-[var(--text3)]">Fondo inicial</span>
-              <span className="mono text-[var(--text2)]">{formatCurrency(current.opening_amount)}</span>
+              <span className="mono text-[var(--text2)]">{formatCurrency(modalTarget.opening_amount)}</span>
             </div>
             <div className="flex justify-between text-sm px-1">
               <span className="text-[var(--text3)]">Efectivo esperado en caja</span>
               <span className="mono font-semibold text-[var(--text)]">
-                {formatCurrency(Number(current.opening_amount) + current.system_efectivo)}
+                {formatCurrency(Number(modalTarget.opening_amount) + modalTarget.system_efectivo)}
               </span>
             </div>
 
-            <Input
-              label="Efectivo físico en caja *"
-              type="number"
-              min="0"
-              step="100"
-              value={closingAmount}
-              onChange={e => setClosingAmount(e.target.value)}
-              placeholder="Contá los billetes e ingresá el total"
-              autoFocus
-            />
+            <Input label="Efectivo físico en caja *" type="number" min="0" step="100"
+              value={closingAmount} onChange={e => setClosingAmount(e.target.value)}
+              placeholder="Contá los billetes e ingresá el total" autoFocus />
 
-            {/* Preview diferencia */}
             {closingAmount !== '' && !isNaN(Number(closingAmount)) && (() => {
-              const expected = Number(current.opening_amount) + current.system_efectivo
+              const expected = Number(modalTarget.opening_amount) + modalTarget.system_efectivo
               const declared = Number(closingAmount)
               const diff = declared - expected
               const isOk = Math.abs(diff) < 1
@@ -432,16 +528,12 @@ export default function CashRegisterPage() {
               )
             })()}
 
-            <Input
-              label="Notas del cierre"
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-              placeholder="Observaciones, novedades del día..."
-            />
+            <Input label="Notas del cierre" value={notes}
+              onChange={e => setNotes(e.target.value)} placeholder="Observaciones, novedades del día..." />
 
             <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
               <div className="flex justify-end gap-2">
-                <Button variant="secondary" onClick={() => setCloseModal(false)} disabled={saving}>Cancelar</Button>
+                <Button variant="secondary" onClick={() => { setCloseModal(false); setCloseTarget(null) }} disabled={saving}>Cancelar</Button>
                 <Button onClick={handleClose} loading={saving} variant="danger">Cerrar caja</Button>
               </div>
             </div>
@@ -453,7 +545,7 @@ export default function CashRegisterPage() {
       <Modal open={detailModal} onClose={() => { setDetailModal(false); setSelectedRegister(null) }}
         title="Detalle de cierre" size="sm">
         {selectedRegister && (
-          <div className="space-y-4">
+          <div className="space-y-4 pb-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3">
                 <p className="text-xs text-[var(--text3)] mb-0.5">Apertura</p>

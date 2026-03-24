@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -32,29 +32,53 @@ export default function SalesPage() {
   const [customerOptions, setCustomerOptions] = useState<{ id: string; full_name: string }[]>([])
   const [searchingCustomers, setSearchingCustomers] = useState(false)
 
+  // Refs para evitar loops en useCallback
+  const periodRef = useRef(period)
+  const paymentRef = useRef(paymentFilter)
+  const minAmountRef = useRef(minAmount)
+  const maxAmountRef = useRef(maxAmount)
+  const customerRef = useRef(customerFilter)
+  const pageRef = useRef(page)
+
+  useEffect(() => { periodRef.current = period }, [period])
+  useEffect(() => { paymentRef.current = paymentFilter }, [paymentFilter])
+  useEffect(() => { minAmountRef.current = minAmount }, [minAmount])
+  useEffect(() => { maxAmountRef.current = maxAmount }, [maxAmount])
+  useEffect(() => { customerRef.current = customerFilter }, [customerFilter])
+  useEffect(() => { pageRef.current = page }, [page])
+
   const fetchSales = useCallback(async () => {
     setLoading(true)
     try {
-      const { from, to } = getPeriodDates(period)
+      const { from, to } = getPeriodDates(periodRef.current)
       const params: Record<string, string | number | undefined> = {
-        from, to, page, limit: 20,
+        from, to,
+        page: pageRef.current,
+        limit: 20,
       }
-      if (paymentFilter) params.payment_method = paymentFilter
-      if (minAmount) params.min_amount = Number(minAmount)
-      if (maxAmount) params.max_amount = Number(maxAmount)
-      if (customerFilter) params.customer_id = customerFilter.id
+      if (paymentRef.current) params.payment_method = paymentRef.current
+      if (minAmountRef.current) params.min_amount = Number(minAmountRef.current)
+      if (maxAmountRef.current) params.max_amount = Number(maxAmountRef.current)
+      if (customerRef.current) params.customer_id = customerRef.current.id
 
       const res = await api.get<PaginatedResponse<Sale>>('/api/sales', params)
       setData(res.data)
       setPagination(res.pagination)
     } catch (err) { console.error(err) }
     finally { setLoading(false) }
-  }, [period, paymentFilter, minAmount, maxAmount, page])
+  }, [])
 
-  useEffect(() => { fetchSales() }, [fetchSales])
-  useEffect(() => { setPage(1) }, [period])
-  useEffect(() => { setPage(1) }, [period, paymentFilter, minAmount, maxAmount])
+  // Disparar fetch cuando cambian filtros o página
+  useEffect(() => {
+    fetchSales()
+  }, [period, paymentFilter, minAmount, maxAmount, customerFilter, page, fetchSales])
 
+  // Reset página al cambiar filtros
+  useEffect(() => {
+    setPage(1)
+  }, [period, paymentFilter, minAmount, maxAmount, customerFilter])
+
+  // Búsqueda de clientes con debounce
   useEffect(() => {
     if (!customerSearch.trim() || customerSearch.length < 2) { setCustomerOptions([]); return }
     const timer = setTimeout(async () => {
@@ -212,6 +236,7 @@ export default function SalesPage() {
                   <tr className="border-b border-[var(--border)]">
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Fecha</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Vendedor</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Sucursal / Caja</th>
                     <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Método</th>
                     <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Descuento</th>
                     <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Total</th>
@@ -229,6 +254,14 @@ export default function SalesPage() {
                       </td>
                       <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
                         {(sale.users as { full_name: string } | undefined)?.full_name ?? '—'}
+                      </td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        <p className="text-sm text-[var(--text)]">
+                          {(sale.branches as { name: string } | undefined)?.name ?? '—'}
+                        </p>
+                        <p className="text-xs text-[var(--text3)]">
+                          {(sale.registers as { name: string } | undefined)?.name ?? ''}
+                        </p>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <Badge variant="default">{getPaymentMethodLabel(sale.payment_method)}</Badge>

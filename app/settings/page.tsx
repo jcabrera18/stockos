@@ -11,9 +11,10 @@ import { getRoleLabel } from '@/lib/utils'
 import { Sun, Moon, Shield } from 'lucide-react'
 
 export default function SettingsPage() {
-  const { user, role, signOut } = useAuth()
-  const { theme, toggle }       = useTheme()
-  const [name, setName]         = useState('')
+  const { user, signOut } = useAuth()
+  const role = user?.role ?? ''
+  const { theme, toggle } = useTheme()
+  const [name, setName] = useState('')
 
   useEffect(() => {
     if (user?.email) setName(user.email)
