@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Package, Boxes, ShoppingCart, BarChart3, Menu, X, Settings, LogOut, Sun, Moon, Tag, Users, PercentCircle, Warehouse, ClipboardList } from 'lucide-react'
+import { LayoutDashboard, Package, Boxes, Building2, ShoppingCart, BarChart3, CreditCard, Menu, X, Settings, LogOut, Sun, Moon, Tag, Users, PercentCircle, Warehouse, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
 import { useTheme } from '@/hooks/useTheme'
@@ -16,12 +16,14 @@ const NAV_ITEMS = [
 ]
 
 const EXTRA_ITEMS = [
+  { href: '/cash-register', label: 'Caja', icon: CreditCard },
   { href: '/purchases',   label: 'Compras',         icon: ShoppingCart },
   { href: '/customers',   label: 'Cuentas ctes.',   icon: Users },
   { href: '/categories',  label: 'Categorías',      icon: Tag },
   { href: '/price-lists', label: 'Listas de precio', icon: PercentCircle },
   { href: '/warehouses', label: 'Depósitos', icon: Warehouse },
   { href: '/orders', label: 'Pedidos', icon: ClipboardList },
+  { href: '/branches', label: 'Sucursales', icon: Building2 },
   { href: '/settings',    label: 'Configuración',   icon: Settings },
 ]
 

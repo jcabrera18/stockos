@@ -6,10 +6,13 @@ import { formatCurrency } from '@/lib/utils'
 import type { Product } from '@/types'
 import type { CustomerSummary } from '@/app/customers/page'
 import type { PriceList } from '@/app/price-lists/page'
-import { Search, Plus, Minus, Trash2, X, ShoppingCart, Zap, ChevronLeft, Users } from 'lucide-react'
+import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { POSTicket } from '@/components/modules/POSTicket'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
+import { useWorkstation } from '@/hooks/useWorkstation'
+import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 
 interface CartItem {
   product: Product
@@ -40,7 +43,6 @@ const PAYMENT_METHODS = [
   { value: 'cuenta_corriente', label: 'Cta. Cte.', icon: '📒' },
 ]
 
-// Fuera del componente — sin closure stale
 async function getPriceForQuantity(productId: string, quantity: number): Promise<{
   price: number
   list_name: string
@@ -53,7 +55,6 @@ async function getPriceForQuantity(productId: string, quantity: number): Promise
 export default function POSPage() {
   const router = useRouter()
 
-  // Búsqueda
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Product[]>([])
   const [searching, setSearching] = useState(false)
@@ -62,44 +63,44 @@ export default function POSPage() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isAddingRef = useRef(false)
 
-  // Cantidad pendiente — estado para el UI, ref para los callbacks
   const [pendingQty, setPendingQty] = useState(1)
   const pendingQtyRef = useRef(1)
   const qtyRef = useRef<HTMLInputElement>(null)
 
-  // Carrito
   const [cart, setCart] = useState<CartItem[]>([])
   const [saleDiscount, setSaleDiscount] = useState(0)
 
-  // Checkout
   const [step, setStep] = useState<'cart' | 'payment' | 'ticket'>('cart')
   const [paymentMethod, setPaymentMethod] = useState('efectivo')
   const [installments, setInstallments] = useState(1)
   const [processing, setProcessing] = useState(false)
   const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null)
 
-  // Clientes
   const [customerQuery, setCustomerQuery] = useState('')
   const [customerResults, setCustomerResults] = useState<CustomerSummary[]>([])
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSummary | null>(null)
   const [searchingCustomer, setSearchingCustomer] = useState(false)
   const [quickCustomerModal, setQuickCustomerModal] = useState(false)
 
-  // Listas de precio
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
   const [selectedList, setSelectedList] = useState<PriceList | null>(null)
 
-  // Factura
-  const [invoiceModal, setInvoiceModal] = useState(false)
-
-  // Warehouse
   const [warehouses, setWarehouses] = useState<{ id: string; name: string; is_default: boolean }[]>([])
   const [selectedWarehouse, setSelectedWarehouse] = useState<{ id: string; name: string } | null>(null)
 
-  // Focus inicial en cantidad
-  useEffect(() => { searchRef.current?.focus() }, [])
+  const [cajaWarning, setCajaWarning] = useState(false)
+  const [invoiceModal, setInvoiceModal] = useState(false)
 
-  // Cargar listas de precio
+  // Estados
+  const [branches, setBranches] = useState<{ id: string; name: string; registers: { id: string; name: string }[] }[]>([])
+  const [selectingWorkstation, setSelectingWorkstation] = useState(false)
+  const [tempBranchId, setTempBranchId] = useState('')
+  const [tempRegisterId, setTempRegisterId] = useState('')
+
+  const { workstation, setWorkstation, loaded } = useWorkstation()
+
+  useEffect(() => { qtyRef.current?.focus() }, [])
+
   useEffect(() => {
     api.get<PriceList[]>('/api/price-lists').then(lists => {
       setPriceLists(lists)
@@ -107,55 +108,6 @@ export default function POSPage() {
       if (def) setSelectedList(def)
     }).catch(() => { })
   }, [])
-
-  // Búsqueda de productos con debounce
-  useEffect(() => {
-    if (!query.trim()) { setResults([]); return }
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-
-    debounceRef.current = setTimeout(async () => {
-      setSearching(true)
-      try {
-        if (/^\d{8,14}$/.test(query.trim())) {
-          try {
-            const p = await api.get<Product>(`/api/products/barcode/${query.trim()}`)
-            addToCart(p)
-            setQuery('')
-            setResults([])
-            return
-          } catch { }
-        }
-        const res = await api.get<{ data: Product[] }>('/api/products', {
-          search: query.trim(), limit: 8,
-        })
-        setResults(res.data)
-        setActiveResultIndex(res.data.length > 0 ? 0 : -1)
-      } catch {
-        setResults([])
-        setActiveResultIndex(-1)
-      } finally {
-        setSearching(false)
-      }
-    }, 300)
-
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Búsqueda de clientes con debounce
-  useEffect(() => {
-    if (!customerQuery.trim() || customerQuery.length < 2) { setCustomerResults([]); return }
-    const timer = setTimeout(async () => {
-      setSearchingCustomer(true)
-      try {
-        const data = await api.get<CustomerSummary[]>(
-          `/api/customers/search?q=${encodeURIComponent(customerQuery)}`
-        )
-        setCustomerResults(data)
-      } catch { setCustomerResults([]) }
-      finally { setSearchingCustomer(false) }
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [customerQuery])
 
   useEffect(() => {
     api.get<{ id: string; name: string; is_default: boolean }[]>('/api/warehouses')
@@ -165,28 +117,75 @@ export default function POSPage() {
       }).catch(() => { })
   }, [])
 
-  // addToCart — lee qty del ref para evitar closure stale
+  useEffect(() => {
+    const params = workstation?.register_id ? `?register_id=${workstation.register_id}` : ''
+    api.get(`/api/cash-register/current${params}`)
+      .then((data: unknown) => { if (!data) setCajaWarning(true) })
+      .catch(() => { })
+  }, [workstation])
+
+  useEffect(() => {
+    if (!query.trim()) { setResults([]); return }
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(async () => {
+      setSearching(true)
+      try {
+        if (/^\d{8,14}$/.test(query.trim())) {
+          try {
+            const p = await api.get<Product>(`/api/products/barcode/${query.trim()}`)
+            addToCart(p)
+            setQuery(''); setResults([])
+            return
+          } catch { }
+        }
+        const res = await api.get<{ data: Product[] }>('/api/products', { search: query.trim(), limit: 8 })
+        setResults(res.data)
+        setActiveResultIndex(res.data.length > 0 ? 0 : -1)
+      } catch { setResults([]); setActiveResultIndex(-1) }
+      finally { setSearching(false) }
+    }, 300)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!customerQuery.trim() || customerQuery.length < 2) { setCustomerResults([]); return }
+    const timer = setTimeout(async () => {
+      setSearchingCustomer(true)
+      try {
+        const data = await api.get<CustomerSummary[]>(`/api/customers/search?q=${encodeURIComponent(customerQuery)}`)
+        setCustomerResults(data)
+      } catch { setCustomerResults([]) }
+      finally { setSearchingCustomer(false) }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [customerQuery])
+
+  useEffect(() => {
+    api.get<{ id: string; name: string; registers: { id: string; name: string }[] }[]>('/api/branches')
+      .then(setBranches)
+      .catch(() => { })
+  }, [])
+
+  useEffect(() => {
+    if (workstation === null && loaded) {
+      setSelectingWorkstation(true)
+    }
+  }, [workstation, loaded])
+
   const addToCart = useCallback(async (product: Product, qty?: number) => {
     if (isAddingRef.current) return
     isAddingRef.current = true
-
     const quantity = qty ?? pendingQtyRef.current
-
     if (product.stock_current <= 0) {
       toast.error(`${product.name} sin stock`)
       isAddingRef.current = false
       return
     }
-
     try {
       const existing = cart.find(i => i.product.id === product.id)
-
       if (existing) {
         const newQty = existing.quantity + quantity
-        if (newQty > product.stock_current) {
-          toast.error(`Stock máximo disponible: ${product.stock_current}`)
-          return
-        }
+        if (newQty > product.stock_current) { toast.error(`Stock máximo: ${product.stock_current}`); return }
         const pricing = await getPriceForQuantity(product.id, newQty)
         setCart(prev => prev.map(i =>
           i.product.id === product.id
@@ -194,30 +193,14 @@ export default function POSPage() {
             : i
         ))
       } else {
-        if (quantity > product.stock_current) {
-          toast.error(`Stock máximo disponible: ${product.stock_current}`)
-          return
-        }
+        if (quantity > product.stock_current) { toast.error(`Stock máximo: ${product.stock_current}`); return }
         const pricing = await getPriceForQuantity(product.id, quantity)
-        setCart(prev => [...prev, {
-          product,
-          quantity,
-          unit_price: pricing.price,
-          discount: 0,
-          applied_list: pricing.list_name,
-          applied_margin: pricing.margin_pct,
-        }])
+        setCart(prev => [...prev, { product, quantity, unit_price: pricing.price, discount: 0, applied_list: pricing.list_name, applied_margin: pricing.margin_pct }])
       }
-
-      // Resetear cantidad y volver foco a qty input
-      setPendingQty(1)
-      pendingQtyRef.current = 1
-      setResults([])
-      setQuery('')
-      setTimeout(() => searchRef.current?.focus(), 50)
-    } finally {
-      isAddingRef.current = false
-    }
+      setPendingQty(1); pendingQtyRef.current = 1
+      setResults([]); setQuery('')
+      setTimeout(() => qtyRef.current?.focus(), 50)
+    } finally { isAddingRef.current = false }
   }, [cart])
 
   const updateQty = async (id: string, delta: number) => {
@@ -232,14 +215,13 @@ export default function POSPage() {
     ))
   }
 
-  const updateItemDiscount = (id: string, value: string) =>
-    setCart(prev => prev.map(i => i.product.id === id ? { ...i, discount: Math.max(0, Number(value) || 0) } : i))
+  const updateItemDiscount = (id: string, v: string) =>
+    setCart(prev => prev.map(i => i.product.id === id ? { ...i, discount: Math.max(0, Number(v) || 0) } : i))
 
-  const updateItemPrice = (id: string, value: string) =>
-    setCart(prev => prev.map(i => i.product.id === id ? { ...i, unit_price: Math.max(0, Number(value) || 0) } : i))
+  const updateItemPrice = (id: string, v: string) =>
+    setCart(prev => prev.map(i => i.product.id === id ? { ...i, unit_price: Math.max(0, Number(v) || 0) } : i))
 
-  const removeItem = (id: string) =>
-    setCart(prev => prev.filter(i => i.product.id !== id))
+  const removeItem = (id: string) => setCart(prev => prev.filter(i => i.product.id !== id))
 
   const subtotal = cart.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
   const total = Math.max(0, subtotal - saleDiscount)
@@ -249,21 +231,16 @@ export default function POSPage() {
     setProcessing(true)
     try {
       const payload = {
-        items: cart.map(i => ({
-          product_id: i.product.id,
-          quantity: i.quantity,
-          unit_price: i.unit_price,
-          discount: i.discount,
-        })),
+        items: cart.map(i => ({ product_id: i.product.id, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount })),
         discount: saleDiscount,
         payment_method: paymentMethod,
         installments: paymentMethod === 'credito' ? installments : 1,
         price_list_id: selectedList?.id ?? null,
         warehouse_id: selectedWarehouse?.id ?? null,
+        branch_id: workstation?.branch_id ?? null,
+        register_id: workstation?.register_id ?? null,
       }
-
       let sale: CompletedSale
-
       if (paymentMethod === 'cuenta_corriente') {
         if (!selectedCustomer) throw new Error('Seleccioná un cliente para cuenta corriente')
         sale = await api.post<CompletedSale>('/api/sales', { ...payload, payment_method: 'transferencia', installments: 1 })
@@ -273,36 +250,26 @@ export default function POSPage() {
         sale = await api.post<CompletedSale>('/api/sales', payload)
         toast.success('Venta registrada')
       }
-
+      // En handleConfirm, agregar log:
+      console.log('workstation:', workstation)
+      console.log('payload branch_id:', workstation?.branch_id)
+      console.log('payload register_id:', workstation?.register_id)
       setCompletedSale({ ...sale, items: cart })
       setStep('ticket')
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al procesar la venta')
-    } finally {
-      setProcessing(false)
-    }
+    } finally { setProcessing(false) }
   }
 
   const handleNewSale = () => {
-    setCart([])
-    setSaleDiscount(0)
-    setPaymentMethod('efectivo')
-    setInstallments(1)
-    setCompletedSale(null)
-    setSelectedCustomer(null)
-    setCustomerQuery('')
+    setCart([]); setSaleDiscount(0); setPaymentMethod('efectivo'); setInstallments(1)
+    setCompletedSale(null); setSelectedCustomer(null); setCustomerQuery('')
     setStep('cart')
     setTimeout(() => qtyRef.current?.focus(), 100)
   }
 
   if (step === 'ticket' && completedSale) {
-    return (
-      <POSTicket
-        sale={completedSale}
-        onNewSale={handleNewSale}
-        onClose={() => router.push('/sales')}
-      />
-    )
+    return <POSTicket sale={completedSale} onNewSale={handleNewSale} onClose={() => router.push('/sales')} />
   }
 
   return (
@@ -321,7 +288,38 @@ export default function POSPage() {
             <Zap size={13} className="text-white" />
           </div>
           <span className="text-sm font-bold text-[var(--text)]">StockOS POS</span>
+          {workstation && (
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-xs text-[var(--text3)] hidden sm:block">
+                {workstation.branch_name} · {workstation.register_name}
+              </span>
+              <button
+                onClick={() => {
+                  setTempBranchId(workstation.branch_id)
+                  setTempRegisterId(workstation.register_id)
+                  setSelectingWorkstation(true)
+                }}
+                className="text-xs text-[var(--text3)] hover:text-[var(--accent)] underline transition-colors"
+              >
+                Cambiar
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* Banner caja cerrada */}
+        {cajaWarning && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-[var(--danger-subtle)] border-b border-[var(--danger)]">
+            <div className="flex items-center gap-2 text-xs text-[var(--danger)]">
+              <AlertTriangle size={14} className="flex-shrink-0" />
+              <span className="font-medium">La caja no está abierta. Las ventas se registran igual, pero no habrá cierre de caja.</span>
+            </div>
+            <button onClick={() => router.push('/cash-register')}
+              className="text-xs font-semibold text-[var(--danger)] underline flex-shrink-0">
+              Abrir caja →
+            </button>
+          </div>
+        )}
 
         {/* Selector de lista */}
         {priceLists.length > 1 && (
@@ -330,19 +328,8 @@ export default function POSPage() {
               <span className="text-xs text-[var(--text3)] flex-shrink-0">Lista:</span>
               {priceLists.map(list => (
                 <button key={list.id}
-                  onClick={() => {
-                    setSelectedList(list)
-                    setCart(prev => prev.map(item => ({
-                      ...item,
-                      unit_price: Math.round(item.product.cost_price * (1 + list.margin_pct / 100) * 100) / 100,
-                      applied_list: list.name,
-                      applied_margin: list.margin_pct,
-                    })))
-                  }}
-                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedList?.id === list.id
-                    ? 'bg-[var(--accent)] text-white'
-                    : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)]'
-                    }`}>
+                  onClick={() => { setSelectedList(list); setCart(prev => prev.map(item => ({ ...item, unit_price: Math.round(item.product.cost_price * (1 + list.margin_pct / 100) * 100) / 100, applied_list: list.name, applied_margin: list.margin_pct }))) }}
+                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedList?.id === list.id ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)]'}`}>
                   {list.name} (+{list.margin_pct}%)
                 </button>
               ))}
@@ -350,17 +337,14 @@ export default function POSPage() {
           </div>
         )}
 
-        {/* Selector de Warehouse */}
+        {/* Selector de depósito */}
         {warehouses.length > 1 && (
           <div className="px-4 py-2 border-b border-[var(--border)] bg-[var(--surface2)]">
             <div className="flex items-center gap-2 overflow-x-auto">
               <span className="text-xs text-[var(--text3)] flex-shrink-0">Depósito:</span>
               {warehouses.map(w => (
                 <button key={w.id} onClick={() => setSelectedWarehouse(w)}
-                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedWarehouse?.id === w.id
-                      ? 'bg-[var(--accent)] text-white'
-                      : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)]'
-                    }`}>
+                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedWarehouse?.id === w.id ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)]'}`}>
                   {w.name}
                 </button>
               ))}
@@ -371,83 +355,39 @@ export default function POSPage() {
         {/* Cantidad + Buscador */}
         <div className="px-4 py-3 border-b border-[var(--border)]">
           <div className="flex gap-2">
-
-            {/* Input cantidad */}
             <div className="relative flex-shrink-0">
-              <input
-                ref={qtyRef}
-                type="number"
-                min="1"
-                max="999"
-                value={pendingQty}
-                onChange={e => {
-                  const val = Math.max(1, Number(e.target.value) || 1)
-                  setPendingQty(val)
-                  pendingQtyRef.current = val
-                }}
+              <input ref={qtyRef} type="number" min="1" max="999" value={pendingQty}
+                onChange={e => { const val = Math.max(1, Number(e.target.value) || 1); setPendingQty(val); pendingQtyRef.current = val }}
                 onFocus={e => e.target.select()}
                 onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === 'Tab') {
-                    e.preventDefault()
-                    searchRef.current?.focus()
-                    return
-                  }
-                  // Solo dígitos y teclas de control
-                  if (!/^\d$/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-                    e.preventDefault()
-                  }
+                  if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); searchRef.current?.focus(); return }
+                  if (!/^\d$/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault()
                 }}
                 className="w-16 text-center text-sm font-bold mono py-3 rounded-[var(--radius-lg)] bg-[var(--surface2)] border-2 border-[var(--accent)] text-[var(--accent)] focus:outline-none"
               />
-              <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[10px] text-[var(--text3)] bg-[var(--bg)] px-1 whitespace-nowrap">
-                cant.
-              </span>
+              <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[10px] text-[var(--text3)] bg-[var(--bg)] px-1 whitespace-nowrap">cant.</span>
             </div>
-
-            {/* Buscador */}
             <div className="relative flex-1">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
-              {searching && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
-              )}
-              <input
-                ref={searchRef}
-                value={query}
-                onChange={e => {
-                  // SOLO actualizar query — NO tocar pendingQty
-                  setQuery(e.target.value)
-                  setActiveResultIndex(-1)
-                }}
+              {searching && <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />}
+              <input ref={searchRef} value={query}
+                onChange={e => { setQuery(e.target.value); setActiveResultIndex(-1) }}
                 onKeyDown={async e => {
                   if (e.key === 'ArrowDown') { e.preventDefault(); setActiveResultIndex(prev => Math.min(prev + 1, results.length - 1)); return }
                   if (e.key === 'ArrowUp') { e.preventDefault(); setActiveResultIndex(prev => Math.max(prev - 1, -1)); return }
                   if (e.key === 'Enter') {
                     e.preventDefault()
                     if (debounceRef.current) { clearTimeout(debounceRef.current); debounceRef.current = null }
-
-                    if (activeResultIndex >= 0 && results[activeResultIndex]) {
-                      addToCart(results[activeResultIndex], pendingQtyRef.current)
-                      setActiveResultIndex(-1)
-                      return
-                    }
-                    if (results.length === 1) {
-                      addToCart(results[0], pendingQtyRef.current)
-                      setActiveResultIndex(-1)
-                      return
-                    }
+                    if (activeResultIndex >= 0 && results[activeResultIndex]) { addToCart(results[activeResultIndex], pendingQtyRef.current); setActiveResultIndex(-1); return }
+                    if (results.length === 1) { addToCart(results[0], pendingQtyRef.current); setActiveResultIndex(-1); return }
                     if (query.trim()) {
                       setSearching(true)
                       try {
-                        if (/^\d{8,14}$/.test(query.trim())) {
-                          const p = await api.get<Product>(`/api/products/barcode/${query.trim()}`)
-                          addToCart(p, pendingQtyRef.current)
-                          return
-                        }
+                        if (/^\d{8,14}$/.test(query.trim())) { const p = await api.get<Product>(`/api/products/barcode/${query.trim()}`); addToCart(p, pendingQtyRef.current); return }
                         const res = await api.get<{ data: Product[] }>('/api/products', { search: query.trim(), limit: 8 })
                         setResults(res.data)
                         if (res.data.length === 1) addToCart(res.data[0], pendingQtyRef.current)
-                      } catch { setResults([]) }
-                      finally { setSearching(false) }
+                      } catch { setResults([]) } finally { setSearching(false) }
                     }
                   }
                 }}
@@ -466,10 +406,7 @@ export default function POSPage() {
                 <button key={product.id}
                   onClick={() => { addToCart(product, pendingQtyRef.current); setActiveResultIndex(-1) }}
                   disabled={product.stock_current <= 0}
-                  className={`w-full flex items-center justify-between px-4 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group ${index === activeResultIndex
-                    ? 'ring-2 ring-[var(--accent)] border-[var(--accent)]'
-                    : 'border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]'
-                    }`}>
+                  className={`w-full flex items-center justify-between px-4 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group ${index === activeResultIndex ? 'ring-2 ring-[var(--accent)] border-[var(--accent)]' : 'border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]'}`}>
                   <div>
                     <p className="text-sm font-medium text-[var(--text)] group-hover:text-[var(--accent)]">{product.name}</p>
                     <p className="text-xs text-[var(--text3)]">
@@ -501,7 +438,7 @@ export default function POSPage() {
       {/* Panel derecho: carrito */}
       <div className="w-96 flex flex-col bg-[var(--surface)] flex-shrink-0">
 
-        {/* Selector de cliente */}
+        {/* Cliente */}
         <div className="px-3 py-3 border-b border-[var(--border)]">
           {selectedCustomer ? (
             <div className="flex items-center justify-between px-3 py-2 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)]">
@@ -518,12 +455,8 @@ export default function POSPage() {
           ) : (
             <div className="relative">
               <Users size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
-              {searchingCustomer && (
-                <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
-              )}
-              <input
-                value={customerQuery}
-                onChange={e => setCustomerQuery(e.target.value)}
+              {searchingCustomer && <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />}
+              <input value={customerQuery} onChange={e => setCustomerQuery(e.target.value)}
                 placeholder="Cliente (opcional)..."
                 className="w-full pl-7 pr-3 py-2 text-xs rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
               />
@@ -539,9 +472,7 @@ export default function POSPage() {
                             <p className="text-xs font-medium text-[var(--text)]">{c.full_name}</p>
                             {c.document && <p className="text-xs text-[var(--text3)]">{c.document}</p>}
                           </div>
-                          {Number(c.current_balance) > 0 && (
-                            <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>
-                          )}
+                          {Number(c.current_balance) > 0 && <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>}
                         </button>
                       ))}
                       <button onClick={() => setQuickCustomerModal(true)}
@@ -563,9 +494,7 @@ export default function POSPage() {
           )}
         </div>
 
-        <QuickCustomerModal
-          open={quickCustomerModal}
-          onClose={() => setQuickCustomerModal(false)}
+        <QuickCustomerModal open={quickCustomerModal} onClose={() => setQuickCustomerModal(false)}
           onCreated={(customer) => { setSelectedCustomer(customer); setCustomerQuery(''); setCustomerResults([]) }}
           initialName={customerQuery}
         />
@@ -581,9 +510,7 @@ export default function POSPage() {
             )}
           </h2>
           {cart.length > 0 && (
-            <button onClick={() => setCart([])} className="text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">
-              Limpiar
-            </button>
+            <button onClick={() => setCart([])} className="text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">Limpiar</button>
           )}
         </div>
 
@@ -598,9 +525,7 @@ export default function POSPage() {
             <div key={item.product.id} className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3 space-y-2">
               <div className="flex items-start justify-between gap-2">
                 <p className="text-sm font-medium text-[var(--text)] leading-tight">{item.product.name}</p>
-                <button onClick={() => removeItem(item.product.id)} className="text-[var(--text3)] hover:text-[var(--danger)] flex-shrink-0 mt-0.5">
-                  <X size={13} />
-                </button>
+                <button onClick={() => removeItem(item.product.id)} className="text-[var(--text3)] hover:text-[var(--danger)] flex-shrink-0 mt-0.5"><X size={13} /></button>
               </div>
               {item.applied_list && (
                 <span className="text-xs text-[var(--text3)]">
@@ -628,9 +553,7 @@ export default function POSPage() {
                 </div>
               </div>
               <div className="text-right">
-                <span className="text-sm mono font-bold text-[var(--text)]">
-                  {formatCurrency(item.unit_price * item.quantity - item.discount)}
-                </span>
+                <span className="text-sm mono font-bold text-[var(--text)]">{formatCurrency(item.unit_price * item.quantity - item.discount)}</span>
               </div>
             </div>
           ))}
@@ -678,19 +601,14 @@ export default function POSPage() {
             <div className="grid grid-cols-3 gap-2">
               {PAYMENT_METHODS.map(m => (
                 <button key={m.value} onClick={() => setPaymentMethod(m.value)}
-                  className={`flex flex-col items-center gap-1 py-3 rounded-[var(--radius-md)] border text-xs font-medium transition-all ${paymentMethod === m.value
-                    ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'
-                    }`}>
+                  className={`flex flex-col items-center gap-1 py-3 rounded-[var(--radius-md)] border text-xs font-medium transition-all ${paymentMethod === m.value ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]' : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'}`}>
                   <span className="text-lg">{m.icon}</span>
                   {m.label}
                 </button>
               ))}
             </div>
             {paymentMethod === 'cuenta_corriente' && !selectedCustomer && (
-              <p className="text-xs text-[var(--warning)] text-center">
-                Seleccioná un cliente en el panel derecho
-              </p>
+              <p className="text-xs text-[var(--warning)] text-center">Seleccioná un cliente en el panel derecho</p>
             )}
             {paymentMethod === 'credito' && (
               <div className="flex items-center gap-3">
@@ -698,8 +616,7 @@ export default function POSPage() {
                 <div className="flex gap-1">
                   {[1, 3, 6, 12, 18, 24].map(n => (
                     <button key={n} onClick={() => setInstallments(n)}
-                      className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${installments === n ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-                        }`}>
+                      className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${installments === n ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'}`}>
                       {n}x
                     </button>
                   ))}
@@ -709,10 +626,7 @@ export default function POSPage() {
             <button onClick={handleConfirm}
               disabled={processing || (paymentMethod === 'cuenta_corriente' && !selectedCustomer)}
               className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-[var(--radius-md)] transition-colors disabled:opacity-60 active:scale-95 flex items-center justify-center gap-2">
-              {processing
-                ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Procesando...</>
-                : 'Confirmar venta'
-              }
+              {processing ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Procesando...</> : 'Confirmar venta'}
             </button>
           </div>
         )}
@@ -720,19 +634,86 @@ export default function POSPage() {
 
       {/* Modal factura */}
       {invoiceModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: 'rgba(0,0,0,0.6)' }}
-          onClick={() => setInvoiceModal(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setInvoiceModal(false)}>
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6 max-w-sm w-full">
             <h3 className="text-base font-semibold text-[var(--text)] mb-4">Emitir factura</h3>
             <p className="text-sm text-[var(--text3)] mb-4">Integración AFIP en configuración. Próximamente disponible.</p>
-            <button onClick={() => setInvoiceModal(false)}
-              className="w-full py-2 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] text-sm text-[var(--text2)]">
-              Cerrar
-            </button>
+            <button onClick={() => setInvoiceModal(false)} className="w-full py-2 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] text-sm text-[var(--text2)]">Cerrar</button>
           </div>
         </div>
       )}
+
+      {/* Modal selección de puesto — para admin sin workstation */}
+      <Modal
+        open={selectingWorkstation}
+        onClose={() => setSelectingWorkstation(false)}
+        title={workstation ? 'Cambiar caja' : '¿En qué caja vas a trabajar?'}
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-xs text-[var(--text3)]">
+            Seleccioná tu puesto para que las ventas y el cierre de caja queden registrados correctamente.
+          </p>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-[var(--text2)]">Sucursal</label>
+            <select
+              value={tempBranchId}
+              onChange={e => { setTempBranchId(e.target.value); setTempRegisterId('') }}
+              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+            >
+              <option value="">Seleccionar...</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-[var(--text2)]">Caja</label>
+            <select
+              value={tempRegisterId}
+              onChange={e => setTempRegisterId(e.target.value)}
+              disabled={!tempBranchId}
+              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50"
+            >
+              <option value="">{tempBranchId ? 'Seleccionar...' : 'Primero elegí la sucursal'}</option>
+              {branches.find(b => b.id === tempBranchId)?.registers.map(r => (
+                <option key={r.id} value={r.id}>{r.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setSelectingWorkstation(false)}
+                className="text-xs text-[var(--text3)] hover:text-[var(--text)]"
+              >
+                Continuar sin seleccionar
+              </button>
+              <Button
+                onClick={() => {
+                  if (!tempBranchId || !tempRegisterId) { toast.error('Seleccioná sucursal y caja'); return }
+                  const branch = branches.find(b => b.id === tempBranchId)
+                  const register = branch?.registers.find(r => r.id === tempRegisterId)
+                  if (!branch || !register) return
+                  setWorkstation({
+                    branch_id: branch.id,
+                    branch_name: branch.name,
+                    register_id: register.id,
+                    register_name: register.name,
+                  })
+                  setSelectingWorkstation(false)
+                }}
+              >
+                Confirmar
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
     </div>
   )
 }

@@ -16,6 +16,8 @@ import type { StockSummary, Product, Category, PaginatedResponse, Pagination as 
 import { Plus, Search, Package, Pencil, Trash2, SlidersHorizontal, Tag } from 'lucide-react'
 import { toast } from 'sonner'
 import { ProductPriceRulesModal } from '@/components/modules/ProductPriceRulesModal'
+import { BulkPriceModal } from '@/components/modules/BulkPriceModal'
+import { TrendingUp } from 'lucide-react'
 
 export default function ProductsPage() {
   const [data, setData] = useState<StockSummary[]>([])
@@ -37,6 +39,7 @@ export default function ProductsPage() {
   const [priceRulesProduct, setPriceRulesProduct] = useState<Product | null>(null)
 
   const [allCategories, setAllCategories] = useState<Category[]>([])
+  const [bulkPriceModal, setBulkPriceModal] = useState(false)
 
   const fetchProducts = useCallback(async () => {
     setLoading(true)
@@ -117,11 +120,17 @@ export default function ProductsPage() {
         title="Productos"
         description={`${pagination.total} productos`}
         action={
-          <Button onClick={openCreate}>
-            <Plus size={15} /> Nuevo producto
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setBulkPriceModal(true)}>
+              <TrendingUp size={15} /> Actualizar precios
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus size={15} /> Nuevo producto
+            </Button>
+          </div>
         }
       />
+
 
       <div className="p-5 space-y-4">
         {/* Búsqueda */}
@@ -272,6 +281,12 @@ export default function ProductsPage() {
         open={priceRulesModal}
         onClose={() => { setPriceRulesModal(false); setPriceRulesProduct(null) }}
         product={priceRulesProduct}
+      />
+
+      <BulkPriceModal
+        open={bulkPriceModal}
+        onClose={() => setBulkPriceModal(false)}
+        onApplied={fetchProducts}
       />
 
     </AppShell>

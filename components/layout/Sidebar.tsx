@@ -3,24 +3,28 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, Boxes, ShoppingCart,
-  Truck, BarChart3, Settings, Sun, Moon, LogOut, Zap, Tag, Users, PercentCircle, Warehouse, ClipboardList
+  Truck, BarChart3, Settings, Sun, Moon, LogOut, Zap, Tag, Users, PercentCircle, Warehouse, ClipboardList, CreditCard, Building2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
+import { useState, useEffect } from 'react'
+import { api } from '@/lib/api'
 
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/products', label: 'Productos', icon: Package },
   { href: '/stock', label: 'Stock', icon: Boxes },
+  { href: '/cash-register', label: 'Caja', icon: CreditCard },
   { href: '/sales', label: 'Ventas', icon: ShoppingCart },
   { href: '/categories', label: 'Categorías', icon: Tag },
   { href: '/purchases', label: 'Compras', icon: Truck },
   { href: '/finances', label: 'Finanzas', icon: BarChart3 },
   { href: '/customers', label: 'Cuentas', icon: Users },
-  { href: '/price-lists', label: 'Precios',    icon: PercentCircle },
+  { href: '/price-lists', label: 'Precios', icon: PercentCircle },
   { href: '/warehouses', label: 'Depósitos', icon: Warehouse },
   { href: '/orders', label: 'Pedidos', icon: ClipboardList },
+  { href: '/branches', label: 'Sucursales', icon: Building2 },
   { href: '/settings', label: 'Config', icon: Settings },
 ]
 
@@ -28,6 +32,13 @@ export function Sidebar() {
   const pathname = usePathname()
   const { theme, toggle } = useTheme()
   const { signOut } = useAuth()
+  const [cajaAbierta, setCajaAbierta] = useState(false)
+
+  useEffect(() => {
+    api.get('/api/cash-register/current')
+      .then((data: unknown) => setCajaAbierta(data !== null))
+      .catch(() => { })
+  }, [])
 
   return (
     <aside className="hidden md:flex flex-col w-56 h-screen bg-[var(--surface)] border-r border-[var(--border)] sticky top-0 flex-shrink-0">
@@ -44,18 +55,19 @@ export function Sidebar() {
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(href + '/')
           return (
-            <Link
-              key={href}
-              href={href}
+            <Link key={href} href={href}
               className={cn(
                 'flex items-center gap-2.5 px-3 py-2 rounded-[var(--radius-md)] text-sm transition-colors',
-                active
-                  ? 'bg-[var(--accent-subtle)] text-[var(--accent)] font-medium'
-                  : 'text-[var(--text2)] hover:bg-[var(--surface2)] hover:text-[var(--text)]'
-              )}
-            >
+                active ? 'bg-[var(--accent-subtle)] text-[var(--accent)] font-medium' : 'text-[var(--text2)] hover:bg-[var(--surface2)] hover:text-[var(--text)]'
+              )}>
               <Icon size={16} />
-              {label}
+              <span className="flex-1">{label}</span>
+              {href === '/cash-register' && (
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cajaAbierta
+                  ? 'bg-[var(--accent)] animate-pulse'
+                  : 'bg-[var(--danger)]'
+                  }`} />
+              )}
             </Link>
           )
         })}
