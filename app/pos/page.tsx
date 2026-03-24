@@ -250,10 +250,6 @@ export default function POSPage() {
         sale = await api.post<CompletedSale>('/api/sales', payload)
         toast.success('Venta registrada')
       }
-      // En handleConfirm, agregar log:
-      console.log('workstation:', workstation)
-      console.log('payload branch_id:', workstation?.branch_id)
-      console.log('payload register_id:', workstation?.register_id)
       setCompletedSale({ ...sale, items: cart })
       setStep('ticket')
     } catch (err: unknown) {

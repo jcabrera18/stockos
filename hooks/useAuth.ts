@@ -2,18 +2,24 @@
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { api } from '@/lib/api'
+import { useWorkstation } from '@/hooks/useWorkstation'
+
 
 interface UserProfile {
-  id: string
+  id:          string
   business_id: string
-  role: string
-  is_active: boolean
+  role:        string
+  is_active:   boolean
+  email?:      string
+  full_name?:  string
 }
 
 export function useAuth() {
   const supabase = createClient()
   const [user, setUser] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
+  const { clearWorkstation } = useWorkstation()
+
 
   useEffect(() => {
     // Cargar sesión y perfil
@@ -54,7 +60,8 @@ export function useAuth() {
 
   const signOut = async () => {
     await supabase.auth.signOut()
-    window.location.replace('/login')
+    setUser(null)
+    window.location.href = '/login'
   }
 
   return { user, loading, signOut }

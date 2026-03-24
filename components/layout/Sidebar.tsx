@@ -10,6 +10,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
 import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
+import { useWorkstation } from '@/hooks/useWorkstation'
 
 export function Sidebar() {
   const pathname = usePathname()
@@ -17,27 +18,25 @@ export function Sidebar() {
   const { signOut, user } = useAuth()
   const role = (user?.role as string) ?? 'cashier'
   const [cajaAbierta, setCajaAbierta] = useState(false)
-
-  console.log('user:', user)
-console.log('role:', user?.role)
+  const { workstation } = useWorkstation()
 
   const ALL_NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'admin'] },
-  { href: '/pos', label: 'POS', icon: Zap, roles: ['owner', 'admin', 'cashier'] },
-  { href: '/sales', label: 'Ventas', icon: ShoppingCart, roles: ['owner', 'admin', 'cashier'] },
-  { href: '/orders', label: 'Pedidos', icon: ClipboardList, roles: ['owner', 'admin', 'cashier', 'stocker', 'seller'] },
-  { href: '/stock', label: 'Inventario', icon: Boxes, roles: ['owner', 'admin', 'stocker'] },
-  { href: '/products', label: 'Productos', icon: Package, roles: ['owner', 'admin'] },
-  { href: '/purchases', label: 'Compras', icon: Truck, roles: ['owner', 'admin', 'stocker'] },
-  { href: '/customers', label: 'Cuentas ctes.', icon: Users, roles: ['owner', 'admin', 'cashier'] },
-  { href: '/finances', label: 'Finanzas', icon: BarChart3, roles: ['owner', 'admin'] },
-  { href: '/cash-register', label: 'Caja', icon: CreditCard, roles: ['owner', 'admin', 'cashier'] },
-  { href: '/warehouses', label: 'Depósitos', icon: Warehouse, roles: ['owner', 'admin', 'stocker'] },
-  { href: '/branches', label: 'Sucursales', icon: Building2, roles: ['owner', 'admin'] },
-  { href: '/price-lists', label: 'Precios', icon: Tag, roles: ['owner', 'admin'] },
-  { href: '/categories', label: 'Categorías', icon: Layers, roles: ['owner', 'admin'] },]
+    { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'admin'] },
+    { href: '/pos', label: 'POS', icon: Zap, roles: ['owner', 'admin', 'cashier'] },
+    { href: '/sales', label: 'Ventas', icon: ShoppingCart, roles: ['owner', 'admin', 'cashier'] },
+    { href: '/orders', label: 'Pedidos', icon: ClipboardList, roles: ['owner', 'admin', 'cashier', 'stocker', 'seller'] },
+    { href: '/stock', label: 'Inventario', icon: Boxes, roles: ['owner', 'admin', 'stocker'] },
+    { href: '/products', label: 'Productos', icon: Package, roles: ['owner', 'admin'] },
+    { href: '/purchases', label: 'Compras', icon: Truck, roles: ['owner', 'admin', 'stocker'] },
+    { href: '/customers', label: 'Cuentas ctes.', icon: Users, roles: ['owner', 'admin', 'cashier'] },
+    { href: '/finances', label: 'Finanzas', icon: BarChart3, roles: ['owner', 'admin'] },
+    { href: '/cash-register', label: 'Caja', icon: CreditCard, roles: ['owner', 'admin', 'cashier'] },
+    { href: '/warehouses', label: 'Depósitos', icon: Warehouse, roles: ['owner', 'admin', 'stocker'] },
+    { href: '/branches', label: 'Sucursales', icon: Building2, roles: ['owner', 'admin'] },
+    { href: '/price-lists', label: 'Precios', icon: Tag, roles: ['owner', 'admin'] },
+    { href: '/categories', label: 'Categorías', icon: Layers, roles: ['owner', 'admin'] },]
 
-const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
+  const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
 
   useEffect(() => {
     api.get('/api/cash-register/current')
@@ -94,6 +93,12 @@ const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
           <LogOut size={16} />
           Salir
         </button>
+        {workstation && (
+          <div className="px-3 py-2 border-t border-[var(--border)]">
+            <p className="text-xs text-[var(--text3)] truncate">{workstation.branch_name}</p>
+            <p className="text-xs font-medium text-[var(--text)] truncate">{workstation.register_name}</p>
+          </div>
+        )}
       </div>
     </aside>
   )
