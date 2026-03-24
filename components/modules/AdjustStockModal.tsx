@@ -12,6 +12,7 @@ interface AdjustStockModalProps {
   onClose: () => void
   onSaved: () => void
   product: Product | null
+  warehouseId?: string 
 }
 
 export function AdjustStockModal({ open, onClose, onSaved, product }: AdjustStockModalProps) {

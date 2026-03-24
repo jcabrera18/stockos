@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Package, Boxes, ShoppingCart, BarChart3, Menu, X, Settings, LogOut, Sun, Moon, Tag, Users, PercentCircle } from 'lucide-react'
+import { LayoutDashboard, Package, Boxes, ShoppingCart, BarChart3, Menu, X, Settings, LogOut, Sun, Moon, Tag, Users, PercentCircle, Warehouse, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
 import { useTheme } from '@/hooks/useTheme'
@@ -20,6 +20,8 @@ const EXTRA_ITEMS = [
   { href: '/customers',   label: 'Cuentas ctes.',   icon: Users },
   { href: '/categories',  label: 'Categorías',      icon: Tag },
   { href: '/price-lists', label: 'Listas de precio', icon: PercentCircle },
+  { href: '/warehouses', label: 'Depósitos', icon: Warehouse },
+  { href: '/orders', label: 'Pedidos', icon: ClipboardList },
   { href: '/settings',    label: 'Configuración',   icon: Settings },
 ]
 

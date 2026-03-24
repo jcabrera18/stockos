@@ -92,6 +92,10 @@ export default function POSPage() {
   // Factura
   const [invoiceModal, setInvoiceModal] = useState(false)
 
+  // Warehouse
+  const [warehouses, setWarehouses] = useState<{ id: string; name: string; is_default: boolean }[]>([])
+  const [selectedWarehouse, setSelectedWarehouse] = useState<{ id: string; name: string } | null>(null)
+
   // Focus inicial en cantidad
   useEffect(() => { searchRef.current?.focus() }, [])
 
@@ -152,6 +156,14 @@ export default function POSPage() {
     }, 300)
     return () => clearTimeout(timer)
   }, [customerQuery])
+
+  useEffect(() => {
+    api.get<{ id: string; name: string; is_default: boolean }[]>('/api/warehouses')
+      .then(data => {
+        setWarehouses(data)
+        setSelectedWarehouse(data.find(w => w.is_default) ?? data[0] ?? null)
+      }).catch(() => { })
+  }, [])
 
   // addToCart — lee qty del ref para evitar closure stale
   const addToCart = useCallback(async (product: Product, qty?: number) => {
@@ -247,6 +259,7 @@ export default function POSPage() {
         payment_method: paymentMethod,
         installments: paymentMethod === 'credito' ? installments : 1,
         price_list_id: selectedList?.id ?? null,
+        warehouse_id: selectedWarehouse?.id ?? null,
       }
 
       let sale: CompletedSale
@@ -331,6 +344,24 @@ export default function POSPage() {
                     : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)]'
                     }`}>
                   {list.name} (+{list.margin_pct}%)
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Selector de Warehouse */}
+        {warehouses.length > 1 && (
+          <div className="px-4 py-2 border-b border-[var(--border)] bg-[var(--surface2)]">
+            <div className="flex items-center gap-2 overflow-x-auto">
+              <span className="text-xs text-[var(--text3)] flex-shrink-0">Depósito:</span>
+              {warehouses.map(w => (
+                <button key={w.id} onClick={() => setSelectedWarehouse(w)}
+                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedWarehouse?.id === w.id
+                      ? 'bg-[var(--accent)] text-white'
+                      : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)]'
+                    }`}>
+                  {w.name}
                 </button>
               ))}
             </div>
