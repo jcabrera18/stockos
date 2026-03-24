@@ -160,7 +160,11 @@ export default function ProductsPage() {
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
                   {data.map(product => (
-                    <tr key={product.id} className="hover:bg-[var(--surface2)] transition-colors group">
+                    <tr
+                      key={product.id}
+                      onClick={() => handleEdit(product)}
+                      className="hover:bg-[var(--surface2)] transition-colors cursor-pointer group"
+                    >
                       <td className="px-4 py-3">
                         <p className="font-medium text-[var(--text)]">{product.name}</p>
                         {product.barcode && (

@@ -11,33 +11,33 @@ import type { Pagination as PaginationType } from '@/types'
 import { CreditCard, TrendingUp, TrendingDown, SlidersHorizontal } from 'lucide-react'
 
 interface Movement {
-  id:             string
-  type:           'sale' | 'payment' | 'adjustment'
-  amount:         number
-  balance_after:  number
-  description:    string
+  id: string
+  type: 'sale' | 'payment' | 'adjustment'
+  amount: number
+  balance_after: number
+  description: string
   payment_method?: string
-  created_at:     string
-  users?:         { full_name: string }
+  created_at: string
+  users?: { full_name: string }
 }
 
 interface CustomerDetailModalProps {
-  open:      boolean
-  onClose:   () => void
-  customer:  CustomerSummary | null
+  open: boolean
+  onClose: () => void
+  customer: CustomerSummary | null
   onPayment: () => void
 }
 
 const movementConfig = {
-  sale:       { label: 'Venta',   icon: TrendingUp,   color: 'text-[var(--danger)]' },
-  payment:    { label: 'Pago',    icon: TrendingDown, color: 'text-[var(--accent)]' },
+  sale: { label: 'Venta', icon: TrendingUp, color: 'text-[var(--danger)]' },
+  payment: { label: 'Pago', icon: TrendingDown, color: 'text-[var(--accent)]' },
   adjustment: { label: 'Ajuste', icon: SlidersHorizontal, color: 'text-[var(--warning)]' },
 }
 
 export function CustomerDetailModal({ open, onClose, customer, onPayment }: CustomerDetailModalProps) {
   const [movements, setMovements] = useState<Movement[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 30, pages: 0 })
-  const [page, setPage]   = useState(1)
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -58,7 +58,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
 
   return (
     <Modal open={open} onClose={onClose} title={`Cuenta — ${customer.full_name}`} size="lg">
-      <div className="space-y-4">
+      <div className="space-y-4 pb-4">
 
         {/* Header con saldo y datos */}
         <div className="grid grid-cols-3 gap-3">
@@ -80,7 +80,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
                       width: `${Math.min(Number(customer.current_balance) / customer.credit_limit * 100, 100)}%`,
                       background: Number(customer.current_balance) >= customer.credit_limit
                         ? 'var(--danger)' : Number(customer.current_balance) >= customer.credit_limit * 0.8
-                        ? 'var(--warning)' : 'var(--accent)',
+                          ? 'var(--warning)' : 'var(--accent)',
                     }}
                   />
                 </div>
@@ -115,7 +115,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
         )}
 
         {/* Historial de movimientos */}
-        <div>
+        <div className="pb-4">
           <p className="text-xs font-medium text-[var(--text3)] mb-2">Historial de movimientos</p>
           {loading ? (
             <div className="flex justify-center py-8">

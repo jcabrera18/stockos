@@ -8,15 +8,15 @@ import { toast } from 'sonner'
 import type { Product } from '@/types'
 
 interface AdjustStockModalProps {
-  open:    boolean
+  open: boolean
   onClose: () => void
   onSaved: () => void
   product: Product | null
 }
 
 export function AdjustStockModal({ open, onClose, onSaved, product }: AdjustStockModalProps) {
-  const [type, setType]     = useState<'add' | 'remove'>('add')
-  const [quantity, setQty]  = useState('')
+  const [type, setType] = useState<'add' | 'remove'>('add')
+  const [quantity, setQty] = useState('')
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -38,7 +38,7 @@ export function AdjustStockModal({ open, onClose, onSaved, product }: AdjustStoc
       const delta = type === 'add' ? Number(quantity) : -Number(quantity)
       await api.post(`/api/products/${product.id}/adjust-stock`, {
         quantity: delta,
-        reason:   reason.trim(),
+        reason: reason.trim(),
       })
       toast.success(`Stock ${type === 'add' ? 'agregado' : 'descontado'} correctamente`)
       reset()
@@ -74,21 +74,19 @@ export function AdjustStockModal({ open, onClose, onSaved, product }: AdjustStoc
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => setType('add')}
-              className={`py-2 text-sm rounded-[var(--radius-md)] font-medium transition-colors border ${
-                type === 'add'
+              className={`py-2 text-sm rounded-[var(--radius-md)] font-medium transition-colors border ${type === 'add'
                   ? 'bg-[var(--accent-subtle)] border-[var(--accent)] text-[var(--accent)]'
                   : 'bg-[var(--surface2)] border-[var(--border)] text-[var(--text2)]'
-              }`}
+                }`}
             >
               + Entrada
             </button>
             <button
               onClick={() => setType('remove')}
-              className={`py-2 text-sm rounded-[var(--radius-md)] font-medium transition-colors border ${
-                type === 'remove'
+              className={`py-2 text-sm rounded-[var(--radius-md)] font-medium transition-colors border ${type === 'remove'
                   ? 'bg-[var(--danger-subtle)] border-[var(--danger)] text-[var(--danger)]'
                   : 'bg-[var(--surface2)] border-[var(--border)] text-[var(--text2)]'
-              }`}
+                }`}
             >
               − Salida
             </button>
@@ -121,18 +119,20 @@ export function AdjustStockModal({ open, onClose, onSaved, product }: AdjustStoc
             placeholder="Ej: Recepción de mercadería, merma, etc."
           />
 
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="secondary" onClick={() => { reset(); onClose() }} disabled={saving}>
-              Cancelar
-            </Button>
-            <Button
-              variant={type === 'remove' ? 'danger' : 'primary'}
-              onClick={handleSave}
-              loading={saving}
-              disabled={newStock < 0}
-            >
-              Confirmar ajuste
-            </Button>
+          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => { reset(); onClose() }} disabled={saving}>
+                Cancelar
+              </Button>
+              <Button
+                variant={type === 'remove' ? 'danger' : 'primary'}
+                onClick={handleSave}
+                loading={saving}
+                disabled={newStock < 0}
+              >
+                Confirmar ajuste
+              </Button>
+            </div>
           </div>
 
         </div>

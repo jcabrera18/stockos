@@ -305,9 +305,11 @@ export default function FinancesPage() {
             value={form.description}
             onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
           />
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" onClick={() => setAddModal(false)}>Cancelar</Button>
-            <Button onClick={handleAddExpense} loading={saving}>Guardar</Button>
+          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setAddModal(false)}>Cancelar</Button>
+              <Button onClick={handleAddExpense} loading={saving}>Guardar</Button>
+            </div>
           </div>
         </div>
       </Modal>

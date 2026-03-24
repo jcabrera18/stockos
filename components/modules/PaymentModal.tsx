@@ -10,27 +10,27 @@ import { toast } from 'sonner'
 import type { CustomerSummary } from '@/app/customers/page'
 
 interface PaymentModalProps {
-  open:     boolean
-  onClose:  () => void
-  onSaved:  () => void
+  open: boolean
+  onClose: () => void
+  onSaved: () => void
   customer: CustomerSummary | null
 }
 
 const PAYMENT_OPTIONS = [
-  { value: 'efectivo',      label: 'Efectivo' },
+  { value: 'efectivo', label: 'Efectivo' },
   { value: 'transferencia', label: 'Transferencia' },
-  { value: 'debito',        label: 'Débito' },
-  { value: 'credito',       label: 'Crédito' },
-  { value: 'qr',            label: 'QR' },
-  { value: 'cheque',        label: 'Cheque' },
+  { value: 'debito', label: 'Débito' },
+  { value: 'credito', label: 'Crédito' },
+  { value: 'qr', label: 'QR' },
+  { value: 'cheque', label: 'Cheque' },
 ]
 
 export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalProps) {
-  const [amount, setAmount]         = useState('')
-  const [method, setMethod]         = useState('efectivo')
-  const [description, setDesc]      = useState('Pago de cuenta corriente')
-  const [saving, setSaving]         = useState(false)
-  const [payAll, setPayAll]         = useState(false)
+  const [amount, setAmount] = useState('')
+  const [method, setMethod] = useState('efectivo')
+  const [description, setDesc] = useState('Pago de cuenta corriente')
+  const [saving, setSaving] = useState(false)
+  const [payAll, setPayAll] = useState(false)
 
   useEffect(() => {
     if (open) {
@@ -55,9 +55,9 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
     setSaving(true)
     try {
       await api.post(`/api/customers/${customer.id}/payment`, {
-        amount:         amountNum,
+        amount: amountNum,
         payment_method: method,
-        description:    description.trim() || 'Pago de cuenta corriente',
+        description: description.trim() || 'Pago de cuenta corriente',
       })
       toast.success(`Pago de ${formatCurrency(amountNum)} registrado`)
       onSaved()
@@ -69,7 +69,7 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
 
   if (!customer) return null
 
-  const amountNum    = Number(amount) || 0
+  const amountNum = Number(amount) || 0
   const balanceAfter = Math.max(0, Number(customer.current_balance) - amountNum)
 
   return (
@@ -141,9 +141,11 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
           </div>
         )}
 
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
-          <Button onClick={handleSave} loading={saving}>Confirmar pago</Button>
+        <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
+            <Button onClick={handleSave} loading={saving}>Confirmar pago</Button>
+          </div>
         </div>
       </div>
     </Modal>

@@ -10,22 +10,26 @@ import { api } from '@/lib/api'
 import { getStockStatusLabel, getStockStatusColor, formatCurrency } from '@/lib/utils'
 import type { StockSummary, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import { Boxes, Search, AlertTriangle } from 'lucide-react'
+import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
+import type { Product } from '@/types'
 
 type StockFilter = 'all' | 'ok' | 'bajo' | 'critico' | 'sin_stock'
 
 export default function StockPage() {
-  const [data, setData]         = useState<StockSummary[]>([])
+  const [data, setData] = useState<StockSummary[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 50, pages: 0 })
-  const [search, setSearch]     = useState('')
-  const [filter, setFilter]     = useState<StockFilter>('all')
-  const [page, setPage]         = useState(1)
-  const [loading, setLoading]   = useState(true)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<StockFilter>('all')
+  const [page, setPage] = useState(1)
+  const [loading, setLoading] = useState(true)
+  const [adjustModal, setAdjustModal] = useState(false)
+  const [adjustProduct, setAdjustProduct] = useState<Product | null>(null)
 
   const fetchStock = useCallback(async () => {
     setLoading(true)
     try {
       const res = await api.get<PaginatedResponse<StockSummary>>('/api/stock', {
-        search:       search || undefined,
+        search: search || undefined,
         stock_status: filter !== 'all' ? filter : undefined,
         page,
         limit: 50,
@@ -43,11 +47,11 @@ export default function StockPage() {
   useEffect(() => { setPage(1) }, [search, filter])
 
   const filters: { key: StockFilter; label: string }[] = [
-    { key: 'all',      label: 'Todos' },
-    { key: 'critico',  label: 'Crítico' },
-    { key: 'sin_stock',label: 'Sin stock' },
-    { key: 'bajo',     label: 'Bajo' },
-    { key: 'ok',       label: 'OK' },
+    { key: 'all', label: 'Todos' },
+    { key: 'critico', label: 'Crítico' },
+    { key: 'sin_stock', label: 'Sin stock' },
+    { key: 'bajo', label: 'Bajo' },
+    { key: 'ok', label: 'OK' },
   ]
 
   return (
@@ -64,11 +68,10 @@ export default function StockPage() {
             <button
               key={f.key}
               onClick={() => setFilter(f.key)}
-              className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${
-                filter === f.key
-                  ? 'bg-[var(--accent)] text-white'
-                  : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-              }`}
+              className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${filter === f.key
+                ? 'bg-[var(--accent)] text-white'
+                : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                }`}
             >
               {f.label}
             </button>
@@ -102,7 +105,14 @@ export default function StockPage() {
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
                   {data.map(item => (
-                    <tr key={item.id} className="hover:bg-[var(--surface2)] transition-colors">
+                    <tr
+                      key={item.id}
+                      onClick={() => {
+                        setAdjustProduct(item as unknown as Product)
+                        setAdjustModal(true)
+                      }}
+                      className="hover:bg-[var(--surface2)] transition-colors cursor-pointer"
+                    >
                       <td className="px-4 py-3">
                         <p className="font-medium text-[var(--text)]">{item.name}</p>
                         <p className="text-xs text-[var(--text3)]">{item.category_name ?? '—'}</p>
@@ -119,9 +129,9 @@ export default function StockPage() {
                       </td>
                       <td className="px-4 py-3 text-center">
                         <Badge variant={
-                          item.stock_status === 'ok'       ? 'success' :
-                          item.stock_status === 'bajo'     ? 'warning' :
-                          'danger'
+                          item.stock_status === 'ok' ? 'success' :
+                            item.stock_status === 'bajo' ? 'warning' :
+                              'danger'
                         }>
                           {getStockStatusLabel(item.stock_status)}
                         </Badge>
@@ -134,6 +144,14 @@ export default function StockPage() {
             <Pagination pagination={pagination} onPageChange={setPage} />
           </div>
         )}
+
+        <AdjustStockModal
+          open={adjustModal}
+          onClose={() => { setAdjustModal(false); setAdjustProduct(null) }}
+          onSaved={fetchStock}
+          product={adjustProduct}
+        />
+
       </div>
     </AppShell>
   )

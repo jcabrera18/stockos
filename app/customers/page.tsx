@@ -18,59 +18,59 @@ import { Plus, Users, Search, CreditCard, Eye, Pencil, Trash2, AlertTriangle } f
 import { toast } from 'sonner'
 
 export interface CustomerSummary {
-  id:               string
-  business_id:      string
-  full_name:        string
-  document?:        string
-  phone?:           string
-  email?:           string
-  credit_limit:     number
-  current_balance:  number
+  id: string
+  business_id: string
+  full_name: string
+  document?: string
+  phone?: string
+  email?: string
+  credit_limit: number
+  current_balance: number
   available_credit: number | null
-  credit_status:    'ok' | 'limite_proximo' | 'limite_alcanzado' | 'sin_limite'
-  is_active:        boolean
-  notes?:           string
-  created_at:       string
+  credit_status: 'ok' | 'limite_proximo' | 'limite_alcanzado' | 'sin_limite'
+  is_active: boolean
+  notes?: string
+  created_at: string
 }
 
 const creditStatusConfig = {
-  ok:               { label: 'OK',              variant: 'success' as const },
-  sin_limite:       { label: 'Sin límite',      variant: 'default' as const },
-  limite_proximo:   { label: 'Límite próximo',  variant: 'warning' as const },
-  limite_alcanzado: { label: 'Límite alcanzado',variant: 'danger'  as const },
+  ok: { label: 'OK', variant: 'success' as const },
+  sin_limite: { label: 'Sin límite', variant: 'default' as const },
+  limite_proximo: { label: 'Límite próximo', variant: 'warning' as const },
+  limite_alcanzado: { label: 'Límite alcanzado', variant: 'danger' as const },
 }
 
 type FilterTab = 'all' | 'with_balance' | 'limite_proximo' | 'limite_alcanzado'
 
 export default function CustomersPage() {
-  const [data, setData]             = useState<CustomerSummary[]>([])
+  const [data, setData] = useState<CustomerSummary[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
-  const [search, setSearch]         = useState('')
-  const [filter, setFilter]         = useState<FilterTab>('all')
-  const [page, setPage]             = useState(1)
-  const [loading, setLoading]       = useState(true)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<FilterTab>('all')
+  const [page, setPage] = useState(1)
+  const [loading, setLoading] = useState(true)
 
   // Modales
-  const [customerModal, setCustomerModal]   = useState(false)
-  const [editCustomer, setEditCustomer]     = useState<CustomerSummary | null>(null)
-  const [paymentModal, setPaymentModal]     = useState(false)
+  const [customerModal, setCustomerModal] = useState(false)
+  const [editCustomer, setEditCustomer] = useState<CustomerSummary | null>(null)
+  const [paymentModal, setPaymentModal] = useState(false)
   const [paymentCustomer, setPaymentCustomer] = useState<CustomerSummary | null>(null)
-  const [detailModal, setDetailModal]       = useState(false)
+  const [detailModal, setDetailModal] = useState(false)
   const [detailCustomer, setDetailCustomer] = useState<CustomerSummary | null>(null)
-  const [deleteModal, setDeleteModal]       = useState(false)
+  const [deleteModal, setDeleteModal] = useState(false)
   const [deleteCustomer, setDeleteCustomer] = useState<CustomerSummary | null>(null)
-  const [deleting, setDeleting]             = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
     try {
       const params: Record<string, string | number | boolean | undefined> = {
-        search:        search || undefined,
+        search: search || undefined,
         page,
         limit: 20,
       }
-      if (filter === 'with_balance')    params.with_balance  = true
-      if (filter === 'limite_proximo')  params.credit_status = 'limite_proximo'
+      if (filter === 'with_balance') params.with_balance = true
+      if (filter === 'limite_proximo') params.credit_status = 'limite_proximo'
       if (filter === 'limite_alcanzado') params.credit_status = 'limite_alcanzado'
 
       const res = await api.get<PaginatedResponse<CustomerSummary>>('/api/customers', params)
@@ -101,9 +101,9 @@ export default function CustomersPage() {
   const totalDebt = data.reduce((a, c) => a + Number(c.current_balance), 0)
 
   const tabs: { key: FilterTab; label: string }[] = [
-    { key: 'all',              label: 'Todos' },
-    { key: 'with_balance',     label: 'Con saldo' },
-    { key: 'limite_proximo',   label: 'Límite próximo' },
+    { key: 'all', label: 'Todos' },
+    { key: 'with_balance', label: 'Con saldo' },
+    { key: 'limite_proximo', label: 'Límite próximo' },
     { key: 'limite_alcanzado', label: 'Límite alcanzado' },
   ]
 
@@ -124,11 +124,10 @@ export default function CustomersPage() {
         <div className="flex flex-wrap items-center gap-2">
           {tabs.map(t => (
             <button key={t.key} onClick={() => setFilter(t.key)}
-              className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${
-                filter === t.key
-                  ? 'bg-[var(--accent)] text-white'
-                  : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-              }`}>
+              className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${filter === t.key
+                ? 'bg-[var(--accent)] text-white'
+                : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                }`}>
               {t.label}
             </button>
           ))}
@@ -168,7 +167,11 @@ export default function CustomersPage() {
                 {data.map(customer => {
                   const sc = creditStatusConfig[customer.credit_status]
                   return (
-                    <tr key={customer.id} className="hover:bg-[var(--surface2)] transition-colors group">
+                    <tr
+                      key={customer.id}
+                      onClick={() => { setDetailCustomer(customer); setDetailModal(true) }}
+                      className="hover:bg-[var(--surface2)] transition-colors cursor-pointer group"
+                    >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {customer.credit_status === 'limite_alcanzado' && (
@@ -243,7 +246,17 @@ export default function CustomersPage() {
       <PaymentModal
         open={paymentModal}
         onClose={() => { setPaymentModal(false); setPaymentCustomer(null) }}
-        onSaved={fetchCustomers}
+        onSaved={() => {
+          fetchCustomers()
+          // Si venía del detalle, reabrir con datos frescos
+          if (detailCustomer) {
+            api.get<CustomerSummary>(`/api/customers/${detailCustomer.id}`)
+              .then(updated => {
+                setDetailCustomer(updated)
+                setDetailModal(true)
+              }).catch(() => { })
+          }
+        }}
         customer={paymentCustomer}
       />
 
@@ -251,7 +264,11 @@ export default function CustomersPage() {
         open={detailModal}
         onClose={() => { setDetailModal(false); setDetailCustomer(null) }}
         customer={detailCustomer}
-        onPayment={() => { setPaymentCustomer(detailCustomer); setPaymentModal(true) }}
+        onPayment={() => {
+          setDetailModal(false)
+          setPaymentCustomer(detailCustomer)
+          setPaymentModal(true)
+        }}
       />
 
       <ConfirmDialog

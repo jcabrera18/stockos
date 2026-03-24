@@ -134,7 +134,7 @@ export default function DashboardPage() {
       <div className="p-5 space-y-5">
 
         {/* ── Fila 1: Stats principales ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <StatCard
             title="Ventas hoy"
             value={formatCurrency(stats?.today_revenue ?? 0)}
