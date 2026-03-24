@@ -243,8 +243,14 @@ export default function POSPage() {
       let sale: CompletedSale
       if (paymentMethod === 'cuenta_corriente') {
         if (!selectedCustomer) throw new Error('Seleccioná un cliente para cuenta corriente')
-        sale = await api.post<CompletedSale>('/api/sales', { ...payload, payment_method: 'transferencia', installments: 1 })
-        await api.post(`/api/customers/${selectedCustomer.id}/charge`, { sale_id: sale.id, amount: total })
+        sale = await api.post<CompletedSale>('/api/sales', {
+          ...payload,
+          payment_method: 'cuenta_corriente',
+          installments: 1,
+        })
+        await api.post(`/api/customers/${selectedCustomer.id}/charge`, {
+          sale_id: sale.id, amount: total,
+        })
         toast.success('Venta registrada y cargada a cuenta corriente')
       } else {
         sale = await api.post<CompletedSale>('/api/sales', payload)
@@ -604,7 +610,7 @@ export default function POSPage() {
               ))}
             </div>
             {paymentMethod === 'cuenta_corriente' && !selectedCustomer && (
-              <p className="text-xs text-[var(--warning)] text-center">Seleccioná un cliente en el panel derecho</p>
+              <p className="text-xs text-[var(--warning)] text-center">Seleccioná un cliente en el buscador de arriba</p>
             )}
             {paymentMethod === 'credito' && (
               <div className="flex items-center gap-3">
