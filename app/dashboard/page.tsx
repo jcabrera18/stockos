@@ -108,7 +108,7 @@ export default function DashboardPage() {
   const peakHour = salesByHour.reduce((max, h) => h.total_revenue > (max?.total_revenue ?? 0) ? h : max, salesByHour[0])
 
   // Datos del gráfico de 30 días formateados
-  const last30Formatted = salesLast30.map(d => ({
+  const last30Formatted = [...salesLast30].map(d => ({
     ...d,
     label: new Date(d.sale_date).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }),
   }))
@@ -252,7 +252,7 @@ export default function DashboardPage() {
             <p className="text-sm text-[var(--text3)] text-center py-8">Sin datos aún</p>
           ) : (
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={last30Formatted} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+              <LineChart data={[...last30Formatted]} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--text3)' }} interval="preserveStartEnd" />
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text3)' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} width={45} />
@@ -280,7 +280,7 @@ export default function DashboardPage() {
               <p className="text-sm text-[var(--text3)] text-center py-8">Sin datos esta semana</p>
             ) : (
               <ResponsiveContainer width="100%" height={180}>
-                <BarChart data={salesByHour} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                <BarChart data={[...salesByHour]} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                   <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--text3)' }} interval={2} />
                   <YAxis tick={{ fontSize: 9, fill: 'var(--text3)' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} width={35} />
@@ -316,7 +316,7 @@ export default function DashboardPage() {
                 <ResponsiveContainer width="50%" height={160}>
                   <PieChart>
                     <Pie
-                      data={paymentMethods}
+                      data={[...paymentMethods]}
                       dataKey="total"
                       nameKey="method"
                       cx="50%"
