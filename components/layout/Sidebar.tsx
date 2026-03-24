@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, Boxes, ShoppingCart,
-  Truck, BarChart3, Settings, Sun, Moon, LogOut, Zap, Tag, Users, PercentCircle, Warehouse, ClipboardList, CreditCard, Building2
+  Truck, BarChart3, Settings, Sun, Moon, LogOut, Zap, Layers, Tag, Users, PercentCircle, Warehouse, ClipboardList, CreditCard, Building2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
@@ -11,28 +11,33 @@ import { useAuth } from '@/hooks/useAuth'
 import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 
-const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/products', label: 'Productos', icon: Package },
-  { href: '/stock', label: 'Stock', icon: Boxes },
-  { href: '/cash-register', label: 'Caja', icon: CreditCard },
-  { href: '/sales', label: 'Ventas', icon: ShoppingCart },
-  { href: '/categories', label: 'Categorías', icon: Tag },
-  { href: '/purchases', label: 'Compras', icon: Truck },
-  { href: '/finances', label: 'Finanzas', icon: BarChart3 },
-  { href: '/customers', label: 'Cuentas', icon: Users },
-  { href: '/price-lists', label: 'Precios', icon: PercentCircle },
-  { href: '/warehouses', label: 'Depósitos', icon: Warehouse },
-  { href: '/orders', label: 'Pedidos', icon: ClipboardList },
-  { href: '/branches', label: 'Sucursales', icon: Building2 },
-  { href: '/settings', label: 'Config', icon: Settings },
-]
-
 export function Sidebar() {
   const pathname = usePathname()
   const { theme, toggle } = useTheme()
-  const { signOut } = useAuth()
+  const { signOut, user } = useAuth()
+  const role = (user?.role as string) ?? 'cashier'
   const [cajaAbierta, setCajaAbierta] = useState(false)
+
+  console.log('user:', user)
+console.log('role:', user?.role)
+
+  const ALL_NAV_ITEMS = [
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['owner', 'admin'] },
+  { href: '/pos', label: 'POS', icon: Zap, roles: ['owner', 'admin', 'cashier'] },
+  { href: '/sales', label: 'Ventas', icon: ShoppingCart, roles: ['owner', 'admin', 'cashier'] },
+  { href: '/orders', label: 'Pedidos', icon: ClipboardList, roles: ['owner', 'admin', 'cashier', 'stocker', 'seller'] },
+  { href: '/stock', label: 'Inventario', icon: Boxes, roles: ['owner', 'admin', 'stocker'] },
+  { href: '/products', label: 'Productos', icon: Package, roles: ['owner', 'admin'] },
+  { href: '/purchases', label: 'Compras', icon: Truck, roles: ['owner', 'admin', 'stocker'] },
+  { href: '/customers', label: 'Cuentas ctes.', icon: Users, roles: ['owner', 'admin', 'cashier'] },
+  { href: '/finances', label: 'Finanzas', icon: BarChart3, roles: ['owner', 'admin'] },
+  { href: '/cash-register', label: 'Caja', icon: CreditCard, roles: ['owner', 'admin', 'cashier'] },
+  { href: '/warehouses', label: 'Depósitos', icon: Warehouse, roles: ['owner', 'admin', 'stocker'] },
+  { href: '/branches', label: 'Sucursales', icon: Building2, roles: ['owner', 'admin'] },
+  { href: '/price-lists', label: 'Precios', icon: Tag, roles: ['owner', 'admin'] },
+  { href: '/categories', label: 'Categorías', icon: Layers, roles: ['owner', 'admin'] },]
+
+const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
 
   useEffect(() => {
     api.get('/api/cash-register/current')

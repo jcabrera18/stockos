@@ -1,48 +1,61 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { User as SupabaseUser, Session } from '@supabase/supabase-js'
+import { api } from '@/lib/api'
+
+interface UserProfile {
+  id: string
+  business_id: string
+  role: string
+  is_active: boolean
+}
 
 export function useAuth() {
-  const [user, setUser]       = useState<SupabaseUser | null>(null)
-  const [session, setSession] = useState<Session | null>(null)
+  const supabase = createClient()
+  const [user, setUser] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const supabase = createClient()
+    // Cargar sesión y perfil
+    const loadProfile = async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session) {
+        try {
+          const profile = await api.get<UserProfile>('/api/auth/me')
+          setUser(profile)
+        } catch {
+          setUser(null)
+        }
+      } else {
+        setUser(null)
+      }
+      setLoading(false)
+    }
 
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session)
-      setUser(data.session?.user ?? null)
+    loadProfile()
+
+    // Escuchar cambios de sesión
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session) {
+        try {
+          const profile = await api.get<UserProfile>('/api/auth/me')
+          setUser(profile)
+        } catch {
+          setUser(null)
+        }
+      } else {
+        setUser(null)
+      }
       setLoading(false)
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-    })
-
     return () => subscription.unsubscribe()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const signOut = async () => {
-    const supabase = createClient()
     await supabase.auth.signOut()
-    window.location.href = '/login'
+    window.location.replace('/login')
   }
 
-  // Extraer custom claims del JWT
-  const claims = session?.access_token
-    ? JSON.parse(atob(session.access_token.split('.')[1]))
-    : null
-
-  return {
-    user,
-    session,
-    loading,
-    signOut,
-    businessId: claims?.business_id as string | undefined,
-    role:       claims?.user_role   as string | undefined,
-    isActive:   claims?.is_active   as boolean | undefined,
-  }
+  return { user, loading, signOut }
 }

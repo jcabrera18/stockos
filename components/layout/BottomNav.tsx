@@ -1,36 +1,44 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Package, Boxes, Building2, ShoppingCart, BarChart3, CreditCard, Menu, X, Settings, LogOut, Sun, Moon, Tag, Users, PercentCircle, Warehouse, ClipboardList } from 'lucide-react'
+import { LayoutDashboard, Package, Boxes, Building2, Zap, ShoppingCart, BarChart3, CreditCard, Menu, X, Settings, LogOut, Sun, Moon, Tag, Users, PercentCircle, Warehouse, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
 
-const NAV_ITEMS = [
-  { href: '/dashboard', label: 'Inicio',    icon: LayoutDashboard },
-  { href: '/products',  label: 'Productos', icon: Package },
-  { href: '/stock',     label: 'Stock',     icon: Boxes },
-  { href: '/sales',     label: 'Ventas',    icon: ShoppingCart },
-  { href: '/finances',  label: 'Finanzas',  icon: BarChart3 },
-]
-
-const EXTRA_ITEMS = [
-  { href: '/cash-register', label: 'Caja', icon: CreditCard },
-  { href: '/purchases',   label: 'Compras',         icon: ShoppingCart },
-  { href: '/customers',   label: 'Cuentas ctes.',   icon: Users },
-  { href: '/categories',  label: 'Categorías',      icon: Tag },
-  { href: '/price-lists', label: 'Listas de precio', icon: PercentCircle },
-  { href: '/warehouses', label: 'Depósitos', icon: Warehouse },
-  { href: '/orders', label: 'Pedidos', icon: ClipboardList },
-  { href: '/branches', label: 'Sucursales', icon: Building2 },
-  { href: '/settings',    label: 'Configuración',   icon: Settings },
-]
 
 export function BottomNav() {
-  const pathname          = usePathname()
+  const pathname = usePathname()
   const { theme, toggle } = useTheme()
-  const { signOut }       = useAuth()
+  const { signOut, user } = useAuth()
+  const role = (user?.role as string) ?? 'cashier'
+
+  const ALL_NAV_ITEMS = [
+    { href: '/dashboard', label: 'Inicio', icon: LayoutDashboard, roles: ['owner', 'admin'] },
+    { href: '/pos', label: 'POS', icon: Zap, roles: ['owner', 'admin', 'cashier'] },
+    { href: '/products', label: 'Productos', icon: Package, roles: ['owner', 'admin'] },
+    { href: '/stock', label: 'Stock', icon: Boxes, roles: ['owner', 'admin', 'stocker'] },
+    { href: '/sales', label: 'Ventas', icon: ShoppingCart, roles: ['owner', 'admin', 'cashier'] },
+    { href: '/finances', label: 'Finanzas', icon: BarChart3, roles: ['owner', 'admin'] },
+    { href: '/orders', label: 'Pedidos', icon: ClipboardList, roles: ['owner', 'admin', 'cashier', 'stocker', 'seller'] },
+  ]
+
+  const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
+
+  const ALL_EXTRA_ITEMS = [
+    { href: '/purchases', label: 'Compras', icon: ShoppingCart, roles: ['owner', 'admin', 'stocker'] },
+    { href: '/customers', label: 'Cuentas ctes.', icon: Users, roles: ['owner', 'admin', 'cashier'] },
+    { href: '/categories', label: 'Categorías', icon: Tag, roles: ['owner', 'admin'] },
+    { href: '/price-lists', label: 'Listas de precio', icon: PercentCircle, roles: ['owner', 'admin'] },
+    { href: '/warehouses', label: 'Depósitos', icon: Warehouse, roles: ['owner', 'admin', 'stocker'] },
+    { href: '/branches', label: 'Sucursales', icon: Building2, roles: ['owner', 'admin'] },
+    { href: '/cash-register', label: 'Caja', icon: CreditCard, roles: ['owner', 'admin', 'cashier'] },
+    { href: '/settings', label: 'Configuración', icon: Settings, roles: ['owner', 'admin'] },
+  ]
+
+  const EXTRA_ITEMS = ALL_EXTRA_ITEMS.filter(item => item.roles.includes(role))
+
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   return (
