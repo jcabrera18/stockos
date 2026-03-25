@@ -260,10 +260,10 @@ export default function CustomersPage() {
 
       <PaymentModal
         open={paymentModal}
-        onClose={() => { setPaymentModal(false); setPaymentCustomer(null) }}
-        onSaved={() => {
-          fetchCustomers()
-          // Si venía del detalle, reabrir con datos frescos
+        onClose={() => {
+          setPaymentModal(false)
+          setPaymentCustomer(null)
+          // Reabrir detalle con datos frescos recién cuando cierra el recibo
           if (detailCustomer) {
             api.get<CustomerSummary>(`/api/customers/${detailCustomer.id}`)
               .then(updated => {
@@ -272,6 +272,7 @@ export default function CustomersPage() {
               }).catch(() => { })
           }
         }}
+        onSaved={fetchCustomers}
         customer={paymentCustomer}
       />
 
