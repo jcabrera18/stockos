@@ -68,21 +68,6 @@ export default function SettingsPage() {
           </div>
         </Card>
 
-        {/* API */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Conexión API</CardTitle>
-          </CardHeader>
-          <div className="space-y-2">
-            <div>
-              <p className="text-xs text-[var(--text3)] mb-1">URL del backend</p>
-              <p className="text-sm mono text-[var(--text2)]">
-                {process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'}
-              </p>
-            </div>
-          </div>
-        </Card>
-
         {/* Sesión */}
         <Card>
           <CardHeader>
