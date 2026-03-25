@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -41,12 +41,16 @@ export default function ProductsPage() {
   const [allCategories, setAllCategories] = useState<Category[]>([])
   const [bulkPriceModal, setBulkPriceModal] = useState(false)
 
+  const searchRef = useRef(search)
+  const pageRef = useRef(page)
+  useEffect(() => { searchRef.current = search }, [search])
+
   const fetchProducts = useCallback(async () => {
     setLoading(true)
     try {
       const res = await api.get<PaginatedResponse<StockSummary>>('/api/products', {
-        search: search || undefined,
-        page,
+        search: searchRef.current || undefined,
+        page: pageRef.current,
         limit: 20,
       })
       setData(res.data)
@@ -56,10 +60,19 @@ export default function ProductsPage() {
     } finally {
       setLoading(false)
     }
-  }, [search, page])
+  }, [])
 
-  useEffect(() => { fetchProducts() }, [fetchProducts])
-  useEffect(() => { setPage(1) }, [search])
+  useEffect(() => {
+    pageRef.current = 1
+    setPage(1)
+    fetchProducts()
+  }, [search, fetchProducts])
+
+  const handlePageChange = useCallback((newPage: number) => {
+    pageRef.current = newPage
+    setPage(newPage)
+    fetchProducts()
+  }, [fetchProducts])
 
   useEffect(() => {
     api.get<Category[]>('/api/products/categories').then(setAllCategories).catch(() => { })
@@ -244,7 +257,7 @@ export default function ProductsPage() {
                 </tbody>
               </table>
             </div>
-            <Pagination pagination={pagination} onPageChange={setPage} />
+            <Pagination pagination={pagination} onPageChange={handlePageChange} />
           </div>
         )}
       </div>

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card } from '@/components/ui/Card'
@@ -46,18 +46,22 @@ export default function FinancesPage() {
   const [incomePag, setIncomePag] = useState<PaginationType>({ total: 0, page: 1, limit: 50, pages: 0 })
   const [incomePage, setIncomePage] = useState(1)
 
-  const dates = getPeriodDates(period)
+  const periodRef = useRef(period)
+  const expPageRef = useRef(expPage)
+  const incomePageRef = useRef(incomePage)
+  useEffect(() => { periodRef.current = period }, [period])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
+      const { from, to } = getPeriodDates(periodRef.current)
       const [sum, exp, inc] = await Promise.all([
-        api.get<FinanceSummary>('/api/finances/summary', { from: dates.from, to: dates.to }),
+        api.get<FinanceSummary>('/api/finances/summary', { from, to }),
         api.get<PaginatedResponse<Expense>>('/api/finances/expenses', {
-          from: dates.from, to: dates.to, page: expPage, limit: 50
+          from, to, page: expPageRef.current, limit: 50
         }),
         api.get<PaginatedResponse<Sale>>('/api/finances/income', {
-          from: dates.from, to: dates.to, page: incomePage, limit: 50
+          from, to, page: incomePageRef.current, limit: 50
         }),
       ])
       setSummary(sum)
@@ -70,10 +74,27 @@ export default function FinancesPage() {
     } finally {
       setLoading(false)
     }
-  }, [period, expPage, incomePage]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
-  useEffect(() => { fetchData() }, [fetchData])
-  useEffect(() => { setExpPage(1) }, [period])
+  useEffect(() => {
+    expPageRef.current = 1
+    incomePageRef.current = 1
+    setExpPage(1)
+    setIncomePage(1)
+    fetchData()
+  }, [period, fetchData])
+
+  const handleExpPageChange = useCallback((newPage: number) => {
+    expPageRef.current = newPage
+    setExpPage(newPage)
+    fetchData()
+  }, [fetchData])
+
+  const handleIncomePageChange = useCallback((newPage: number) => {
+    incomePageRef.current = newPage
+    setIncomePage(newPage)
+    fetchData()
+  }, [fetchData])
 
   const handleAddExpense = async () => {
     if (!form.amount || !form.description) return
@@ -240,7 +261,7 @@ export default function FinancesPage() {
                       ))}
                     </tbody>
                   </table>
-                  <Pagination pagination={incomePag} onPageChange={setIncomePage} />
+                  <Pagination pagination={incomePag} onPageChange={handleIncomePageChange} />
                 </div>
               )
             )}
@@ -274,7 +295,7 @@ export default function FinancesPage() {
                     ))}
                   </tbody>
                 </table>
-                <Pagination pagination={expPagination} onPageChange={setExpPage} />
+                <Pagination pagination={expPagination} onPageChange={handleExpPageChange} />
               </div>
             )}
           </>

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/Badge'
@@ -44,14 +44,22 @@ export default function StockPage() {
       .catch(() => { })
   }, [])
 
+  const searchRef = useRef(search)
+  const filterRef = useRef(filter)
+  const selectedWarehouseRef = useRef(selectedWarehouse)
+  const pageRef = useRef(page)
+  useEffect(() => { searchRef.current = search }, [search])
+  useEffect(() => { filterRef.current = filter }, [filter])
+  useEffect(() => { selectedWarehouseRef.current = selectedWarehouse }, [selectedWarehouse])
+
   const fetchStock = useCallback(async () => {
     setLoading(true)
     try {
       const res = await api.get<PaginatedResponse<StockItem>>('/api/stock', {
-        search: search || undefined,
-        stock_status: filter !== 'all' ? filter : undefined,
-        warehouse_id: selectedWarehouse || undefined,
-        page,
+        search: searchRef.current || undefined,
+        stock_status: filterRef.current !== 'all' ? filterRef.current : undefined,
+        warehouse_id: selectedWarehouseRef.current || undefined,
+        page: pageRef.current,
         limit: 50,
       })
       const mappedData = res.data.map(item => ({
@@ -62,10 +70,19 @@ export default function StockPage() {
       setPagination(res.pagination)
     } catch (err) { console.error(err) }
     finally { setLoading(false) }
-  }, [search, filter, page, selectedWarehouse])
+  }, [])
 
-  useEffect(() => { fetchStock() }, [fetchStock])
-  useEffect(() => { setPage(1) }, [search, filter, selectedWarehouse])
+  useEffect(() => {
+    pageRef.current = 1
+    setPage(1)
+    fetchStock()
+  }, [search, filter, selectedWarehouse, fetchStock])
+
+  const handlePageChange = useCallback((newPage: number) => {
+    pageRef.current = newPage
+    setPage(newPage)
+    fetchStock()
+  }, [fetchStock])
 
   const filters: { key: StockFilter; label: string }[] = [
     { key: 'all', label: 'Todos' },
@@ -175,7 +192,7 @@ export default function StockPage() {
                 </tbody>
               </table>
             </div>
-            <Pagination pagination={pagination} onPageChange={setPage} />
+            <Pagination pagination={pagination} onPageChange={handlePageChange} />
           </div>
         )}
 

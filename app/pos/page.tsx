@@ -99,6 +99,9 @@ export default function POSPage() {
 
   const { workstation, setWorkstation, loaded } = useWorkstation()
 
+  const cartRef = useRef(cart)
+  useEffect(() => { cartRef.current = cart }, [cart])
+
   useEffect(() => { qtyRef.current?.focus() }, [])
 
   useEffect(() => {
@@ -145,7 +148,7 @@ export default function POSPage() {
       finally { setSearching(false) }
     }, 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query]) // addToCart es estable (deps []), no necesita estar en deps
 
   useEffect(() => {
     if (!customerQuery.trim() || customerQuery.length < 2) { setCustomerResults([]); return }
@@ -182,7 +185,7 @@ export default function POSPage() {
       return
     }
     try {
-      const existing = cart.find(i => i.product.id === product.id)
+      const existing = cartRef.current.find(i => i.product.id === product.id)
       if (existing) {
         const newQty = existing.quantity + quantity
         if (newQty > product.stock_current) { toast.error(`Stock máximo: ${product.stock_current}`); return }
@@ -201,7 +204,7 @@ export default function POSPage() {
       setResults([]); setQuery('')
       setTimeout(() => qtyRef.current?.focus(), 50)
     } finally { isAddingRef.current = false }
-  }, [cart])
+  }, [])
 
   const updateQty = async (id: string, delta: number) => {
     const item = cart.find(i => i.product.id === id)

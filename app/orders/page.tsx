@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -174,21 +174,36 @@ export default function OrdersPage() {
 
   const [stockIssues, setStockIssues] = useState<Record<string, { available: number; needed: number }>>({})
 
+  const statusFilterRef = useRef(statusFilter)
+  const searchRef = useRef(search)
+  const pageRef = useRef(page)
+  useEffect(() => { statusFilterRef.current = statusFilter }, [statusFilter])
+  useEffect(() => { searchRef.current = search }, [search])
+
   const fetchOrders = useCallback(async () => {
     setLoading(true)
     try {
-      const params: Record<string, string | number | undefined> = { page, limit: 20 }
-      if (statusFilter) params.status = statusFilter
-      if (search) params.search = search
+      const params: Record<string, string | number | undefined> = { page: pageRef.current, limit: 20 }
+      if (statusFilterRef.current) params.status = statusFilterRef.current
+      if (searchRef.current) params.search = searchRef.current
       const res = await api.get<{ data: OrderSummary[]; pagination: PaginationType }>('/api/orders', params)
       setOrders(res.data)
       setPagination(res.pagination)
     } catch (err) { console.error(err) }
     finally { setLoading(false) }
-  }, [page, statusFilter, search])
+  }, [])
 
-  useEffect(() => { fetchOrders() }, [fetchOrders])
-  useEffect(() => { setPage(1) }, [statusFilter, search])
+  useEffect(() => {
+    pageRef.current = 1
+    setPage(1)
+    fetchOrders()
+  }, [statusFilter, search, fetchOrders])
+
+  const handlePageChange = useCallback((newPage: number) => {
+    pageRef.current = newPage
+    setPage(newPage)
+    fetchOrders()
+  }, [fetchOrders])
 
   useEffect(() => {
     Promise.all([
@@ -525,7 +540,7 @@ export default function OrdersPage() {
                 })}
               </tbody>
             </table>
-            <Pagination pagination={pagination} onPageChange={setPage} />
+            <Pagination pagination={pagination} onPageChange={handlePageChange} />
           </div>
         )}
       </div>

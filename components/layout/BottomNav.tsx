@@ -11,7 +11,7 @@ import { useAuth } from '@/hooks/useAuth'
 export function BottomNav() {
   const pathname = usePathname()
   const { theme, toggle } = useTheme()
-  const { signOut, user } = useAuth()
+  const { signOut, user, loading } = useAuth()
   const role = (user?.role as string) ?? 'cashier'
 
   const ALL_NAV_ITEMS = [
@@ -46,19 +46,28 @@ export function BottomNav() {
       {/* Bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--surface)] border-t border-[var(--border)] px-1 pb-safe">
         <div className="flex items-center justify-around">
-          {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href || pathname.startsWith(href + '/')
-            return (
-              <Link key={href} href={href}
-                className={cn(
-                  'flex flex-col items-center gap-0.5 px-3 py-2.5 min-w-0',
-                  active ? 'text-[var(--accent)]' : 'text-[var(--text3)]'
-                )}>
-                <Icon size={20} />
-                <span className="text-[10px] font-medium truncate">{label}</span>
-              </Link>
-            )
-          })}
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex flex-col items-center gap-1 px-3 py-2.5">
+                <div className="w-5 h-5 rounded bg-[var(--surface2)] animate-pulse" />
+                <div className="w-8 h-2 rounded bg-[var(--surface2)] animate-pulse" />
+              </div>
+            ))
+          ) : (
+            NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+              const active = pathname === href || pathname.startsWith(href + '/')
+              return (
+                <Link key={href} href={href}
+                  className={cn(
+                    'flex flex-col items-center gap-0.5 px-3 py-2.5 min-w-0',
+                    active ? 'text-[var(--accent)]' : 'text-[var(--text3)]'
+                  )}>
+                  <Icon size={20} />
+                  <span className="text-[10px] font-medium truncate">{label}</span>
+                </Link>
+              )
+            })
+          )}
 
           {/* Botón menú */}
           <button

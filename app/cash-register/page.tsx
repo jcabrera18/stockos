@@ -101,13 +101,17 @@ export default function CashRegisterPage() {
     }
   }, [workstation])
 
+  const pageRef = useRef(page)
+  const registerIdRef = useRef(workstation?.register_id)
+  useEffect(() => { registerIdRef.current = workstation?.register_id }, [workstation?.register_id])
+
   const fetchData = useCallback(async () => {
     if (!loaded) return
     setLoading(true)
     try {
-      const cashParams = workstation?.register_id && isRestrictedRef.current
-        ? { page, limit: 20, register_id: workstation.register_id }
-        : { page, limit: 20 }
+      const cashParams = registerIdRef.current && isRestrictedRef.current
+        ? { page: pageRef.current, limit: 20, register_id: registerIdRef.current }
+        : { page: pageRef.current, limit: 20 }
 
       const [hist, br, regs, opens] = await Promise.all([
         api.get<{ data: CashRegister[]; pagination: PaginationType }>('/api/cash-register', cashParams),
@@ -122,23 +126,25 @@ export default function CashRegisterPage() {
       setBranches(br)
       setRegisters(regs)
     } catch (err) {
-      console.error('fetchData error:', err)  // ← ver el error real
+      console.error('fetchData error:', err)
     } finally {
-      setLoading(false)   // ← siempre se ejecuta
-      setRefreshing(false) // ← también acá por si acaso
+      setLoading(false)
+      setRefreshing(false)
     }
-  }, [page, workstation?.register_id, loaded])
-
-  const fetchDataRef = useRef(fetchData)
-  useEffect(() => { fetchDataRef.current = fetchData }, [fetchData])
+  }, [loaded])
 
   const handleRefresh = async () => {
     setRefreshing(true)
-    await fetchDataRef.current()
-    setRefreshing(false)
+    await fetchData()
   }
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  const handlePageChange = useCallback((newPage: number) => {
+    pageRef.current = newPage
+    setPage(newPage)
+    fetchData()
+  }, [fetchData])
 
   // Cajas disponibles para abrir (excluir las ya abiertas)
   const openRegisterIds = new Set(openRegisters.map(r => r.register_id))
@@ -406,7 +412,7 @@ export default function CashRegisterPage() {
                       ))}
                     </tbody>
                   </table>
-                  <Pagination pagination={pagination} onPageChange={setPage} />
+                  <Pagination pagination={pagination} onPageChange={handlePageChange} />
                 </div>
               )}
             </div>

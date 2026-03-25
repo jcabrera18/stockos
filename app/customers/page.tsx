@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -61,27 +61,42 @@ export default function CustomersPage() {
   const [deleteCustomer, setDeleteCustomer] = useState<CustomerSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  const searchRef = useRef(search)
+  const filterRef = useRef(filter)
+  const pageRef = useRef(page)
+  useEffect(() => { searchRef.current = search }, [search])
+  useEffect(() => { filterRef.current = filter }, [filter])
+
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
     try {
       const params: Record<string, string | number | boolean | undefined> = {
-        search: search || undefined,
-        page,
+        search: searchRef.current || undefined,
+        page: pageRef.current,
         limit: 20,
       }
-      if (filter === 'with_balance') params.with_balance = true
-      if (filter === 'limite_proximo') params.credit_status = 'limite_proximo'
-      if (filter === 'limite_alcanzado') params.credit_status = 'limite_alcanzado'
+      if (filterRef.current === 'with_balance') params.with_balance = true
+      if (filterRef.current === 'limite_proximo') params.credit_status = 'limite_proximo'
+      if (filterRef.current === 'limite_alcanzado') params.credit_status = 'limite_alcanzado'
 
       const res = await api.get<PaginatedResponse<CustomerSummary>>('/api/customers', params)
       setData(res.data)
       setPagination(res.pagination)
     } catch (err) { console.error(err) }
     finally { setLoading(false) }
-  }, [search, filter, page])
+  }, [])
 
-  useEffect(() => { fetchCustomers() }, [fetchCustomers])
-  useEffect(() => { setPage(1) }, [search, filter])
+  useEffect(() => {
+    pageRef.current = 1
+    setPage(1)
+    fetchCustomers()
+  }, [search, filter, fetchCustomers])
+
+  const handlePageChange = useCallback((newPage: number) => {
+    pageRef.current = newPage
+    setPage(newPage)
+    fetchCustomers()
+  }, [fetchCustomers])
 
   const handleDelete = async () => {
     if (!deleteCustomer) return
@@ -231,7 +246,7 @@ export default function CustomersPage() {
                 })}
               </tbody>
             </table>
-            <Pagination pagination={pagination} onPageChange={setPage} />
+            <Pagination pagination={pagination} onPageChange={handlePageChange} />
           </div>
         )}
       </div>

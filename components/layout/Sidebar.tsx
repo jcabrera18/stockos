@@ -15,7 +15,7 @@ import { useWorkstation } from '@/hooks/useWorkstation'
 export function Sidebar() {
   const pathname = usePathname()
   const { theme, toggle } = useTheme()
-  const { signOut, user } = useAuth()
+  const { signOut, user, loading } = useAuth()
   const role = (user?.role as string) ?? 'cashier'
   const [cajaAbierta, setCajaAbierta] = useState(false)
   const { workstation } = useWorkstation()
@@ -59,25 +59,34 @@ export function Sidebar() {
 
       {/* Nav */}
       <nav className="flex-1 px-2 py-3 space-y-0.5 overflow-y-auto">
-        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || pathname.startsWith(href + '/')
-          return (
-            <Link key={href} href={href}
-              className={cn(
-                'flex items-center gap-2.5 px-3 py-2 rounded-[var(--radius-md)] text-sm transition-colors',
-                active ? 'bg-[var(--accent-subtle)] text-[var(--accent)] font-medium' : 'text-[var(--text2)] hover:bg-[var(--surface2)] hover:text-[var(--text)]'
-              )}>
-              <Icon size={16} />
-              <span className="flex-1">{label}</span>
-              {href === '/cash-register' && (
-                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cajaAbierta
-                  ? 'bg-[var(--accent)] animate-pulse'
-                  : 'bg-[var(--danger)]'
-                  }`} />
-              )}
-            </Link>
-          )
-        })}
+        {loading ? (
+          Array.from({ length: 7 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2.5 px-3 py-2 rounded-[var(--radius-md)]">
+              <div className="w-4 h-4 rounded bg-[var(--surface2)] animate-pulse flex-shrink-0" />
+              <div className="h-3 rounded bg-[var(--surface2)] animate-pulse flex-1" style={{ width: `${55 + (i * 13) % 35}%` }} />
+            </div>
+          ))
+        ) : (
+          NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+            const active = pathname === href || pathname.startsWith(href + '/')
+            return (
+              <Link key={href} href={href}
+                className={cn(
+                  'flex items-center gap-2.5 px-3 py-2 rounded-[var(--radius-md)] text-sm transition-colors',
+                  active ? 'bg-[var(--accent-subtle)] text-[var(--accent)] font-medium' : 'text-[var(--text2)] hover:bg-[var(--surface2)] hover:text-[var(--text)]'
+                )}>
+                <Icon size={16} />
+                <span className="flex-1">{label}</span>
+                {href === '/cash-register' && (
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cajaAbierta
+                    ? 'bg-[var(--accent)] animate-pulse'
+                    : 'bg-[var(--danger)]'
+                    }`} />
+                )}
+              </Link>
+            )
+          })
+        )}
       </nav>
 
       {/* Footer */}

@@ -45,7 +45,6 @@ export default function SalesPage() {
   useEffect(() => { minAmountRef.current = minAmount }, [minAmount])
   useEffect(() => { maxAmountRef.current = maxAmount }, [maxAmount])
   useEffect(() => { customerRef.current = customerFilter }, [customerFilter])
-  useEffect(() => { pageRef.current = page }, [page])
 
   const fetchSales = useCallback(async () => {
     setLoading(true)
@@ -68,15 +67,19 @@ export default function SalesPage() {
     finally { setLoading(false) }
   }, [])
 
-  // Disparar fetch cuando cambian filtros o página
+  // Al cambiar filtros: resetear página y fetchear una sola vez
   useEffect(() => {
-    fetchSales()
-  }, [period, paymentFilter, minAmount, maxAmount, customerFilter, page, fetchSales])
-
-  // Reset página al cambiar filtros
-  useEffect(() => {
+    pageRef.current = 1
     setPage(1)
-  }, [period, paymentFilter, minAmount, maxAmount, customerFilter])
+    fetchSales()
+  }, [period, paymentFilter, minAmount, maxAmount, customerFilter, fetchSales])
+
+  // Cambio de página desde el componente Pagination
+  const handlePageChange = useCallback((newPage: number) => {
+    pageRef.current = newPage
+    setPage(newPage)
+    fetchSales()
+  }, [fetchSales])
 
   // Búsqueda de clientes con debounce
   useEffect(() => {
@@ -277,7 +280,7 @@ export default function SalesPage() {
                 </tbody>
               </table>
             </div>
-            <Pagination pagination={pagination} onPageChange={setPage} />
+            <Pagination pagination={pagination} onPageChange={handlePageChange} />
           </div>
         )}
 

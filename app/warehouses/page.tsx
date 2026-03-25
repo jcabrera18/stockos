@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -75,39 +75,53 @@ export default function WarehousesPage() {
   const [transfers, setTransfers] = useState<unknown[]>([])
   const [loadingTransfers, setLoadingTransfers] = useState(false)
 
+  const selectedWarehouseRef = useRef(selectedWarehouse)
+  const stockSearchRef = useRef(stockSearch)
+  const stockPageRef = useRef(stockPage)
+  useEffect(() => { selectedWarehouseRef.current = selectedWarehouse }, [selectedWarehouse])
+  useEffect(() => { stockSearchRef.current = stockSearch }, [stockSearch])
+
   const fetchWarehouses = useCallback(async () => {
     setLoading(true)
     try {
       const data = await api.get<Warehouse[]>('/api/warehouses')
       setWarehouses(data)
-      if (!selectedWarehouse && data.length > 0) {
+      if (!selectedWarehouseRef.current && data.length > 0) {
         setSelectedWarehouse(data.find(w => w.is_default) ?? data[0])
       }
     } catch (err) { console.error(err) }
     finally { setLoading(false) }
-  }, [selectedWarehouse])
+  }, [])
 
-  useEffect(() => { fetchWarehouses() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchWarehouses() }, [fetchWarehouses])
 
   const fetchStock = useCallback(async () => {
-    if (!selectedWarehouse) return
+    if (!selectedWarehouseRef.current) return
     setLoadingStock(true)
     try {
       const res = await api.get<{ data: WarehouseStock[]; pagination: PaginationType }>(
-        `/api/warehouses/${selectedWarehouse.id}/stock`,
-        { search: stockSearch || undefined, page: stockPage, limit: 50 }
+        `/api/warehouses/${selectedWarehouseRef.current.id}/stock`,
+        { search: stockSearchRef.current || undefined, page: stockPageRef.current, limit: 50 }
       )
       setStockData(res.data)
       setStockPag(res.pagination)
     } catch (err) { console.error(err) }
     finally { setLoadingStock(false) }
-  }, [selectedWarehouse, stockSearch, stockPage])
+  }, [])
 
   useEffect(() => {
-    if (tab === 'stock') fetchStock()
-  }, [tab, fetchStock])
+    if (tab === 'stock') {
+      stockPageRef.current = 1
+      setStockPage(1)
+      fetchStock()
+    }
+  }, [tab, selectedWarehouse, stockSearch, fetchStock])
 
-  useEffect(() => { setStockPage(1) }, [stockSearch, selectedWarehouse])
+  const handleStockPageChange = useCallback((newPage: number) => {
+    stockPageRef.current = newPage
+    setStockPage(newPage)
+    fetchStock()
+  }, [fetchStock])
 
   const fetchTransfers = useCallback(async () => {
     setLoadingTransfers(true)
@@ -323,7 +337,7 @@ export default function WarehousesPage() {
                     ))}
                   </tbody>
                 </table>
-                <Pagination pagination={stockPag} onPageChange={setStockPage} />
+                <Pagination pagination={stockPag} onPageChange={handleStockPageChange} />
               </div>
             )}
           </div>

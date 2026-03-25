@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
@@ -56,21 +56,34 @@ export default function PurchasesPage() {
   const [deletingSupplierLoading, setDeletingSupplierLoading] = useState(false)
 
   // ── Fetch órdenes ──────────────────────────────────────
+  const statusFilterRef = useRef(statusFilter)
+  const orderPageRef = useRef(orderPage)
+  useEffect(() => { statusFilterRef.current = statusFilter }, [statusFilter])
+
   const fetchOrders = useCallback(async () => {
     setLoadingOrders(true)
     try {
       const res = await api.get<PaginatedResponse<PurchaseOrder>>('/api/purchases', {
-        status: statusFilter !== 'all' ? statusFilter : undefined,
-        page: orderPage, limit: 20,
+        status: statusFilterRef.current !== 'all' ? statusFilterRef.current : undefined,
+        page: orderPageRef.current, limit: 20,
       })
       setOrders(res.data)
       setOrderPag(res.pagination)
     } catch (err) { console.error(err) }
     finally { setLoadingOrders(false) }
-  }, [statusFilter, orderPage])
+  }, [])
 
-  useEffect(() => { fetchOrders() }, [fetchOrders])
-  useEffect(() => { setOrderPage(1) }, [statusFilter])
+  useEffect(() => {
+    orderPageRef.current = 1
+    setOrderPage(1)
+    fetchOrders()
+  }, [statusFilter, fetchOrders])
+
+  const handlePageChange = useCallback((newPage: number) => {
+    orderPageRef.current = newPage
+    setOrderPage(newPage)
+    fetchOrders()
+  }, [fetchOrders])
 
   // ── Fetch proveedores ──────────────────────────────────
   const fetchSuppliers = useCallback(async () => {
@@ -259,7 +272,7 @@ export default function PurchasesPage() {
                     })}
                   </tbody>
                 </table>
-                <Pagination pagination={orderPag} onPageChange={setOrderPage} />
+                <Pagination pagination={orderPag} onPageChange={handlePageChange} />
               </div>
             )}
           </>
