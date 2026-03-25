@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
 import { useState, useEffect } from 'react'
+import { Modal } from '@/components/ui/Modal'
 import { api } from '@/lib/api'
 import { useWorkstation } from '@/hooks/useWorkstation'
 
@@ -18,6 +19,7 @@ export function Sidebar() {
   const { signOut, user, loading } = useAuth()
   const role = (user?.role as string) ?? 'cashier'
   const [cajaAbierta, setCajaAbierta] = useState(false)
+  const [confirmSignOut, setConfirmSignOut] = useState(false)
   const { workstation } = useWorkstation()
 
   useEffect(() => {
@@ -48,6 +50,7 @@ export function Sidebar() {
   const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
 
   return (
+    <>
     <aside className="hidden md:flex flex-col w-56 h-screen bg-[var(--surface)] border-r border-[var(--border)] sticky top-0 flex-shrink-0">
       {/* Logo */}
       <div className="flex items-center gap-2.5 px-4 py-5 border-b border-[var(--border)]">
@@ -99,8 +102,8 @@ export function Sidebar() {
           {theme === 'dark' ? 'Modo claro' : 'Modo oscuro'}
         </button>
         <button
-          onClick={signOut}
-          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[var(--radius-md)] text-sm text-[var(--text2)] hover:bg-[var(--danger-subtle)] hover:text-[var(--danger)] transition-colors"
+          onClick={() => setConfirmSignOut(true)}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-[var(--radius-md)] text-sm text-[var(--text2)] hover:bg-[var(--danger-subtle)] hover:text-[var(--danger)] transition-colors cursor-pointer"
         >
           <LogOut size={16} />
           Salir
@@ -113,5 +116,26 @@ export function Sidebar() {
         )}
       </div>
     </aside>
+
+    <Modal open={confirmSignOut} onClose={() => setConfirmSignOut(false)} title="Cerrar sesión" size="sm">
+      <div className="space-y-4 pb-2">
+        <p className="text-sm text-[var(--text2)]">¿Seguro que querés salir?</p>
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={() => setConfirmSignOut(false)}
+            className="px-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)] transition-colors cursor-pointer"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={signOut}
+            className="px-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--danger)] text-white hover:opacity-90 transition-opacity cursor-pointer"
+          >
+            Salir
+          </button>
+        </div>
+      </div>
+    </Modal>
+    </>
   )
 }

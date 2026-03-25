@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { LayoutDashboard, Package, Boxes, Building2, Zap, ShoppingCart, BarChart3, CreditCard, Menu, X, Settings, LogOut, Sun, Moon, Tag, Users, PercentCircle, Warehouse, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
+import { Modal } from '@/components/ui/Modal'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
 
@@ -40,6 +41,7 @@ export function BottomNav() {
   const EXTRA_ITEMS = ALL_EXTRA_ITEMS.filter(item => item.roles.includes(role))
 
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [confirmSignOut, setConfirmSignOut] = useState(false)
 
   return (
     <>
@@ -138,8 +140,8 @@ export function BottomNav() {
                   {theme === 'dark' ? 'Modo claro' : 'Modo oscuro'}
                 </span>
               </button>
-              <button onClick={signOut}
-                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors">
+              <button onClick={() => { setDrawerOpen(false); setConfirmSignOut(true) }}
+                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors cursor-pointer">
                 <LogOut size={18} />
                 <span className="text-sm font-medium">Cerrar sesión</span>
               </button>
@@ -147,6 +149,25 @@ export function BottomNav() {
           </div>
         </div>
       )}
+      <Modal open={confirmSignOut} onClose={() => setConfirmSignOut(false)} title="Cerrar sesión" size="sm">
+        <div className="space-y-4 pb-2">
+          <p className="text-sm text-[var(--text2)]">¿Seguro que querés salir?</p>
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => setConfirmSignOut(false)}
+              className="px-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)] transition-colors cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={signOut}
+              className="px-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--danger)] text-white hover:opacity-90 transition-opacity cursor-pointer"
+            >
+              Salir
+            </button>
+          </div>
+        </div>
+      </Modal>
     </>
   )
 }

@@ -27,6 +27,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [confirmLoading, setConfirmLoading] = useState(false)
   const [error, setError] = useState('')
 
   // Step 2 — workstation
@@ -50,7 +51,7 @@ export default function LoginPage() {
 
     try {
       const { error: authErr } = await supabase.auth.signInWithPassword({ email, password })
-      if (authErr) { setError('Email o contraseña incorrectos'); return }
+      if (authErr) { setError('Email o contraseña incorrectos'); setLoading(false); return }
 
       // Traer perfil del usuario para saber el rol
       const profile = await api.get<{ role: string }>('/api/auth/me')
@@ -74,14 +75,14 @@ export default function LoginPage() {
         finally { setLoadingBranches(false) }
 
         setStep('workstation')
+        setLoading(false)
       } else {
-        // Owner/admin → ir directo al dashboard
+        // Owner/admin → ir directo al dashboard, mantener loading hasta que navegue
         setWorkstation(null)
         router.replace('/dashboard')
       }
     } catch {
       setError('Error al iniciar sesión')
-    } finally {
       setLoading(false)
     }
   }
@@ -90,6 +91,7 @@ export default function LoginPage() {
     if (!selectedBranch) { setError('Seleccioná una sucursal'); return }
     if (!selectedRegister) { setError('Seleccioná una caja'); return }
 
+    setConfirmLoading(true)
     setWorkstation({
       branch_id: selectedBranch.id,
       branch_name: selectedBranch.name,
@@ -97,7 +99,7 @@ export default function LoginPage() {
       register_name: selectedRegister.name,
     })
 
-    router.replace('/dashboard')
+    router.replace('/pos')
   }
 
   const handleChangeWorkstation = () => {
@@ -255,10 +257,17 @@ export default function LoginPage() {
 
                   <button
                     onClick={handleSelectWorkstation}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold rounded-[var(--radius-md)] transition-colors"
+                    disabled={confirmLoading}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold rounded-[var(--radius-md)] transition-colors disabled:opacity-60"
                   >
-                    <LogIn size={15} />
-                    Comenzar turno
+                    {confirmLoading ? (
+                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <>
+                        <LogIn size={15} />
+                        Comenzar turno
+                      </>
+                    )}
                   </button>
 
                   <button
