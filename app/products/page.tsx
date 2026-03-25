@@ -17,7 +17,8 @@ import { Plus, Search, Package, Pencil, Trash2, SlidersHorizontal, Tag, Filter, 
 import { toast } from 'sonner'
 import { ProductPriceRulesModal } from '@/components/modules/ProductPriceRulesModal'
 import { BulkPriceModal } from '@/components/modules/BulkPriceModal'
-import { TrendingUp } from 'lucide-react'
+import { PrintPriceListModal } from '@/components/modules/PrintPriceListModal'
+import { TrendingUp, Printer } from 'lucide-react'
 
 interface Supplier { id: string; name: string }
 interface CategoryWithChildren extends Category { children: CategoryWithChildren[] }
@@ -65,6 +66,7 @@ export default function ProductsPage() {
 
   const [allCategories, setAllCategories] = useState<Category[]>([])
   const [bulkPriceModal, setBulkPriceModal] = useState(false)
+  const [printModal, setPrintModal] = useState(false)
   const [brandFilter, setBrandFilter] = useState('')
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([])
   const [supplierFilter, setSupplierFilter] = useState('')
@@ -210,6 +212,9 @@ export default function ProductsPage() {
         description={`${pagination.total} productos`}
         action={
           <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setPrintModal(true)}>
+              <Printer size={15} /> Lista de precios
+            </Button>
             <Button variant="secondary" onClick={() => setBulkPriceModal(true)}>
               <TrendingUp size={15} /> Actualizar precios
             </Button>
@@ -454,6 +459,11 @@ export default function ProductsPage() {
         open={bulkPriceModal}
         onClose={() => setBulkPriceModal(false)}
         onApplied={fetchProducts}
+      />
+
+      <PrintPriceListModal
+        open={printModal}
+        onClose={() => setPrintModal(false)}
       />
 
     </AppShell>
