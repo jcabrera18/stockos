@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import Script from 'next/script'
 import './globals.css'
 import { Toaster } from 'sonner'
 
@@ -22,16 +23,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             },
           }}
         />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              (function() {
-                const saved = localStorage.getItem('stockos-theme') || 'dark';
-                document.documentElement.setAttribute('data-theme', saved);
-              })();
-            `,
-          }}
-        />
+        <Script id="theme-init" strategy="beforeInteractive">{`
+          (function() {
+            const saved = localStorage.getItem('stockos-theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', saved);
+          })();
+        `}</Script>
       </body>
     </html>
   )

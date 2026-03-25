@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Package, Boxes, ShoppingCart,
-  Truck, BarChart3, Settings, Sun, Moon, LogOut, Zap, Layers, Tag, Users, PercentCircle, Warehouse, ClipboardList, CreditCard, Building2
+  Truck, BarChart3, Settings, Sun, Moon, LogOut, Zap, Layers, Tag, Users, PercentCircle, Warehouse, ClipboardList, CreditCard, Building2, Award, Percent, Receipt
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useTheme } from '@/hooks/useTheme'
@@ -20,15 +20,27 @@ export function Sidebar() {
   const role = (user?.role as string) ?? 'cashier'
   const [cajaAbierta, setCajaAbierta] = useState(false)
   const [confirmSignOut, setConfirmSignOut] = useState(false)
+  const [pendingHref, setPendingHref] = useState<string | null>(null)
+
+  useEffect(() => { setPendingHref(null) }, [pathname])
   const { workstation } = useWorkstation()
 
   useEffect(() => {
-    const params = workstation?.register_id
-      ? `?register_id=${workstation.register_id}`
-      : ''
-    api.get(`/api/cash-register/current${params}`)
-      .then((data: unknown) => setCajaAbierta(data !== null))
-      .catch(() => { })
+    const check = () => {
+      const params = workstation?.register_id
+        ? `?register_id=${workstation.register_id}`
+        : ''
+      api.get(`/api/cash-register/current${params}`)
+        .then((data: unknown) => setCajaAbierta(data !== null))
+        .catch(() => { })
+    }
+    check()
+    window.addEventListener('focus', check)
+    window.addEventListener('caja-changed', check)
+    return () => {
+      window.removeEventListener('focus', check)
+      window.removeEventListener('caja-changed', check)
+    }
   }, [workstation])
 
   const ALL_NAV_ITEMS = [
@@ -45,7 +57,11 @@ export function Sidebar() {
     { href: '/warehouses', label: 'Depósitos', icon: Warehouse, roles: ['owner', 'admin', 'stocker'] },
     { href: '/branches', label: 'Sucursales', icon: Building2, roles: ['owner', 'admin'] },
     { href: '/price-lists', label: 'Precios', icon: Tag, roles: ['owner', 'admin'] },
-    { href: '/categories', label: 'Categorías', icon: Layers, roles: ['owner', 'admin'] },]
+    { href: '/categories', label: 'Categorías', icon: Layers, roles: ['owner', 'admin'] },
+    { href: '/brands', label: 'Marcas', icon: Award, roles: ['owner', 'admin'] },
+    { href: '/promotions', label: 'Promociones', icon: Percent, roles: ['owner', 'admin'] },
+    { href: '/invoices', label: 'Comprobantes', icon: Receipt, roles: ['owner', 'admin', 'cashier'] },
+  ]
 
   const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
 
@@ -72,20 +88,21 @@ export function Sidebar() {
         ) : (
           NAV_ITEMS.map(({ href, label, icon: Icon }) => {
             const active = pathname === href || pathname.startsWith(href + '/')
+            const pending = pendingHref === href
             return (
               <Link key={href} href={href}
+                onClick={() => { if (!active) setPendingHref(href) }}
                 className={cn(
                   'flex items-center gap-2.5 px-3 py-2 rounded-[var(--radius-md)] text-sm transition-colors',
-                  active ? 'bg-[var(--accent-subtle)] text-[var(--accent)] font-medium' : 'text-[var(--text2)] hover:bg-[var(--surface2)] hover:text-[var(--text)]'
+                  active || pending ? 'bg-[var(--accent-subtle)] text-[var(--accent)] font-medium' : 'text-[var(--text2)] hover:bg-[var(--surface2)] hover:text-[var(--text)]'
                 )}>
                 <Icon size={16} />
                 <span className="flex-1">{label}</span>
-                {href === '/cash-register' && (
-                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cajaAbierta
-                    ? 'bg-[var(--accent)] animate-pulse'
-                    : 'bg-[var(--danger)]'
-                    }`} />
-                )}
+                {pending ? (
+                  <span className="w-3 h-3 border border-[var(--accent)] border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                ) : href === '/cash-register' ? (
+                  <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cajaAbierta ? 'bg-[var(--accent)] animate-pulse' : 'bg-[var(--danger)]'}`} />
+                ) : null}
               </Link>
             )
           })

@@ -6,6 +6,7 @@ export interface Workstation {
   branch_name: string
   register_id: string
   register_name: string
+  warehouse_id?: string
 }
 
 const STORAGE_KEY = 'stockos_workstation'

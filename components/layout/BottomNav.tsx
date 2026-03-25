@@ -1,9 +1,9 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Package, Boxes, Building2, Zap, ShoppingCart, BarChart3, CreditCard, Menu, X, Settings, LogOut, Sun, Moon, Tag, Users, PercentCircle, Warehouse, ClipboardList } from 'lucide-react'
+import { LayoutDashboard, Package, Boxes, Building2, Zap, ShoppingCart, BarChart3, CreditCard, Menu, X, Settings, LogOut, Sun, Moon, Tag, Users, PercentCircle, Warehouse, ClipboardList, Award, Percent, Receipt } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
@@ -33,6 +33,9 @@ export function BottomNav() {
     { href: '/categories', label: 'Categorías', icon: Tag, roles: ['owner', 'admin'] },
     { href: '/price-lists', label: 'Listas de precio', icon: PercentCircle, roles: ['owner', 'admin'] },
     { href: '/warehouses', label: 'Depósitos', icon: Warehouse, roles: ['owner', 'admin', 'stocker'] },
+    { href: '/brands', label: 'Marcas', icon: Award, roles: ['owner', 'admin'] },
+    { href: '/promotions', label: 'Promociones', icon: Percent, roles: ['owner', 'admin'] },
+    { href: '/invoices', label: 'Comprobantes', icon: Receipt, roles: ['owner', 'admin', 'cashier'] },
     { href: '/branches', label: 'Sucursales', icon: Building2, roles: ['owner', 'admin'] },
     { href: '/cash-register', label: 'Caja', icon: CreditCard, roles: ['owner', 'admin', 'cashier'] },
     { href: '/settings', label: 'Configuración', icon: Settings, roles: ['owner', 'admin'] },
@@ -42,6 +45,9 @@ export function BottomNav() {
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [confirmSignOut, setConfirmSignOut] = useState(false)
+  const [pendingHref, setPendingHref] = useState<string | null>(null)
+
+  useEffect(() => { setPendingHref(null) }, [pathname])
 
   return (
     <>
@@ -58,13 +64,19 @@ export function BottomNav() {
           ) : (
             NAV_ITEMS.map(({ href, label, icon: Icon }) => {
               const active = pathname === href || pathname.startsWith(href + '/')
+              const pending = pendingHref === href
               return (
                 <Link key={href} href={href}
+                  onClick={() => { if (!active) setPendingHref(href) }}
                   className={cn(
-                    'flex flex-col items-center gap-0.5 px-3 py-2.5 min-w-0',
-                    active ? 'text-[var(--accent)]' : 'text-[var(--text3)]'
+                    'flex flex-col items-center gap-0.5 px-3 py-2.5 min-w-0 relative',
+                    active || pending ? 'text-[var(--accent)]' : 'text-[var(--text3)]'
                   )}>
-                  <Icon size={20} />
+                  {pending ? (
+                    <span className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <Icon size={20} />
+                  )}
                   <span className="text-[10px] font-medium truncate">{label}</span>
                 </Link>
               )

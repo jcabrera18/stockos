@@ -113,11 +113,15 @@ export default function CashRegisterPage() {
         ? { page: pageRef.current, limit: 20, register_id: registerIdRef.current }
         : { page: pageRef.current, limit: 20 }
 
+      const openParams = registerIdRef.current && isRestrictedRef.current
+        ? { register_id: registerIdRef.current }
+        : {}
+
       const [hist, br, regs, opens] = await Promise.all([
         api.get<{ data: CashRegister[]; pagination: PaginationType }>('/api/cash-register', cashParams),
         api.get<Branch[]>('/api/branches'),
         api.get<Register[]>('/api/branches/all-registers'),
-        api.get<CashRegister[]>('/api/cash-register/open'),
+        api.get<CashRegister[]>('/api/cash-register/open', openParams),
       ])
 
       setOpenRegisters(opens)
@@ -169,6 +173,7 @@ export default function CashRegisterPage() {
       toast.success('Caja abierta correctamente')
       setOpenModal(false)
       setOpeningAmount(''); setNotes('')
+      window.dispatchEvent(new Event('caja-changed'))
       fetchData()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al abrir caja')
@@ -189,6 +194,7 @@ export default function CashRegisterPage() {
       setCloseModal(false)
       setCloseTarget(null)
       setClosingAmount(''); setNotes('')
+      window.dispatchEvent(new Event('caja-changed'))
       fetchData()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al cerrar caja')
@@ -427,26 +433,36 @@ export default function CashRegisterPage() {
             Ingresá el efectivo con el que arrancás el día (fondo de caja).
           </div>
 
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-[var(--text2)]">Sucursal *</label>
-            <select value={openBranchId}
-              onChange={e => { setOpenBranchId(e.target.value); setOpenRegisterId('') }}
-              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]">
-              <option value="">Seleccionar sucursal...</option>
-              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-          </div>
+          {isRestrictedRef.current ? (
+            <div className="px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)] text-sm text-[var(--text2)]">
+              <span className="font-medium text-[var(--text)]">{workstation?.branch_name}</span>
+              <span className="text-[var(--text3)]"> · </span>
+              <span>{workstation?.register_name}</span>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-[var(--text2)]">Sucursal *</label>
+                <select value={openBranchId}
+                  onChange={e => { setOpenBranchId(e.target.value); setOpenRegisterId('') }}
+                  className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]">
+                  <option value="">Seleccionar sucursal...</option>
+                  {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
 
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-[var(--text2)]">Caja *</label>
-            <select value={openRegisterId}
-              onChange={e => setOpenRegisterId(e.target.value)}
-              disabled={!openBranchId}
-              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50">
-              <option value="">{openBranchId ? 'Seleccionar caja...' : 'Primero elegí la sucursal'}</option>
-              {availableRegisters.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-medium text-[var(--text2)]">Caja *</label>
+                <select value={openRegisterId}
+                  onChange={e => setOpenRegisterId(e.target.value)}
+                  disabled={!openBranchId}
+                  className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50">
+                  <option value="">{openBranchId ? 'Seleccionar caja...' : 'Primero elegí la sucursal'}</option>
+                  {availableRegisters.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              </div>
+            </>
+          )}
 
           <Input label="Fondo inicial *" type="number" min="0" step="100"
             value={openingAmount} onChange={e => setOpeningAmount(e.target.value)} placeholder="Ej: 5000" />

@@ -1,7 +1,9 @@
 'use client'
 import { useRef, useState } from 'react'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
-import { Printer, Plus, X, CheckCircle, CreditCard, Package } from 'lucide-react'
+import { Printer, Plus, X, CheckCircle, CreditCard, MessageCircle, Loader2 } from 'lucide-react'
+import html2canvas from 'html2canvas'
+import { toast } from 'sonner'
 
 interface CartItem {
   product:    { name: string; unit: string; barcode?: string }
@@ -24,19 +26,65 @@ interface TicketSale {
 }
 
 interface POSTicketProps {
-  sale:      TicketSale
-  onNewSale: () => void
-  onClose:   () => void
+  sale:          TicketSale
+  onNewSale:     () => void
+  onClose:       () => void
+  customerPhone?: string
 }
 
-export function POSTicket({ sale, onNewSale, onClose }: POSTicketProps) {
+export function POSTicket({ sale, onNewSale, onClose, customerPhone }: POSTicketProps) {
   const printRef              = useRef<HTMLDivElement>(null)
   const [invoiceModal, setInvoiceModal] = useState(false)
+  const [sharing, setSharing] = useState(false)
 
   const itemsSubtotal = sale.items.reduce(
     (a, i) => a + i.unit_price * i.quantity - i.discount, 0
   )
   const itemCount = sale.items.reduce((a, i) => a + i.quantity, 0)
+
+  const handleShareWhatsApp = async () => {
+    if (!printRef.current) return
+    setSharing(true)
+    try {
+      const canvas = await html2canvas(printRef.current, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      })
+
+      const blob = await new Promise<Blob>((resolve, reject) =>
+        canvas.toBlob(b => b ? resolve(b) : reject(new Error('No se pudo generar la imagen')), 'image/png')
+      )
+
+      // Mobile / browsers que soportan Web Share API con archivos
+      if (navigator.canShare?.({ files: [new File([blob], 'ticket.png', { type: 'image/png' })] })) {
+        await navigator.share({
+          files: [new File([blob], `ticket-${sale.id.slice(-8)}.png`, { type: 'image/png' })],
+          title: 'Comprobante de compra',
+        })
+        return
+      }
+
+      // Desktop: copiar al portapapeles + abrir WhatsApp Web
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': blob }),
+      ])
+
+      const phone = customerPhone?.replace(/\D/g, '')
+      const url = phone
+        ? `https://web.whatsapp.com/send?phone=${phone}`
+        : 'https://web.whatsapp.com/'
+      window.open(url, '_blank')
+
+      toast.success('Imagen copiada — pegala en el chat con Ctrl+V', { duration: 6000 })
+    } catch (err) {
+      toast.error('No se pudo generar la imagen')
+      console.error(err)
+    } finally {
+      setSharing(false)
+    }
+  }
 
   const handlePrint = () => {
     const content = printRef.current
@@ -329,24 +377,34 @@ export function POSTicket({ sale, onNewSale, onClose }: POSTicketProps) {
         </div>
 
         {/* Botones */}
-        <div className="flex gap-2">
-          <button
-            onClick={handlePrint}
-            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-sm font-medium text-[var(--text)] hover:bg-[var(--surface2)] transition-colors active:scale-95"
-          >
-            <Printer size={15} />
-            Imprimir
-          </button>
-          <button
-            onClick={() => setInvoiceModal(true)}
-            className="flex items-center justify-center gap-2 px-4 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-sm font-medium text-[var(--text)] hover:bg-[var(--surface2)] transition-colors active:scale-95"
-          >
-            <CreditCard size={15} />
-            Factura
-          </button>
+        <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-3 gap-2">
+            <button
+              onClick={handlePrint}
+              className="flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-sm font-medium text-[var(--text)] hover:bg-[var(--surface2)] transition-colors active:scale-95"
+            >
+              <Printer size={15} />
+              Imprimir
+            </button>
+            <button
+              onClick={handleShareWhatsApp}
+              disabled={sharing}
+              className="flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[#25d366] text-white text-sm font-medium hover:bg-[#20bd5a] transition-colors active:scale-95 disabled:opacity-60"
+            >
+              {sharing ? <Loader2 size={15} className="animate-spin" /> : <MessageCircle size={15} />}
+              WhatsApp
+            </button>
+            <button
+              onClick={() => setInvoiceModal(true)}
+              className="flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-sm font-medium text-[var(--text)] hover:bg-[var(--surface2)] transition-colors active:scale-95"
+            >
+              <CreditCard size={15} />
+              Factura
+            </button>
+          </div>
           <button
             onClick={onNewSale}
-            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--accent)] text-white text-sm font-semibold hover:bg-[var(--accent-hover)] transition-colors active:scale-95"
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--accent)] text-white text-sm font-semibold hover:bg-[var(--accent-hover)] transition-colors active:scale-95"
           >
             <Plus size={15} />
             Nueva venta

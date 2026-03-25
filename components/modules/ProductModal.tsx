@@ -33,6 +33,7 @@ const emptyForm = {
   description: '',
   category_id: '',
   supplier_id: '',
+  brand_id: '',
   cost_price: '',
   stock_current: '',
   stock_min: '',
@@ -44,6 +45,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const [form, setForm] = useState(emptyForm)
   const [categories, setCategories] = useState<Category[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([])
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
@@ -56,7 +58,8 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     if (!open) return
     api.get<Category[]>('/api/products/categories').then(setCategories).catch(() => { })
     api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => { })
-    api.get<PriceList[]>('/api/price-lists').then(setPriceLists).catch(() => { })  // ← agregar
+    api.get<PriceList[]>('/api/price-lists').then(setPriceLists).catch(() => { })
+    api.get<{ id: string; name: string }[]>('/api/brands').then(setBrands).catch(() => { })
 
   }, [open])
 
@@ -70,6 +73,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         description: product.description ?? '',
         category_id: product.category_id ?? '',
         supplier_id: product.supplier_id ?? '',
+        brand_id: (product as Product & { brand_id?: string }).brand_id ?? '',
         cost_price: String(product.cost_price),
         stock_current: String(product.stock_current),
         stock_min: String(product.stock_min),
@@ -114,6 +118,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         description: form.description.trim() || null,
         category_id: form.category_id || null,
         supplier_id: form.supplier_id || null,
+        brand_id: form.brand_id || null,
         cost_price: costPrice,
         sell_price: sellPrice,
         stock_current: Number(form.stock_current) || 0,
@@ -140,6 +145,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   }
 
   const supplierOptions = suppliers.map(s => ({ value: s.id, label: s.name }))
+  const brandOptions = brands.map(b => ({ value: b.id, label: b.name }))
 
   interface CategoryWithChildren extends Category {
     children: CategoryWithChildren[]
@@ -264,8 +270,8 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
           </div>
         </div>
 
-        {/* Fila 4: Precio + Proveedor */}
-        <div className="grid grid-cols-2 gap-3">
+        {/* Fila 4: Precio + Proveedor + Marca */}
+        <div className="grid grid-cols-3 gap-3">
           <Input
             label="Precio de costo"
             type="number"
@@ -282,6 +288,13 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
             value={form.supplier_id}
             onChange={set('supplier_id')}
             placeholder="Sin proveedor"
+          />
+          <Select
+            label="Marca"
+            options={brandOptions}
+            value={form.brand_id}
+            onChange={set('brand_id')}
+            placeholder="Sin marca"
           />
         </div>
 

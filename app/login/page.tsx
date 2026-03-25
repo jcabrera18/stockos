@@ -10,6 +10,7 @@ interface Branch {
   id: string
   name: string
   address?: string
+  warehouse_id?: string
   registers: { id: string; name: string }[]
 }
 
@@ -97,6 +98,7 @@ export default function LoginPage() {
       branch_name: selectedBranch.name,
       register_id: selectedRegister.id,
       register_name: selectedRegister.name,
+      warehouse_id: selectedBranch.warehouse_id,
     })
 
     router.replace('/pos')

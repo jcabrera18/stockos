@@ -13,11 +13,35 @@ import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
 import { api } from '@/lib/api'
 import { formatCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
 import type { StockSummary, Product, Category, PaginatedResponse, Pagination as PaginationType } from '@/types'
-import { Plus, Search, Package, Pencil, Trash2, SlidersHorizontal, Tag } from 'lucide-react'
+import { Plus, Search, Package, Pencil, Trash2, SlidersHorizontal, Tag, Filter, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { ProductPriceRulesModal } from '@/components/modules/ProductPriceRulesModal'
 import { BulkPriceModal } from '@/components/modules/BulkPriceModal'
 import { TrendingUp } from 'lucide-react'
+
+interface Supplier { id: string; name: string }
+interface CategoryWithChildren extends Category { children: CategoryWithChildren[] }
+
+function buildCategoryTree(cats: Category[]): CategoryWithChildren[] {
+  const map = new Map<string, CategoryWithChildren>()
+  const roots: CategoryWithChildren[] = []
+  cats.forEach(c => map.set(c.id, { ...c, children: [] }))
+  cats.forEach(c => {
+    const node = map.get(c.id)!
+    if (c.parent_id && map.has(c.parent_id)) map.get(c.parent_id)!.children.push(node)
+    else roots.push(node)
+  })
+  return roots
+}
+
+const STOCK_STATUS_OPTIONS = [
+  { value: 'ok',       label: 'Stock OK' },
+  { value: 'bajo',     label: 'Stock bajo' },
+  { value: 'critico',  label: 'Stock crítico' },
+  { value: 'sin_stock', label: 'Sin stock' },
+]
+
+const selectClass = 'px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed'
 
 export default function ProductsPage() {
   const [data, setData] = useState<StockSummary[]>([])
@@ -25,6 +49,7 @@ export default function ProductsPage() {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [showFilters, setShowFilters] = useState(false)
 
   // Modales
   const [productModal, setProductModal] = useState(false)
@@ -40,18 +65,36 @@ export default function ProductsPage() {
 
   const [allCategories, setAllCategories] = useState<Category[]>([])
   const [bulkPriceModal, setBulkPriceModal] = useState(false)
+  const [brandFilter, setBrandFilter] = useState('')
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([])
+  const [supplierFilter, setSupplierFilter] = useState('')
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [stockStatusFilter, setStockStatusFilter] = useState('')
 
   const searchRef = useRef(search)
   const pageRef = useRef(page)
+  const brandFilterRef = useRef(brandFilter)
+  const supplierFilterRef = useRef(supplierFilter)
+  const categoryFilterRef = useRef(categoryFilter)
+  const stockStatusFilterRef = useRef(stockStatusFilter)
   useEffect(() => { searchRef.current = search }, [search])
+  useEffect(() => { brandFilterRef.current = brandFilter }, [brandFilter])
+  useEffect(() => { supplierFilterRef.current = supplierFilter }, [supplierFilter])
+  useEffect(() => { categoryFilterRef.current = categoryFilter }, [categoryFilter])
+  useEffect(() => { stockStatusFilterRef.current = stockStatusFilter }, [stockStatusFilter])
 
   const fetchProducts = useCallback(async () => {
     setLoading(true)
     try {
       const res = await api.get<PaginatedResponse<StockSummary>>('/api/products', {
-        search: searchRef.current || undefined,
-        page: pageRef.current,
-        limit: 20,
+        search:       searchRef.current || undefined,
+        brand_id:     brandFilterRef.current || undefined,
+        supplier_id:  supplierFilterRef.current || undefined,
+        category_id:  categoryFilterRef.current || undefined,
+        stock_status: stockStatusFilterRef.current || undefined,
+        page:         pageRef.current,
+        limit:        20,
       })
       setData(res.data)
       setPagination(res.pagination)
@@ -66,7 +109,7 @@ export default function ProductsPage() {
     pageRef.current = 1
     setPage(1)
     fetchProducts()
-  }, [search, fetchProducts])
+  }, [search, brandFilter, supplierFilter, categoryFilter, stockStatusFilter, fetchProducts])
 
   const handlePageChange = useCallback((newPage: number) => {
     pageRef.current = newPage
@@ -76,7 +119,40 @@ export default function ProductsPage() {
 
   useEffect(() => {
     api.get<Category[]>('/api/products/categories').then(setAllCategories).catch(() => { })
+    api.get<{ id: string; name: string }[]>('/api/brands').then(setBrands).catch(() => { })
+    api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => { })
   }, [])
+
+  // Cascada de categorías
+  const categoryMap = new Map(allCategories.map(c => [c.id, c]))
+  const l1Tree = buildCategoryTree(allCategories)
+  let catL1 = '', catL2 = '', catL3 = ''
+  if (categoryFilter) {
+    const cat = categoryMap.get(categoryFilter)
+    if (cat) {
+      if (!cat.parent_id) {
+        catL1 = categoryFilter
+      } else {
+        const parent = categoryMap.get(cat.parent_id)
+        if (parent) {
+          if (!parent.parent_id) { catL1 = parent.id; catL2 = categoryFilter }
+          else {
+            const grandparent = categoryMap.get(parent.parent_id)
+            if (grandparent) { catL1 = grandparent.id; catL2 = parent.id; catL3 = categoryFilter }
+          }
+        }
+      }
+    }
+  }
+  const l2Options = catL1 ? (l1Tree.find(c => c.id === catL1)?.children ?? []) : []
+  const l2Node    = l2Options.find(c => c.id === catL2)
+  const l3Options = catL2 ? (l2Node?.children ?? []) : []
+
+  const activeFilterCount = [brandFilter, supplierFilter, categoryFilter, stockStatusFilter].filter(Boolean).length
+
+  function clearFilters() {
+    setBrandFilter(''); setSupplierFilter(''); setCategoryFilter(''); setStockStatusFilter('')
+  }
 
   function getCategoryPath(categoryId: string | undefined, categories: Category[]): string {
     if (!categoryId) return '—'
@@ -145,17 +221,95 @@ export default function ProductsPage() {
       />
 
 
-      <div className="p-5 space-y-4">
-        {/* Búsqueda */}
-        <div className="relative max-w-sm">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar por nombre o código..."
-            className="w-full pl-9 pr-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
-          />
+      <div className="p-5 space-y-3">
+        {/* Búsqueda + botón filtros */}
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar por nombre o código..."
+              className="w-full pl-9 pr-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+            />
+          </div>
+          <button
+            onClick={() => setShowFilters(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] border transition-colors ${showFilters || activeFilterCount > 0 ? 'bg-[var(--accent)] border-[var(--accent)] text-white' : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text2)] hover:border-[var(--accent)]'}`}
+          >
+            <Filter size={14} />
+            Filtros
+            {activeFilterCount > 0 && (
+              <span className="bg-white/25 text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
         </div>
+
+        {/* Panel de filtros */}
+        {showFilters && (
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+
+              {/* Categoría en cascada */}
+              <div className="flex flex-col gap-1 sm:col-span-2 lg:col-span-1">
+                <label className="text-xs font-medium text-[var(--text3)]">Categoría</label>
+                <div className="flex gap-1">
+                  <select value={catL1} onChange={e => setCategoryFilter(e.target.value)} className={`${selectClass} flex-1 min-w-0`}>
+                    <option value="">Todas</option>
+                    {l1Tree.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  {l2Options.length > 0 && (
+                    <select value={catL2} onChange={e => setCategoryFilter(e.target.value || catL1)} className={`${selectClass} flex-1 min-w-0`}>
+                      <option value="">General</option>
+                      {l2Options.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  )}
+                  {l3Options.length > 0 && (
+                    <select value={catL3} onChange={e => setCategoryFilter(e.target.value || catL2)} className={`${selectClass} flex-1 min-w-0`}>
+                      <option value="">General</option>
+                      {l3Options.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  )}
+                </div>
+              </div>
+
+              {/* Proveedor */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--text3)]">Proveedor</label>
+                <select value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)} className={selectClass}>
+                  <option value="">Todos</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+
+              {/* Marca */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--text3)]">Marca</label>
+                <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} className={selectClass}>
+                  <option value="">Todas</option>
+                  {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+
+              {/* Estado de stock */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--text3)]">Estado stock</label>
+                <select value={stockStatusFilter} onChange={e => setStockStatusFilter(e.target.value)} className={selectClass}>
+                  <option value="">Todos</option>
+                  {STOCK_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {activeFilterCount > 0 && (
+              <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">
+                <X size={12} /> Limpiar filtros
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Tabla */}
         {loading ? <PageLoader /> : data.length === 0 ? (

@@ -21,6 +21,11 @@ interface Register {
   is_active: boolean
 }
 
+interface Warehouse {
+  id: string
+  name: string
+}
+
 interface Branch {
   id: string
   name: string
@@ -28,6 +33,8 @@ interface Branch {
   phone?: string
   is_main: boolean
   is_active: boolean
+  warehouse_id?: string
+  warehouse?: Warehouse
   registers: Register[]
 }
 
@@ -48,12 +55,13 @@ export default function BranchesPage() {
   const [tab, setTab] = useState<Tab>('branches')
   const [branches, setBranches] = useState<Branch[]>([])
   const [stats, setStats] = useState<BranchStats[]>([])
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [loading, setLoading] = useState(true)
 
   // Modal sucursal
   const [branchModal, setBranchModal] = useState(false)
   const [editBranch, setEditBranch] = useState<Branch | null>(null)
-  const [branchForm, setBranchForm] = useState({ name: '', address: '', phone: '', is_main: false })
+  const [branchForm, setBranchForm] = useState({ name: '', address: '', phone: '', is_main: false, warehouse_id: '' })
   const [savingBranch, setSavingBranch] = useState(false)
 
   // Modal eliminar sucursal
@@ -76,12 +84,14 @@ export default function BranchesPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [br, st] = await Promise.all([
+      const [br, st, wh] = await Promise.all([
         api.get<Branch[]>('/api/branches'),
         api.get<BranchStats[]>('/api/branches/stats'),
+        api.get<Warehouse[]>('/api/warehouses'),
       ])
       setBranches(br)
       setStats(st)
+      setWarehouses(wh)
     } catch (err) { console.error(err) }
     finally { setLoading(false) }
   }, [])
@@ -91,18 +101,19 @@ export default function BranchesPage() {
   // ── Sucursales ────────────────────────────────────────────
   const openCreateBranch = () => {
     setEditBranch(null)
-    setBranchForm({ name: '', address: '', phone: '', is_main: false })
+    setBranchForm({ name: '', address: '', phone: '', is_main: false, warehouse_id: '' })
     setBranchModal(true)
   }
 
   const openEditBranch = (b: Branch) => {
     setEditBranch(b)
-    setBranchForm({ name: b.name, address: b.address ?? '', phone: b.phone ?? '', is_main: b.is_main })
+    setBranchForm({ name: b.name, address: b.address ?? '', phone: b.phone ?? '', is_main: b.is_main, warehouse_id: b.warehouse_id ?? '' })
     setBranchModal(true)
   }
 
   const handleSaveBranch = async () => {
     if (!branchForm.name.trim()) { toast.error('El nombre es obligatorio'); return }
+    if (!branchForm.warehouse_id) { toast.error('Seleccioná un depósito'); return }
     setSavingBranch(true)
     try {
       const payload = {
@@ -110,6 +121,7 @@ export default function BranchesPage() {
         address: branchForm.address.trim() || null,
         phone: branchForm.phone.trim() || null,
         is_main: branchForm.is_main,
+        warehouse_id: branchForm.warehouse_id,
       }
       if (editBranch) {
         await api.patch(`/api/branches/${editBranch.id}`, payload)
@@ -242,6 +254,11 @@ export default function BranchesPage() {
                           )}
                           {branch.address && (
                             <span className="text-xs text-[var(--text3)]">· {branch.address}</span>
+                          )}
+                          {branch.warehouse && (
+                            <span className="text-xs text-[var(--text3)] bg-[var(--surface2)] px-1.5 py-0.5 rounded">
+                              {branch.warehouse.name}
+                            </span>
                           )}
                         </div>
                         <div className="flex items-center gap-1">
@@ -383,6 +400,20 @@ export default function BranchesPage() {
           <Input label="Nombre *" value={branchForm.name}
             onChange={e => setBranchForm(f => ({ ...f, name: e.target.value }))}
             placeholder="Ej: Sucursal Centro, Local Norte..." />
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-[var(--text2)]">Depósito *</label>
+            <select
+              value={branchForm.warehouse_id}
+              onChange={e => setBranchForm(f => ({ ...f, warehouse_id: e.target.value }))}
+              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+            >
+              <option value="">Seleccionar depósito...</option>
+              {warehouses.map(w => (
+                <option key={w.id} value={w.id}>{w.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-[var(--text3)]">Las ventas de esta sucursal descontarán stock de este depósito.</p>
+          </div>
           <Input label="Dirección" value={branchForm.address}
             onChange={e => setBranchForm(f => ({ ...f, address: e.target.value }))}
             placeholder="Av. Corrientes 1234, CABA" />

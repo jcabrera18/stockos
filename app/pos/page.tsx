@@ -21,6 +21,8 @@ interface CartItem {
   discount: number
   applied_list?: string
   applied_margin?: number
+  promo_label?: string
+  promotion_id?: string | null
 }
 
 interface CompletedSale {
@@ -50,6 +52,32 @@ async function getPriceForQuantity(productId: string, quantity: number): Promise
   rule_source: string
 }> {
   return api.get('/api/products/price', { product_id: productId, quantity })
+}
+
+async function checkPromo(product: Product, quantity: number, unitPrice: number): Promise<{
+  discount: number
+  promo_label: string
+  promotion_id: string | null
+}> {
+  try {
+    const res = await api.post<{
+      promo_applied: boolean
+      discount: number
+      label: string | null
+      promotion_id: string | null
+    }>('/api/promotions/check', {
+      product_id:  product.id,
+      brand_id:    (product as Product & { brand_id?: string }).brand_id ?? null,
+      category_id: product.category_id ?? null,
+      supplier_id: product.supplier_id ?? null,
+      quantity,
+      unit_price:  unitPrice,
+    })
+    if (res.promo_applied) {
+      return { discount: res.discount, promo_label: res.label ?? '', promotion_id: res.promotion_id }
+    }
+  } catch { }
+  return { discount: 0, promo_label: '', promotion_id: null }
 }
 
 export default function POSPage() {
@@ -92,7 +120,7 @@ export default function POSPage() {
   const [invoiceModal, setInvoiceModal] = useState(false)
 
   // Estados
-  const [branches, setBranches] = useState<{ id: string; name: string; registers: { id: string; name: string }[] }[]>([])
+  const [branches, setBranches] = useState<{ id: string; name: string; warehouse_id?: string; registers: { id: string; name: string }[] }[]>([])
   const [selectingWorkstation, setSelectingWorkstation] = useState(false)
   const [tempBranchId, setTempBranchId] = useState('')
   const [tempRegisterId, setTempRegisterId] = useState('')
@@ -104,6 +132,13 @@ export default function POSPage() {
 
   useEffect(() => { qtyRef.current?.focus() }, [])
 
+  // Cargar branches para el modal de selección de workstation
+  useEffect(() => {
+    api.get<{ id: string; name: string; registers: { id: string; name: string }[] }[]>('/api/branches')
+      .then(setBranches)
+      .catch(() => { })
+  }, [])
+
   useEffect(() => {
     api.get<PriceList[]>('/api/price-lists').then(lists => {
       setPriceLists(lists)
@@ -112,20 +147,23 @@ export default function POSPage() {
     }).catch(() => { })
   }, [])
 
+  // ← UN SOLO useEffect para warehouses, espera el workstation
   useEffect(() => {
-    api.get<{ id: string; name: string; is_default: boolean }[]>('/api/warehouses')
-      .then(data => {
-        setWarehouses(data)
-        setSelectedWarehouse(data.find(w => w.is_default) ?? data[0] ?? null)
-      }).catch(() => { })
-  }, [])
+    if (!workstation?.branch_id) return
+    api.get<{ id: string; name: string; is_default: boolean }[]>(
+      `/api/warehouses?branch_id=${workstation.branch_id}`
+    ).then(data => {
+      setWarehouses(data)
+      setSelectedWarehouse(data.find(w => w.is_default) ?? data[0] ?? null)
+    }).catch(() => { })
+  }, [workstation?.branch_id])
 
   useEffect(() => {
     const params = workstation?.register_id ? `?register_id=${workstation.register_id}` : ''
     api.get(`/api/cash-register/current${params}`)
       .then((data: unknown) => { if (!data) setCajaWarning(true) })
       .catch(() => { })
-  }, [workstation])
+  }, [workstation?.register_id])
 
   useEffect(() => {
     if (!query.trim()) { setResults([]); return }
@@ -148,7 +186,7 @@ export default function POSPage() {
       finally { setSearching(false) }
     }, 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [query]) // addToCart es estable (deps []), no necesita estar en deps
+  }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!customerQuery.trim() || customerQuery.length < 2) { setCustomerResults([]); return }
@@ -164,15 +202,7 @@ export default function POSPage() {
   }, [customerQuery])
 
   useEffect(() => {
-    api.get<{ id: string; name: string; registers: { id: string; name: string }[] }[]>('/api/branches')
-      .then(setBranches)
-      .catch(() => { })
-  }, [])
-
-  useEffect(() => {
-    if (workstation === null && loaded) {
-      setSelectingWorkstation(true)
-    }
+    if (workstation === null && loaded) setSelectingWorkstation(true)
   }, [workstation, loaded])
 
   const addToCart = useCallback(async (product: Product, qty?: number) => {
@@ -190,15 +220,17 @@ export default function POSPage() {
         const newQty = existing.quantity + quantity
         if (newQty > product.stock_current) { toast.error(`Stock máximo: ${product.stock_current}`); return }
         const pricing = await getPriceForQuantity(product.id, newQty)
+        const promo = await checkPromo(product, newQty, pricing.price)
         setCart(prev => prev.map(i =>
           i.product.id === product.id
-            ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct }
+            ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
             : i
         ))
       } else {
         if (quantity > product.stock_current) { toast.error(`Stock máximo: ${product.stock_current}`); return }
         const pricing = await getPriceForQuantity(product.id, quantity)
-        setCart(prev => [...prev, { product, quantity, unit_price: pricing.price, discount: 0, applied_list: pricing.list_name, applied_margin: pricing.margin_pct }])
+        const promo = await checkPromo(product, quantity, pricing.price)
+        setCart(prev => [...prev, { product, quantity, unit_price: pricing.price, discount: promo.discount, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, promo_label: promo.promo_label, promotion_id: promo.promotion_id }])
       }
       setPendingQty(1); pendingQtyRef.current = 1
       setResults([]); setQuery('')
@@ -211,9 +243,10 @@ export default function POSPage() {
     if (!item) return
     const newQty = Math.max(1, item.quantity + delta)
     const pricing = await getPriceForQuantity(id, newQty)
+    const promo = await checkPromo(item.product, newQty, pricing.price)
     setCart(prev => prev.map(i =>
       i.product.id === id
-        ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct }
+        ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
         : i
     ))
   }
@@ -246,6 +279,18 @@ export default function POSPage() {
       let sale: CompletedSale
       if (paymentMethod === 'cuenta_corriente') {
         if (!selectedCustomer) throw new Error('Seleccioná un cliente para cuenta corriente')
+
+        // Verificar límite disponible ANTES de hacer la venta
+        const freshCustomer = await api.get<CustomerSummary>(`/api/customers/${selectedCustomer.id}`)
+        if (freshCustomer.credit_limit > 0) {
+          const available = freshCustomer.available_credit ?? (freshCustomer.credit_limit - freshCustomer.current_balance)
+          if (available < total) {
+            throw new Error(
+              `Límite de cuenta corriente insuficiente. Disponible: ${formatCurrency(available)} — Total: ${formatCurrency(total)}`
+            )
+          }
+        }
+
         sale = await api.post<CompletedSale>('/api/sales', {
           ...payload,
           payment_method: 'cuenta_corriente',
@@ -274,7 +319,7 @@ export default function POSPage() {
   }
 
   if (step === 'ticket' && completedSale) {
-    return <POSTicket sale={completedSale} onNewSale={handleNewSale} onClose={() => router.push('/sales')} />
+    return <POSTicket sale={completedSale} onNewSale={handleNewSale} onClose={() => router.push('/sales')} customerPhone={selectedCustomer?.phone} />
   }
 
   return (
@@ -342,8 +387,8 @@ export default function POSPage() {
           </div>
         )}
 
-        {/* Selector de depósito */}
-        {warehouses.length > 1 && (
+        {/* Selector de depósito — solo si hay workstation y la sucursal no tiene depósito fijo */}
+        {warehouses.length > 1 && workstation && !workstation.warehouse_id && !branches.find(b => b.id === workstation.branch_id)?.warehouse_id && (
           <div className="px-4 py-2 border-b border-[var(--border)] bg-[var(--surface2)]">
             <div className="flex items-center gap-2 overflow-x-auto">
               <span className="text-xs text-[var(--text3)] flex-shrink-0">Depósito:</span>
@@ -538,6 +583,11 @@ export default function POSPage() {
                   {item.applied_margin !== undefined && ` (+${item.applied_margin}%)`}
                 </span>
               )}
+              {item.promo_label && (
+                <span className="text-xs text-[var(--warning)] font-medium">
+                  🎉 {item.promo_label}
+                </span>
+              )}
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1 bg-[var(--surface)] rounded-[var(--radius-md)] border border-[var(--border)] px-1">
                   <button onClick={() => updateQty(item.product.id, -1)} className="p-1 hover:text-[var(--accent)]"><Minus size={12} /></button>
@@ -664,7 +714,16 @@ export default function POSPage() {
             <label className="text-sm font-medium text-[var(--text2)]">Sucursal</label>
             <select
               value={tempBranchId}
-              onChange={e => { setTempBranchId(e.target.value); setTempRegisterId('') }}
+              onChange={e => {
+                const branchId = e.target.value
+                setTempBranchId(branchId)
+                setTempRegisterId('')
+                const branch = branches.find(b => b.id === branchId)
+                if (branch?.warehouse_id) {
+                  const wh = warehouses.find(w => w.id === branch.warehouse_id)
+                  if (wh) setSelectedWarehouse(wh)
+                }
+              }}
               className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
             >
               <option value="">Seleccionar...</option>
@@ -708,7 +767,12 @@ export default function POSPage() {
                     branch_name: branch.name,
                     register_id: register.id,
                     register_name: register.name,
+                    warehouse_id: branch.warehouse_id,
                   })
+                  const wh = branch.warehouse_id
+                    ? warehouses.find(w => w.id === branch.warehouse_id)
+                    : warehouses.find(w => w.is_default) ?? warehouses[0]
+                  if (wh) setSelectedWarehouse(wh)
                   setSelectingWorkstation(false)
                 }}
               >

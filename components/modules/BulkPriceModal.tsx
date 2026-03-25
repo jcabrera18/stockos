@@ -12,6 +12,7 @@ import { toast } from 'sonner'
 
 interface Supplier  { id: string; name: string }
 interface Category  { id: string; name: string; parent_id?: string }
+interface Brand     { id: string; name: string }
 
 interface PriceChange {
   id:            string
@@ -54,16 +55,19 @@ const FILTER_OPTIONS = [
   { value: 'all',      label: 'Todos los productos' },
   { value: 'category', label: 'Por categoría' },
   { value: 'supplier', label: 'Por proveedor' },
+  { value: 'brand',    label: 'Por marca' },
 ]
 
 export function BulkPriceModal({ open, onClose, onApplied }: BulkPriceModalProps) {
-  const [filter, setFilter]           = useState<'all' | 'category' | 'supplier'>('all')
+  const [filter, setFilter]           = useState<'all' | 'category' | 'supplier' | 'brand'>('all')
   const [categoryId, setCategoryId]   = useState('')
   const [supplierId, setSupplierId]   = useState('')
+  const [brandId, setBrandId]         = useState('')
   const [pctIncrease, setPctIncrease] = useState('')
   const [rounding, setRounding]       = useState<'none' | '99' | '00' | '50'>('99')
   const [categories, setCategories]   = useState<Category[]>([])
   const [suppliers, setSuppliers]     = useState<Supplier[]>([])
+  const [brands, setBrands]           = useState<Brand[]>([])
 
   const [step, setStep]               = useState<'config' | 'preview' | 'done'>('config')
   const [preview, setPreview]         = useState<PreviewResult | null>(null)
@@ -75,15 +79,17 @@ export function BulkPriceModal({ open, onClose, onApplied }: BulkPriceModalProps
     Promise.all([
       api.get<Category[]>('/api/products/categories'),
       api.get<Supplier[]>('/api/purchases/suppliers'),
-    ]).then(([cats, sups]) => {
+      api.get<Brand[]>('/api/brands'),
+    ]).then(([cats, sups, brnds]) => {
       setCategories(cats)
       setSuppliers(sups)
+      setBrands(brnds)
     }).catch(() => {})
   }, [open])
 
   useEffect(() => {
     if (!open) {
-      setFilter('all'); setCategoryId(''); setSupplierId('')
+      setFilter('all'); setCategoryId(''); setSupplierId(''); setBrandId('')
       setPctIncrease(''); setRounding('99')
       setStep('config'); setPreview(null)
     }
@@ -96,12 +102,14 @@ export function BulkPriceModal({ open, onClose, onApplied }: BulkPriceModalProps
     }
     if (filter === 'category' && !categoryId) { toast.error('Seleccioná una categoría'); return }
     if (filter === 'supplier' && !supplierId) { toast.error('Seleccioná un proveedor'); return }
+    if (filter === 'brand'    && !brandId)    { toast.error('Seleccioná una marca'); return }
 
     setLoading(true)
     try {
       const res = await api.post<PreviewResult>('/api/products/bulk-prices', {
         category_id:       filter === 'category' ? categoryId : null,
         supplier_id:       filter === 'supplier' ? supplierId : null,
+        brand_id:          filter === 'brand'    ? brandId    : null,
         cost_increase_pct: Number(pctIncrease),
         rounding,
         preview:           true,
@@ -120,6 +128,7 @@ export function BulkPriceModal({ open, onClose, onApplied }: BulkPriceModalProps
       const res = await api.post<PreviewResult>('/api/products/bulk-prices', {
         category_id:       filter === 'category' ? categoryId : null,
         supplier_id:       filter === 'supplier' ? supplierId : null,
+        brand_id:          filter === 'brand'    ? brandId    : null,
         cost_increase_pct: Number(pctIncrease),
         rounding,
         preview:           false,
@@ -135,8 +144,50 @@ export function BulkPriceModal({ open, onClose, onApplied }: BulkPriceModalProps
   const pct = Number(pctIncrease) || 0
   const isIncrease = pct >= 0
 
-  const categoryOptions = categories.map(c => ({ value: c.id, label: c.name }))
   const supplierOptions = suppliers.map(s => ({ value: s.id, label: s.name }))
+
+  // Árbol de categorías en cascada
+  interface CategoryWithChildren extends Category { children: CategoryWithChildren[] }
+  function buildCategoryTree(cats: Category[]): CategoryWithChildren[] {
+    const map = new Map<string, CategoryWithChildren>()
+    const roots: CategoryWithChildren[] = []
+    cats.forEach(c => map.set(c.id, { ...c, children: [] }))
+    cats.forEach(c => {
+      const node = map.get(c.id)!
+      if (c.parent_id && map.has(c.parent_id)) map.get(c.parent_id)!.children.push(node)
+      else roots.push(node)
+    })
+    return roots
+  }
+
+  const categoryMap = new Map(categories.map(c => [c.id, c]))
+  const l1Tree = buildCategoryTree(categories)
+
+  let catL1 = '', catL2 = '', catL3 = ''
+  if (categoryId) {
+    const cat = categoryMap.get(categoryId)
+    if (cat) {
+      if (!cat.parent_id) {
+        catL1 = categoryId
+      } else {
+        const parent = categoryMap.get(cat.parent_id)
+        if (parent) {
+          if (!parent.parent_id) {
+            catL1 = parent.id; catL2 = categoryId
+          } else {
+            const grandparent = categoryMap.get(parent.parent_id)
+            if (grandparent) { catL1 = grandparent.id; catL2 = parent.id; catL3 = categoryId }
+          }
+        }
+      }
+    }
+  }
+
+  const l2Options = catL1 ? (l1Tree.find(c => c.id === catL1)?.children ?? []) : []
+  const l2Node    = l2Options.find(c => c.id === catL2)
+  const l3Options = catL2 ? (l2Node?.children ?? []) : []
+
+  const selectClass = 'w-full px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
 
   return (
     <Modal
@@ -164,18 +215,34 @@ export function BulkPriceModal({ open, onClose, onApplied }: BulkPriceModalProps
               label="Aplicar a"
               options={FILTER_OPTIONS}
               value={filter}
-              onChange={e => { setFilter(e.target.value as typeof filter); setCategoryId(''); setSupplierId('') }}
+              onChange={e => { setFilter(e.target.value as typeof filter); setCategoryId(''); setSupplierId(''); setBrandId('') }}
             />
           </div>
 
           {filter === 'category' && (
-            <Select
-              label="Categoría *"
-              options={categoryOptions}
-              value={categoryId}
-              onChange={e => setCategoryId(e.target.value)}
-              placeholder="Seleccionar categoría..."
-            />
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-[var(--text2)]">Categoría *</label>
+              <div className="grid grid-cols-3 gap-2">
+                <select value={catL1}
+                  onChange={e => setCategoryId(e.target.value)}
+                  className={selectClass}>
+                  <option value="">Sin categoría</option>
+                  {l1Tree.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={catL2} disabled={l2Options.length === 0}
+                  onChange={e => setCategoryId(e.target.value || catL1)}
+                  className={selectClass}>
+                  <option value="">{catL1 ? 'General' : '—'}</option>
+                  {l2Options.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={catL3} disabled={l3Options.length === 0}
+                  onChange={e => setCategoryId(e.target.value || catL2)}
+                  className={selectClass}>
+                  <option value="">{catL2 ? 'General' : '—'}</option>
+                  {l3Options.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            </div>
           )}
 
           {filter === 'supplier' && (
@@ -185,6 +252,16 @@ export function BulkPriceModal({ open, onClose, onApplied }: BulkPriceModalProps
               value={supplierId}
               onChange={e => setSupplierId(e.target.value)}
               placeholder="Seleccionar proveedor..."
+            />
+          )}
+
+          {filter === 'brand' && (
+            <Select
+              label="Marca *"
+              options={brands.map(b => ({ value: b.id, label: b.name }))}
+              value={brandId}
+              onChange={e => setBrandId(e.target.value)}
+              placeholder="Seleccionar marca..."
             />
           )}
 
