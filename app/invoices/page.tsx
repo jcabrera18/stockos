@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/Badge'
@@ -87,7 +87,7 @@ const PAYMENT_LABELS: Record<string, string> = {
 
 type TypeFilter = '' | 'X' | 'A' | 'B' | 'C' | 'R'
 
-export default function InvoicesPage() {
+function InvoicesPageInner() {
   const [data, setData] = useState<Invoice[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
   const [loading, setLoading] = useState(true)
@@ -624,5 +624,13 @@ export default function InvoicesPage() {
         </div>
       </Modal>
     </AppShell>
+  )
+}
+
+export default function InvoicesPage() {
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <InvoicesPageInner />
+    </Suspense>
   )
 }
