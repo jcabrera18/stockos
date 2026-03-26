@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { StatCard } from '@/components/ui/StatCard'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
-import { PageLoader } from '@/components/ui/Spinner'
+import { StatCardSkeleton, CardListSkeleton } from '@/components/ui/Skeleton'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
 import type { DashboardStats, Sale } from '@/types'
@@ -26,6 +26,7 @@ interface TopProduct { product_id: string; name: string; total_sold: number; tot
 interface WeekComparison { this_week: number; prev_week: number; diff_pct: number; this_count: number; prev_count: number }
 interface MarginData { revenue: number; cost: number; margin: number; margin_pct: number }
 interface AccountsReceivable { total: number; top_debtors: { full_name: string; current_balance: number; credit_limit: number }[] }
+interface BranchStats { branch_id: string; branch_name: string; register_count: number; sales_today: number; revenue_today: number; revenue_month: number; open_registers: number }
 
 // ─── Colores para gráficos ────────────────────────────────
 const CHART_COLORS = ['#16a34a', '#0ea5e9', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6']
@@ -61,6 +62,7 @@ export default function DashboardPage() {
   const [weekComp, setWeekComp] = useState<WeekComparison | null>(null)
   const [margin, setMargin] = useState<MarginData | null>(null)
   const [accounts, setAccounts] = useState<AccountsReceivable | null>(null)
+  const [branchStats, setBranchStats] = useState<BranchStats[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -68,7 +70,7 @@ export default function DashboardPage() {
     if (!silent) setLoading(true)
     else setRefreshing(true)
     try {
-      const [s, sales, stock, byHour, last30, payments, top, week, mar, acc] = await Promise.all([
+      const [s, sales, stock, byHour, last30, payments, top, week, mar, acc, branches] = await Promise.all([
         api.get<DashboardStats>('/api/dashboard/stats'),
         api.get<Sale[]>('/api/dashboard/recent-sales'),
         api.get<typeof lowStock>('/api/dashboard/low-stock'),
@@ -79,6 +81,7 @@ export default function DashboardPage() {
         api.get<WeekComparison>('/api/dashboard/week-comparison'),
         api.get<MarginData>('/api/dashboard/margin'),
         api.get<AccountsReceivable>('/api/dashboard/accounts-receivable'),
+        api.get<BranchStats[]>('/api/branches/stats'),
       ])
       setStats(s)
       setRecentSales(sales)
@@ -90,6 +93,7 @@ export default function DashboardPage() {
       setWeekComp(week)
       setMargin(mar)
       setAccounts(acc)
+      setBranchStats(branches)
     } catch (err) { console.error(err) }
     finally { setLoading(false); setRefreshing(false) }
   }, [])
@@ -113,7 +117,33 @@ export default function DashboardPage() {
     label: new Date(d.sale_date).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }),
   }))
 
-  if (loading) return <AppShell><PageLoader /></AppShell>
+  if (loading) return (
+    <AppShell>
+      <div className="px-5 py-4 border-b border-[var(--border)]">
+        <div className="h-6 w-24 rounded bg-[var(--surface2)] animate-pulse" />
+        <div className="h-3.5 w-32 rounded bg-[var(--surface2)] animate-pulse mt-1.5 opacity-60" />
+      </div>
+      <div className="p-5 space-y-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          {Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 space-y-3">
+            <div className="h-4 w-40 rounded bg-[var(--surface2)] animate-pulse" />
+            <div className="h-32 rounded bg-[var(--surface2)] animate-pulse opacity-50" />
+          </div>
+          <CardListSkeleton rows={4} />
+        </div>
+        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 space-y-3">
+          <div className="h-4 w-48 rounded bg-[var(--surface2)] animate-pulse" />
+          <div className="h-48 rounded bg-[var(--surface2)] animate-pulse opacity-40" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          {Array.from({ length: 3 }).map((_, i) => <CardListSkeleton key={i} rows={5} />)}
+        </div>
+      </div>
+    </AppShell>
+  )
 
   return (
     <AppShell>
@@ -440,6 +470,8 @@ export default function DashboardPage() {
               ))}
             </div>
           </Card>
+
+          
         </div>
 
       </div>

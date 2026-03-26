@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { PageLoader } from '@/components/ui/Spinner'
+import { TableSkeleton } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ProductModal } from '@/components/modules/ProductModal'
 import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
@@ -48,6 +48,7 @@ export default function ProductsPage() {
   const [data, setData] = useState<StockSummary[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [showFilters, setShowFilters] = useState(false)
@@ -74,13 +75,17 @@ export default function ProductsPage() {
   const [categoryFilter, setCategoryFilter] = useState('')
   const [stockStatusFilter, setStockStatusFilter] = useState('')
 
-  const searchRef = useRef(search)
+  const searchRef = useRef(debouncedSearch)
   const pageRef = useRef(page)
   const brandFilterRef = useRef(brandFilter)
   const supplierFilterRef = useRef(supplierFilter)
   const categoryFilterRef = useRef(categoryFilter)
   const stockStatusFilterRef = useRef(stockStatusFilter)
-  useEffect(() => { searchRef.current = search }, [search])
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), search ? 300 : 0)
+    return () => clearTimeout(t)
+  }, [search])
+  useEffect(() => { searchRef.current = debouncedSearch }, [debouncedSearch])
   useEffect(() => { brandFilterRef.current = brandFilter }, [brandFilter])
   useEffect(() => { supplierFilterRef.current = supplierFilter }, [supplierFilter])
   useEffect(() => { categoryFilterRef.current = categoryFilter }, [categoryFilter])
@@ -111,7 +116,7 @@ export default function ProductsPage() {
     pageRef.current = 1
     setPage(1)
     fetchProducts()
-  }, [search, brandFilter, supplierFilter, categoryFilter, stockStatusFilter, fetchProducts])
+  }, [debouncedSearch, brandFilter, supplierFilter, categoryFilter, stockStatusFilter, fetchProducts])
 
   const handlePageChange = useCallback((newPage: number) => {
     pageRef.current = newPage
@@ -211,17 +216,17 @@ export default function ProductsPage() {
         title="Productos"
         description={`${pagination.total} productos`}
         action={
-          <div className="flex gap-2">
+          <>
             <Button variant="secondary" onClick={() => setPrintModal(true)}>
-              <Printer size={15} /> Lista de precios
+              <Printer size={15} /> <span className="hidden sm:inline">Lista de precios</span>
             </Button>
             <Button variant="secondary" onClick={() => setBulkPriceModal(true)}>
-              <TrendingUp size={15} /> Actualizar precios
+              <TrendingUp size={15} /> <span className="hidden sm:inline">Actualizar precios</span>
             </Button>
             <Button onClick={openCreate}>
               <Plus size={15} /> Nuevo producto
             </Button>
-          </div>
+          </>
         }
       />
 
@@ -317,7 +322,7 @@ export default function ProductsPage() {
         )}
 
         {/* Tabla */}
-        {loading ? <PageLoader /> : data.length === 0 ? (
+        {loading ? <TableSkeleton rows={12} /> : data.length === 0 ? (
           <EmptyState
             icon={Package}
             title={search ? 'Sin resultados' : 'Sin productos'}
@@ -373,7 +378,7 @@ export default function ProductsPage() {
                         </Badge>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                           {/* Ajuste de stock */}
                           <button
                             onClick={() => handleAdjust(product)}

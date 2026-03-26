@@ -82,3 +82,13 @@ body {
 
 /* ─── Mono numbers ───────────────────────────────────────── */
 .mono { font-family: var(--font-mono); }
+
+/* ─── iOS safe areas ─────────────────────────────────────── */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+.pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+
+/* ─── Tap delay fix (pre-iOS 13) ─────────────────────────── */
+button, a, [role="button"] {
+  touch-action: manipulation;
+}
+

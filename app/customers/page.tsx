@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { PageLoader } from '@/components/ui/Spinner'
+import { TableSkeleton } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { CustomerModal } from '@/components/modules/CustomerModal'
 import { PaymentModal } from '@/components/modules/PaymentModal'
@@ -46,6 +46,7 @@ export default function CustomersPage() {
   const [data, setData] = useState<CustomerSummary[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [filter, setFilter] = useState<FilterTab>('all')
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
@@ -61,10 +62,14 @@ export default function CustomersPage() {
   const [deleteCustomer, setDeleteCustomer] = useState<CustomerSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  const searchRef = useRef(search)
+  const searchRef = useRef(debouncedSearch)
   const filterRef = useRef(filter)
   const pageRef = useRef(page)
-  useEffect(() => { searchRef.current = search }, [search])
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), search ? 300 : 0)
+    return () => clearTimeout(t)
+  }, [search])
+  useEffect(() => { searchRef.current = debouncedSearch }, [debouncedSearch])
   useEffect(() => { filterRef.current = filter }, [filter])
 
   const fetchCustomers = useCallback(async () => {
@@ -90,7 +95,7 @@ export default function CustomersPage() {
     pageRef.current = 1
     setPage(1)
     fetchCustomers()
-  }, [search, filter, fetchCustomers])
+  }, [debouncedSearch, filter, fetchCustomers])
 
   const handlePageChange = useCallback((newPage: number) => {
     pageRef.current = newPage
@@ -146,18 +151,18 @@ export default function CustomersPage() {
               {t.label}
             </button>
           ))}
-          <div className="relative ml-auto">
+          <div className="relative ml-auto min-w-[130px]">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Buscar cliente..."
-              className="pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+              className="w-full pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
         </div>
 
-        {loading ? <PageLoader /> : data.length === 0 ? (
+        {loading ? <TableSkeleton rows={10} /> : data.length === 0 ? (
           <EmptyState
             icon={Users}
             title="Sin clientes"
@@ -166,6 +171,7 @@ export default function CustomersPage() {
           />
         ) : (
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--border)]">
@@ -216,7 +222,7 @@ export default function CustomersPage() {
                         <Badge variant={sc.variant}>{sc.label}</Badge>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                           {/* Ver movimientos */}
                           <button onClick={() => { setDetailCustomer(customer); setDetailModal(true) }}
                             title="Ver cuenta" className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors">
@@ -246,6 +252,7 @@ export default function CustomersPage() {
                 })}
               </tbody>
             </table>
+            </div>
             <Pagination pagination={pagination} onPageChange={handlePageChange} />
           </div>
         )}

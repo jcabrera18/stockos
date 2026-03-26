@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { PageLoader } from '@/components/ui/Spinner'
+import { TableSkeleton } from '@/components/ui/Skeleton'
 import { api } from '@/lib/api'
 import { getStockStatusLabel, formatCurrency } from '@/lib/utils'
 import type { StockSummary, PaginatedResponse, Pagination as PaginationType } from '@/types'
@@ -27,6 +27,7 @@ export default function StockPage() {
   const [data, setData] = useState<StockItem[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 50, pages: 0 })
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [filter, setFilter] = useState<StockFilter>('all')
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
@@ -44,11 +45,15 @@ export default function StockPage() {
       .catch(() => { })
   }, [])
 
-  const searchRef = useRef(search)
+  const searchRef = useRef(debouncedSearch)
   const filterRef = useRef(filter)
   const selectedWarehouseRef = useRef(selectedWarehouse)
   const pageRef = useRef(page)
-  useEffect(() => { searchRef.current = search }, [search])
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), search ? 300 : 0)
+    return () => clearTimeout(t)
+  }, [search])
+  useEffect(() => { searchRef.current = debouncedSearch }, [debouncedSearch])
   useEffect(() => { filterRef.current = filter }, [filter])
   useEffect(() => { selectedWarehouseRef.current = selectedWarehouse }, [selectedWarehouse])
 
@@ -76,7 +81,7 @@ export default function StockPage() {
     pageRef.current = 1
     setPage(1)
     fetchStock()
-  }, [search, filter, selectedWarehouse, fetchStock])
+  }, [debouncedSearch, filter, selectedWarehouse, fetchStock])
 
   const handlePageChange = useCallback((newPage: number) => {
     pageRef.current = newPage
@@ -118,7 +123,7 @@ export default function StockPage() {
         )}
 
         {/* Filtros + buscador */}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
           {filters.map(f => (
             <button key={f.key} onClick={() => setFilter(f.key)}
               className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${filter === f.key
@@ -128,16 +133,16 @@ export default function StockPage() {
               {f.label}
             </button>
           ))}
-          <div className="relative ml-auto">
+          <div className="relative ml-auto min-w-[120px]">
             <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
             <input value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Buscar..."
-              className="pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+              className="w-full pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
         </div>
 
-        {loading ? <PageLoader /> : data.length === 0 ? (
+        {loading ? <TableSkeleton rows={15} /> : data.length === 0 ? (
           <EmptyState icon={Boxes} title="Sin resultados" description="Probá con otro filtro." />
         ) : (
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">

@@ -118,6 +118,7 @@ export default function POSPage() {
 
   const [cajaWarning, setCajaWarning] = useState(false)
   const [invoiceModal, setInvoiceModal] = useState(false)
+  const [mobileView, setMobileView] = useState<'search' | 'cart'>('search')
 
   // Estados
   const [branches, setBranches] = useState<{ id: string; name: string; warehouse_id?: string; registers: { id: string; name: string }[] }[]>([])
@@ -173,13 +174,13 @@ export default function POSPage() {
       try {
         if (/^\d{8,14}$/.test(query.trim())) {
           try {
-            const p = await api.get<Product>(`/api/products/barcode/${query.trim()}`)
+            const p = await api.get<Product>(`/api/products/barcode/${query.trim()}`, selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : undefined)
             addToCart(p)
             setQuery(''); setResults([])
             return
           } catch { }
         }
-        const res = await api.get<{ data: Product[] }>('/api/products', { search: query.trim(), limit: 8 })
+        const res = await api.get<{ data: Product[] }>('/api/products', { search: query.trim(), limit: 8, ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}) })
         setResults(res.data)
         setActiveResultIndex(res.data.length > 0 ? 0 : -1)
       } catch { setResults([]); setActiveResultIndex(-1) }
@@ -276,6 +277,8 @@ export default function POSPage() {
         branch_id: workstation?.branch_id ?? null,
         register_id: workstation?.register_id ?? null,
       }
+      console.log('payload warehouse_id:', selectedWarehouse?.id)
+console.log('workstation:', workstation)
       let sale: CompletedSale
       if (paymentMethod === 'cuenta_corriente') {
         if (!selectedCustomer) throw new Error('Seleccioná un cliente para cuenta corriente')
@@ -322,11 +325,13 @@ export default function POSPage() {
     return <POSTicket sale={completedSale} onNewSale={handleNewSale} onClose={() => router.push('/sales')} customerPhone={selectedCustomer?.phone} />
   }
 
-  return (
-    <div className="flex h-screen bg-[var(--bg)] overflow-hidden">
+  const cartItemCount = cart.reduce((a, i) => a + i.quantity, 0)
 
-      {/* Panel izquierdo */}
-      <div className="flex-1 flex flex-col min-w-0 border-r border-[var(--border)]">
+  return (
+    <div className="flex flex-col sm:flex-row h-screen bg-[var(--bg)] overflow-hidden">
+
+      {/* Panel izquierdo — búsqueda */}
+      <div className={`flex-1 flex flex-col min-w-0 border-r border-[var(--border)] pb-14 sm:pb-0 ${mobileView === 'cart' ? 'hidden sm:flex' : 'flex'}`}>
 
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)] bg-[var(--surface)]">
@@ -433,8 +438,8 @@ export default function POSPage() {
                     if (query.trim()) {
                       setSearching(true)
                       try {
-                        if (/^\d{8,14}$/.test(query.trim())) { const p = await api.get<Product>(`/api/products/barcode/${query.trim()}`); addToCart(p, pendingQtyRef.current); return }
-                        const res = await api.get<{ data: Product[] }>('/api/products', { search: query.trim(), limit: 8 })
+                        if (/^\d{8,14}$/.test(query.trim())) { const p = await api.get<Product>(`/api/products/barcode/${query.trim()}`, selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : undefined); addToCart(p, pendingQtyRef.current); return }
+                        const res = await api.get<{ data: Product[] }>('/api/products', { search: query.trim(), limit: 8, ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}) })
                         setResults(res.data)
                         if (res.data.length === 1) addToCart(res.data[0], pendingQtyRef.current)
                       } catch { setResults([]) } finally { setSearching(false) }
@@ -485,8 +490,8 @@ export default function POSPage() {
         </div>
       </div>
 
-      {/* Panel derecho: carrito */}
-      <div className="w-96 flex flex-col bg-[var(--surface)] flex-shrink-0">
+      {/* Panel derecho — carrito */}
+      <div className={`sm:w-96 flex-shrink-0 flex flex-col bg-[var(--surface)] pb-14 sm:pb-0 ${mobileView === 'search' ? 'hidden sm:flex' : 'flex flex-1'}`}>
 
         {/* Cliente */}
         <div className="px-3 py-3 border-b border-[var(--border)]">
@@ -589,10 +594,10 @@ export default function POSPage() {
                 </span>
               )}
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1 bg-[var(--surface)] rounded-[var(--radius-md)] border border-[var(--border)] px-1">
-                  <button onClick={() => updateQty(item.product.id, -1)} className="p-1 hover:text-[var(--accent)]"><Minus size={12} /></button>
-                  <span className="text-sm mono font-semibold w-6 text-center">{item.quantity}</span>
-                  <button onClick={() => updateQty(item.product.id, 1)} className="p-1 hover:text-[var(--accent)]"><Plus size={12} /></button>
+                <div className="flex items-center bg-[var(--surface)] rounded-[var(--radius-md)] border border-[var(--border)]">
+                  <button onClick={() => updateQty(item.product.id, -1)} className="p-2.5 hover:text-[var(--accent)] active:text-[var(--accent)]"><Minus size={13} /></button>
+                  <span className="text-sm mono font-semibold w-8 text-center">{item.quantity}</span>
+                  <button onClick={() => updateQty(item.product.id, 1)} className="p-2.5 hover:text-[var(--accent)] active:text-[var(--accent)]"><Plus size={13} /></button>
                 </div>
                 <div className="flex items-center gap-1 flex-1">
                   <span className="text-xs text-[var(--text3)]">$</span>
@@ -685,6 +690,29 @@ export default function POSPage() {
             </button>
           </div>
         )}
+      </div>
+
+      {/* ── Barra de tabs mobile ── */}
+      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 flex border-t border-[var(--border)] bg-[var(--surface)]/95 backdrop-blur-md">
+        <button
+          onClick={() => setMobileView('search')}
+          className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium transition-colors ${mobileView === 'search' ? 'text-[var(--accent)]' : 'text-[var(--text3)]'}`}
+        >
+          <Search size={20} strokeWidth={mobileView === 'search' ? 2.5 : 1.8} />
+          Buscar
+        </button>
+        <button
+          onClick={() => setMobileView('cart')}
+          className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium transition-colors relative ${mobileView === 'cart' ? 'text-[var(--accent)]' : 'text-[var(--text3)]'}`}
+        >
+          <ShoppingCart size={20} strokeWidth={mobileView === 'cart' ? 2.5 : 1.8} />
+          Carrito
+          {cartItemCount > 0 && (
+            <span className="absolute top-1.5 right-1/4 min-w-[18px] h-[18px] bg-[var(--accent)] text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
+              {cartItemCount}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* Modal factura */}

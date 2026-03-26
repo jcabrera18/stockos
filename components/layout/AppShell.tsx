@@ -1,18 +1,5 @@
-import { Sidebar } from './Sidebar'
-import { BottomNav } from './BottomNav'
-
-interface AppShellProps {
-  children: React.ReactNode
-}
-
-export function AppShell({ children }: AppShellProps) {
-  return (
-    <div className="flex h-screen bg-[var(--bg)] overflow-hidden">
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
-        {children}
-      </main>
-      <BottomNav />
-    </div>
-  )
+// El shell real (Sidebar + BottomNav) vive en AppShellWrapper dentro del root layout
+// y persiste entre navegaciones. Este componente es un passthrough para compatibilidad.
+export function AppShell({ children }: { children: React.ReactNode }) {
+  return <>{children}</>
 }

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { PageLoader } from '@/components/ui/Spinner'
+import { TableSkeleton } from '@/components/ui/Skeleton'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel, getPeriodDates } from '@/lib/utils'
 import type { Sale, PaginatedResponse, Pagination as PaginationType } from '@/types'
@@ -27,6 +27,8 @@ export default function SalesPage() {
   const [paymentFilter, setPaymentFilter] = useState('')
   const [minAmount, setMinAmount] = useState('')
   const [maxAmount, setMaxAmount] = useState('')
+  const [debouncedMin, setDebouncedMin] = useState('')
+  const [debouncedMax, setDebouncedMax] = useState('')
   const [customerFilter, setCustomerFilter] = useState<{ id: string; full_name: string } | null>(null)
   const [customerSearch, setCustomerSearch] = useState('')
   const [customerOptions, setCustomerOptions] = useState<{ id: string; full_name: string }[]>([])
@@ -42,8 +44,16 @@ export default function SalesPage() {
 
   useEffect(() => { periodRef.current = period }, [period])
   useEffect(() => { paymentRef.current = paymentFilter }, [paymentFilter])
-  useEffect(() => { minAmountRef.current = minAmount }, [minAmount])
-  useEffect(() => { maxAmountRef.current = maxAmount }, [maxAmount])
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedMin(minAmount), minAmount ? 500 : 0)
+    return () => clearTimeout(t)
+  }, [minAmount])
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedMax(maxAmount), maxAmount ? 500 : 0)
+    return () => clearTimeout(t)
+  }, [maxAmount])
+  useEffect(() => { minAmountRef.current = debouncedMin }, [debouncedMin])
+  useEffect(() => { maxAmountRef.current = debouncedMax }, [debouncedMax])
   useEffect(() => { customerRef.current = customerFilter }, [customerFilter])
 
   const fetchSales = useCallback(async () => {
@@ -72,7 +82,7 @@ export default function SalesPage() {
     pageRef.current = 1
     setPage(1)
     fetchSales()
-  }, [period, paymentFilter, minAmount, maxAmount, customerFilter, fetchSales])
+  }, [period, paymentFilter, debouncedMin, debouncedMax, customerFilter, fetchSales])
 
   // Cambio de página desde el componente Pagination
   const handlePageChange = useCallback((newPage: number) => {
@@ -219,13 +229,13 @@ export default function SalesPage() {
 
           {/* Total filtrado */}
           {!loading && (
-            <span className="ml-auto text-xs text-[var(--text3)]">
+            <span className="sm:ml-auto w-full sm:w-auto text-xs text-[var(--text3)]">
               {pagination.total} ventas · {formatCurrency(totalRevenue)}
             </span>
           )}
         </div>
 
-        {loading ? <PageLoader /> : data.length === 0 ? (
+        {loading ? <TableSkeleton rows={10} /> : data.length === 0 ? (
           <EmptyState
             icon={ShoppingCart}
             title="Sin ventas"
