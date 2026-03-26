@@ -76,6 +76,25 @@ export function getRoleLabel(role: string): string {
   return labels[role] ?? role
 }
 
+// Día 1 del mes actual 00:00:00 en hora local del browser (para month-comparison)
+export function getLocalMonthStart(): string {
+  const d = new Date()
+  d.setDate(1)
+  d.setHours(0, 0, 0, 0)
+  return d.toISOString()
+}
+
+// Lunes 00:00:00 en hora local del browser (para week-comparison)
+export function getLocalWeekStart(): string {
+  const now = new Date()
+  const day = now.getDay() // 0=dom, 1=lun, ..., 6=sab
+  const daysFromMonday = day === 0 ? 6 : day - 1
+  const monday = new Date(now)
+  monday.setDate(now.getDate() - daysFromMonday)
+  monday.setHours(0, 0, 0, 0)
+  return monday.toISOString()
+}
+
 // Períodos para filtros de fecha
 export function getPeriodDates(period: 'today' | 'week' | 'month' | 'year') {
   const now = new Date()

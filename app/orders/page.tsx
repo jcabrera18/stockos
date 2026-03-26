@@ -18,6 +18,7 @@ import type { PriceList } from '@/app/price-lists/page'
 import {
   Plus, Search, Package, CheckCircle, Clock, Truck,
   X, Minus, Trash2, ChevronRight, DollarSign, AlertCircle,
+  ClipboardList, Printer,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -174,6 +175,34 @@ export default function OrdersPage() {
 
   const [stockIssues, setStockIssues] = useState<Record<string, { available: number; needed: number }>>({})
 
+  // Lista de carga (picking)
+  interface PickingItem {
+    product_id: string; name: string; barcode?: string; unit: string; total_qty: number
+    orders: { id: string; customer_name: string; status: string; quantity: number }[]
+  }
+  const [pickingModal, setPickingModal] = useState(false)
+  const [pickingItems, setPickingItems] = useState<PickingItem[]>([])
+  const [loadingPicking, setLoadingPicking] = useState(false)
+  const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
+
+  const openPickingList = async () => {
+    setPickingModal(true)
+    setCheckedItems(new Set())
+    setLoadingPicking(true)
+    try {
+      const data = await api.get<PickingItem[]>('/api/orders/picking-list')
+      setPickingItems(data)
+    } catch { setPickingItems([]) }
+    finally { setLoadingPicking(false) }
+  }
+
+  const togglePickingCheck = (productId: string) =>
+    setCheckedItems(prev => {
+      const next = new Set(prev)
+      next.has(productId) ? next.delete(productId) : next.add(productId)
+      return next
+    })
+
   const statusFilterRef = useRef(statusFilter)
   const searchRef = useRef(search)
   const pageRef = useRef(page)
@@ -272,6 +301,20 @@ export default function OrdersPage() {
     setCart(prev => prev.map(i => i.product.id === id
       ? { ...i, quantity: Math.max(1, i.quantity + delta) } : i))
 
+  const setCartQty = (id: string, value: string) => {
+    const n = parseInt(value, 10)
+    if (!value) {
+      // Dejar el campo vacío temporalmente — se normaliza al salir
+      setCart(prev => prev.map(i => i.product.id === id ? { ...i, quantity: 0 } : i))
+    } else if (!isNaN(n) && n >= 1) {
+      setCart(prev => prev.map(i => i.product.id === id ? { ...i, quantity: n } : i))
+    }
+  }
+
+  const normalizeCartQty = (id: string) =>
+    setCart(prev => prev.map(i => i.product.id === id
+      ? { ...i, quantity: Math.max(1, i.quantity) } : i))
+
   const updateCartPrice = (id: string, value: string) =>
     setCart(prev => prev.map(i => i.product.id === id
       ? { ...i, unit_price: Math.max(0, Number(value) || 0) } : i))
@@ -280,8 +323,9 @@ export default function OrdersPage() {
     setCart(prev => prev.filter(i => i.product.id !== id))
 
   const cartSubtotal = cart.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
-  const cartDiscount = Number(orderDiscount) || 0
-  const cartTotal = Math.max(0, cartSubtotal - cartDiscount)
+  const discountPct  = Math.min(100, Math.max(0, Number(orderDiscount) || 0))
+  const cartDiscount = Math.round(cartSubtotal * discountPct / 100 * 100) / 100
+  const cartTotal    = Math.max(0, cartSubtotal - cartDiscount)
 
   const resetOrderForm = () => {
     setOrderNotes(''); setOrderDiscount(''); setCart([])
@@ -431,7 +475,16 @@ export default function OrdersPage() {
       <PageHeader
         title="Pedidos"
         description={`${pagination.total} pedidos`}
-        action={<Button onClick={() => setNewOrderModal(true)}><Plus size={15} /> Nuevo pedido</Button>}
+        action={
+          <>
+            <Button variant="secondary" onClick={openPickingList}>
+              <ClipboardList size={15} /> <span className="hidden sm:inline">Lista de carga</span>
+            </Button>
+            <Button onClick={() => setNewOrderModal(true)}>
+              <Plus size={15} /> Nuevo pedido
+            </Button>
+          </>
+        }
       />
 
       <div className="p-5 space-y-4">
@@ -863,10 +916,22 @@ export default function OrdersPage() {
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button onClick={() => updateCartQty(item.product.id, -1)}
-                            className="p-0.5 hover:text-[var(--accent)]"><Minus size={11} /></button>
-                          <span className="mono text-sm w-6 text-center">{item.quantity}</span>
+                            className="p-1 rounded hover:bg-[var(--surface2)] hover:text-[var(--accent)] transition-colors">
+                            <Minus size={11} />
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.quantity || ''}
+                            onChange={e => setCartQty(item.product.id, e.target.value)}
+                            onBlur={() => normalizeCartQty(item.product.id)}
+                            onFocus={e => e.target.select()}
+                            className="w-12 text-sm mono text-center bg-[var(--surface)] border border-[var(--border)] rounded px-1 py-0.5 focus:outline-none focus:border-[var(--accent)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
                           <button onClick={() => updateCartQty(item.product.id, 1)}
-                            className="p-0.5 hover:text-[var(--accent)]"><Plus size={11} /></button>
+                            className="p-1 rounded hover:bg-[var(--surface2)] hover:text-[var(--accent)] transition-colors">
+                            <Plus size={11} />
+                          </button>
                         </div>
                       </td>
                       <td className="px-3 py-2 text-right">
@@ -888,14 +953,26 @@ export default function OrdersPage() {
                   ))}
                 </tbody>
               </table>
-              <div className="px-3 py-2 border-t border-[var(--border)] flex items-center justify-between">
+              <div className="px-3 py-2 border-t border-[var(--border)] flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-[var(--text3)]">Descuento:</span>
-                  <input type="number" min="0" value={orderDiscount}
-                    onChange={e => setOrderDiscount(e.target.value)}
-                    placeholder="0"
-                    className="w-20 text-xs mono text-right bg-[var(--surface)] border border-[var(--border)] rounded px-1.5 py-1 focus:outline-none focus:border-[var(--accent)]"
-                  />
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.5"
+                      value={orderDiscount}
+                      onChange={e => setOrderDiscount(e.target.value)}
+                      onFocus={e => e.target.select()}
+                      placeholder="0"
+                      className="w-16 text-xs mono text-right bg-[var(--surface)] border border-[var(--border)] rounded px-1.5 py-1 focus:outline-none focus:border-[var(--accent)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <span className="text-xs text-[var(--text3)]">%</span>
+                  </div>
+                  {cartDiscount > 0 && (
+                    <span className="text-xs text-[var(--danger)] mono">−{formatCurrency(cartDiscount)}</span>
+                  )}
                 </div>
                 <div className="text-right">
                   <p className="text-lg font-bold mono text-[var(--accent)]">{formatCurrency(cartTotal)}</p>
@@ -997,6 +1074,122 @@ export default function OrdersPage() {
             </div>
           </div>
         </div>
+      </Modal>
+
+      {/* ── Modal: Lista de carga ── */}
+      <Modal
+        open={pickingModal}
+        onClose={() => setPickingModal(false)}
+        title="Lista de carga"
+        size="lg"
+      >
+        {loadingPicking ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-6 h-6 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : pickingItems.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-2 text-[var(--text3)]">
+            <ClipboardList size={32} className="opacity-40" />
+            <p className="text-sm">No hay pedidos confirmados pendientes de carga</p>
+          </div>
+        ) : (() => {
+          const pending = pickingItems.filter(i => !checkedItems.has(i.product_id))
+          const done    = pickingItems.filter(i =>  checkedItems.has(i.product_id))
+          const sorted  = [...pending, ...done]
+          return (
+            <div className="space-y-3">
+              {/* Resumen + progreso */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-[var(--text3)]">
+                    <span className="font-semibold text-[var(--text)] mono">{pickingItems.length}</span> productos ·{' '}
+                    <span className="font-semibold text-[var(--text)] mono">
+                      {new Set(pickingItems.flatMap(i => i.orders.map(o => o.id))).size}
+                    </span>{' '}pedidos
+                  </p>
+                  {checkedItems.size > 0 && (
+                    <p className="text-xs text-[var(--accent)] font-medium mt-0.5">
+                      {checkedItems.size} de {pickingItems.length} cargados
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => window.print()}
+                  className="flex items-center gap-1.5 text-xs text-[var(--text3)] hover:text-[var(--text)] transition-colors"
+                >
+                  <Printer size={13} /> Imprimir
+                </button>
+              </div>
+
+              {/* Barra de progreso */}
+              {checkedItems.size > 0 && (
+                <div className="h-1.5 bg-[var(--surface2)] rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-[var(--accent)] rounded-full transition-all duration-300"
+                    style={{ width: `${(checkedItems.size / pickingItems.length) * 100}%` }}
+                  />
+                </div>
+              )}
+
+              {/* Lista de productos */}
+              <div className="divide-y divide-[var(--border)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
+                {sorted.map((item, idx) => {
+                  const checked = checkedItems.has(item.product_id)
+                  return (
+                    <button
+                      key={item.product_id}
+                      onClick={() => togglePickingCheck(item.product_id)}
+                      className={`w-full px-4 py-3 text-left transition-colors ${checked ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--surface2)]'}`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3 min-w-0">
+                          {/* Checkbox visual */}
+                          <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${checked ? 'bg-[var(--accent)] border-[var(--accent)]' : 'border-[var(--border)]'}`}>
+                            {checked && (
+                              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                                <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className={`font-semibold truncate transition-colors ${checked ? 'text-[var(--text3)] line-through' : 'text-[var(--text)]'}`}>
+                              {!checked && <span className="text-xs mono text-[var(--text3)] mr-1.5">{idx + 1}.</span>}
+                              {item.name}
+                            </p>
+                            {item.barcode && !checked && <p className="text-xs mono text-[var(--text3)]">{item.barcode}</p>}
+                            {!checked && (
+                              <div className="mt-1.5 space-y-0.5">
+                                {item.orders.map(o => (
+                                  <div key={o.id} className="flex items-center gap-2 text-xs text-[var(--text2)]">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-[var(--border)] flex-shrink-0" />
+                                    <span className="truncate">{o.customer_name}</span>
+                                    <span className="mono text-[var(--text3)] flex-shrink-0">× {o.quantity} {item.unit}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex-shrink-0 text-right">
+                          <p className={`text-xl font-bold mono transition-colors ${checked ? 'text-[var(--text3)]' : 'text-[var(--accent)]'}`}>
+                            {item.total_qty}
+                          </p>
+                          <p className="text-xs text-[var(--text3)]">{item.unit}</p>
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {checkedItems.size === pickingItems.length && pickingItems.length > 0 && (
+                <p className="text-center text-sm font-semibold text-[var(--accent)] py-2">
+                  ✓ Todo cargado al camión
+                </p>
+              )}
+            </div>
+          )
+        })()}
       </Modal>
     </AppShell>
   )

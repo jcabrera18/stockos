@@ -13,7 +13,10 @@ import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
 import { api } from '@/lib/api'
 import { formatCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
 import type { StockSummary, Product, Category, PaginatedResponse, Pagination as PaginationType } from '@/types'
-import { Plus, Search, Package, Pencil, Trash2, SlidersHorizontal, Tag, Filter, X } from 'lucide-react'
+import {
+  Plus, Search, Package, Pencil, Trash2, SlidersHorizontal,
+  Tag, Filter, X, ChevronUp, ChevronDown, ArrowUpDown,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { ProductPriceRulesModal } from '@/components/modules/ProductPriceRulesModal'
 import { BulkPriceModal } from '@/components/modules/BulkPriceModal'
@@ -36,13 +39,28 @@ function buildCategoryTree(cats: Category[]): CategoryWithChildren[] {
 }
 
 const STOCK_STATUS_OPTIONS = [
-  { value: 'ok',       label: 'Stock OK' },
-  { value: 'bajo',     label: 'Stock bajo' },
-  { value: 'critico',  label: 'Stock crítico' },
+  { value: 'ok',        label: 'Stock OK' },
+  { value: 'bajo',      label: 'Stock bajo' },
+  { value: 'critico',   label: 'Stock crítico' },
   { value: 'sin_stock', label: 'Sin stock' },
 ]
 
+const SORT_OPTIONS = [
+  { value: 'name',          label: 'Nombre' },
+  { value: 'sell_price',    label: 'Precio venta' },
+  { value: 'cost_price',    label: 'Precio costo' },
+  { value: 'stock_current', label: 'Stock' },
+]
+
 const selectClass = 'px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed'
+
+type SortField = 'name' | 'sell_price' | 'cost_price' | 'stock_current'
+type SortDir   = 'asc' | 'desc'
+
+function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortField; sortDir: SortDir }) {
+  if (sortBy !== field) return <ArrowUpDown size={11} className="opacity-25 group-hover:opacity-60 transition-opacity" />
+  return sortDir === 'asc' ? <ChevronUp size={11} className="text-[var(--accent)]" /> : <ChevronDown size={11} className="text-[var(--accent)]" />
+}
 
 export default function ProductsPage() {
   const [data, setData] = useState<StockSummary[]>([])
@@ -50,6 +68,9 @@ export default function ProductsPage() {
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [page, setPage] = useState(1)
+  const [limit, setLimit] = useState(20)
+  const [sortBy, setSortBy] = useState<SortField>('name')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [loading, setLoading] = useState(true)
   const [showFilters, setShowFilters] = useState(false)
 
@@ -68,40 +89,70 @@ export default function ProductsPage() {
   const [allCategories, setAllCategories] = useState<Category[]>([])
   const [bulkPriceModal, setBulkPriceModal] = useState(false)
   const [printModal, setPrintModal] = useState(false)
+
+  // Filtros
   const [brandFilter, setBrandFilter] = useState('')
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([])
   const [supplierFilter, setSupplierFilter] = useState('')
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [categoryFilter, setCategoryFilter] = useState('')
   const [stockStatusFilter, setStockStatusFilter] = useState('')
+  const [minPriceInput, setMinPriceInput] = useState('')
+  const [maxPriceInput, setMaxPriceInput] = useState('')
+  const [minPrice, setMinPrice] = useState('')
+  const [maxPrice, setMaxPrice] = useState('')
 
-  const searchRef = useRef(debouncedSearch)
-  const pageRef = useRef(page)
-  const brandFilterRef = useRef(brandFilter)
-  const supplierFilterRef = useRef(supplierFilter)
-  const categoryFilterRef = useRef(categoryFilter)
-  const stockStatusFilterRef = useRef(stockStatusFilter)
+  // Refs para acceso síncrono en callbacks
+  const searchRef       = useRef(debouncedSearch)
+  const pageRef         = useRef(page)
+  const limitRef        = useRef(limit)
+  const sortByRef       = useRef(sortBy)
+  const sortDirRef      = useRef(sortDir)
+  const brandRef        = useRef(brandFilter)
+  const supplierRef     = useRef(supplierFilter)
+  const categoryRef     = useRef(categoryFilter)
+  const stockStatusRef  = useRef(stockStatusFilter)
+  const minPriceRef     = useRef(minPrice)
+  const maxPriceRef     = useRef(maxPrice)
+
+  // Debounces
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), search ? 300 : 0)
     return () => clearTimeout(t)
   }, [search])
+  useEffect(() => {
+    const t = setTimeout(() => setMinPrice(minPriceInput), 400)
+    return () => clearTimeout(t)
+  }, [minPriceInput])
+  useEffect(() => {
+    const t = setTimeout(() => setMaxPrice(maxPriceInput), 400)
+    return () => clearTimeout(t)
+  }, [maxPriceInput])
+
+  // Sync refs
   useEffect(() => { searchRef.current = debouncedSearch }, [debouncedSearch])
-  useEffect(() => { brandFilterRef.current = brandFilter }, [brandFilter])
-  useEffect(() => { supplierFilterRef.current = supplierFilter }, [supplierFilter])
-  useEffect(() => { categoryFilterRef.current = categoryFilter }, [categoryFilter])
-  useEffect(() => { stockStatusFilterRef.current = stockStatusFilter }, [stockStatusFilter])
+  useEffect(() => { brandRef.current = brandFilter }, [brandFilter])
+  useEffect(() => { supplierRef.current = supplierFilter }, [supplierFilter])
+  useEffect(() => { categoryRef.current = categoryFilter }, [categoryFilter])
+  useEffect(() => { stockStatusRef.current = stockStatusFilter }, [stockStatusFilter])
+  useEffect(() => { minPriceRef.current = minPrice }, [minPrice])
+  useEffect(() => { maxPriceRef.current = maxPrice }, [maxPrice])
 
   const fetchProducts = useCallback(async () => {
     setLoading(true)
     try {
       const res = await api.get<PaginatedResponse<StockSummary>>('/api/products', {
-        search:       searchRef.current || undefined,
-        brand_id:     brandFilterRef.current || undefined,
-        supplier_id:  supplierFilterRef.current || undefined,
-        category_id:  categoryFilterRef.current || undefined,
-        stock_status: stockStatusFilterRef.current || undefined,
+        search:       searchRef.current     || undefined,
+        brand_id:     brandRef.current      || undefined,
+        supplier_id:  supplierRef.current   || undefined,
+        category_id:  categoryRef.current   || undefined,
+        stock_status: stockStatusRef.current || undefined,
+        min_price:    minPriceRef.current   ? Number(minPriceRef.current)  : undefined,
+        max_price:    maxPriceRef.current   ? Number(maxPriceRef.current)  : undefined,
+        sort_by:      sortByRef.current,
+        sort_dir:     sortDirRef.current,
         page:         pageRef.current,
-        limit:        20,
+        limit:        limitRef.current,
       })
       setData(res.data)
       setPagination(res.pagination)
@@ -112,11 +163,12 @@ export default function ProductsPage() {
     }
   }, [])
 
+  // Re-fetch cuando cambian filtros (reset a página 1)
   useEffect(() => {
     pageRef.current = 1
     setPage(1)
     fetchProducts()
-  }, [debouncedSearch, brandFilter, supplierFilter, categoryFilter, stockStatusFilter, fetchProducts])
+  }, [debouncedSearch, brandFilter, supplierFilter, categoryFilter, stockStatusFilter, minPrice, maxPrice, fetchProducts])
 
   const handlePageChange = useCallback((newPage: number) => {
     pageRef.current = newPage
@@ -124,10 +176,29 @@ export default function ProductsPage() {
     fetchProducts()
   }, [fetchProducts])
 
+  const handleLimitChange = useCallback((newLimit: number) => {
+    limitRef.current = newLimit
+    pageRef.current = 1
+    setLimit(newLimit)
+    setPage(1)
+    fetchProducts()
+  }, [fetchProducts])
+
+  const handleSort = useCallback((field: SortField) => {
+    const newDir: SortDir = sortByRef.current === field && sortDirRef.current === 'asc' ? 'desc' : 'asc'
+    sortByRef.current  = field
+    sortDirRef.current = newDir
+    pageRef.current    = 1
+    setSortBy(field)
+    setSortDir(newDir)
+    setPage(1)
+    fetchProducts()
+  }, [fetchProducts])
+
   useEffect(() => {
-    api.get<Category[]>('/api/products/categories').then(setAllCategories).catch(() => { })
-    api.get<{ id: string; name: string }[]>('/api/brands').then(setBrands).catch(() => { })
-    api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => { })
+    api.get<Category[]>('/api/products/categories').then(setAllCategories).catch(() => {})
+    api.get<{ id: string; name: string }[]>('/api/brands').then(setBrands).catch(() => {})
+    api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => {})
   }, [])
 
   // Cascada de categorías
@@ -155,10 +226,12 @@ export default function ProductsPage() {
   const l2Node    = l2Options.find(c => c.id === catL2)
   const l3Options = catL2 ? (l2Node?.children ?? []) : []
 
-  const activeFilterCount = [brandFilter, supplierFilter, categoryFilter, stockStatusFilter].filter(Boolean).length
+  const hasPriceFilter = !!(minPriceInput || maxPriceInput)
+  const activeFilterCount = [brandFilter, supplierFilter, categoryFilter, stockStatusFilter, hasPriceFilter ? 'price' : ''].filter(Boolean).length
 
   function clearFilters() {
     setBrandFilter(''); setSupplierFilter(''); setCategoryFilter(''); setStockStatusFilter('')
+    setMinPriceInput(''); setMaxPriceInput('')
   }
 
   function getCategoryPath(categoryId: string | undefined, categories: Category[]): string {
@@ -174,7 +247,6 @@ export default function ProductsPage() {
   }
 
   const handleEdit = async (item: StockSummary) => {
-    // Traer producto completo para tener todos los campos
     try {
       const product = await api.get<Product>(`/api/products/${item.id}`)
       setEditProduct(product)
@@ -229,7 +301,6 @@ export default function ProductsPage() {
           </>
         }
       />
-
 
       <div className="p-5 space-y-3">
         {/* Búsqueda + botón filtros */}
@@ -311,6 +382,51 @@ export default function ProductsPage() {
                   {STOCK_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
               </div>
+
+              {/* Rango precio venta */}
+              <div className="flex flex-col gap-1 sm:col-span-2">
+                <label className="text-xs font-medium text-[var(--text3)]">Precio venta</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={minPriceInput}
+                    onChange={e => setMinPriceInput(e.target.value)}
+                    placeholder="Mínimo"
+                    className={`${selectClass} flex-1 min-w-0`}
+                  />
+                  <span className="text-xs text-[var(--text3)] flex-shrink-0">—</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={maxPriceInput}
+                    onChange={e => setMaxPriceInput(e.target.value)}
+                    placeholder="Máximo"
+                    className={`${selectClass} flex-1 min-w-0`}
+                  />
+                </div>
+              </div>
+
+              {/* Ordenar por */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--text3)]">Ordenar por</label>
+                <div className="flex gap-1">
+                  <select
+                    value={sortBy}
+                    onChange={e => handleSort(e.target.value as SortField)}
+                    className={`${selectClass} flex-1 min-w-0`}
+                  >
+                    {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  <button
+                    onClick={() => handleSort(sortBy)}
+                    title={sortDir === 'asc' ? 'Ascendente' : 'Descendente'}
+                    className="px-2.5 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)] hover:border-[var(--accent)] transition-colors"
+                  >
+                    {sortDir === 'asc' ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                  </button>
+                </div>
+              </div>
             </div>
 
             {activeFilterCount > 0 && (
@@ -325,9 +441,9 @@ export default function ProductsPage() {
         {loading ? <TableSkeleton rows={12} /> : data.length === 0 ? (
           <EmptyState
             icon={Package}
-            title={search ? 'Sin resultados' : 'Sin productos'}
-            description={search ? 'Probá con otro término.' : 'Creá tu primer producto para empezar.'}
-            action={!search ? <Button onClick={openCreate}><Plus size={15} /> Nuevo producto</Button> : undefined}
+            title={search || activeFilterCount > 0 ? 'Sin resultados' : 'Sin productos'}
+            description={search || activeFilterCount > 0 ? 'Probá con otros filtros.' : 'Creá tu primer producto para empezar.'}
+            action={!search && activeFilterCount === 0 ? <Button onClick={openCreate}><Plus size={15} /> Nuevo producto</Button> : undefined}
           />
         ) : (
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
@@ -335,11 +451,43 @@ export default function ProductsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-[var(--border)]">
-                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Producto</th>
+                    <th
+                      onClick={() => handleSort('name')}
+                      className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group"
+                    >
+                      <div className="flex items-center gap-1">
+                        Producto
+                        <SortIcon field="name" sortBy={sortBy} sortDir={sortDir} />
+                      </div>
+                    </th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Categoría</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Stock</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">P. Costo</th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">P. Venta</th>
+                    <th
+                      onClick={() => handleSort('stock_current')}
+                      className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group"
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        Stock
+                        <SortIcon field="stock_current" sortBy={sortBy} sortDir={sortDir} />
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleSort('cost_price')}
+                      className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group hidden sm:table-cell"
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        P. Costo
+                        <SortIcon field="cost_price" sortBy={sortBy} sortDir={sortDir} />
+                      </div>
+                    </th>
+                    <th
+                      onClick={() => handleSort('sell_price')}
+                      className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group"
+                    >
+                      <div className="flex items-center justify-end gap-1">
+                        P. Venta
+                        <SortIcon field="sell_price" sortBy={sortBy} sortDir={sortDir} />
+                      </div>
+                    </th>
                     <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Estado</th>
                     <th className="px-4 py-3" />
                   </tr>
@@ -379,24 +527,23 @@ export default function ProductsPage() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                          {/* Ajuste de stock */}
                           <button
-                            onClick={() => handleAdjust(product)}
+                            onClick={e => { e.stopPropagation(); handleAdjust(product) }}
                             title="Ajustar stock"
                             className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
                           >
                             <SlidersHorizontal size={14} />
                           </button>
-                          {/* Editar */}
                           <button
-                            onClick={() => handleEdit(product)}
+                            onClick={e => { e.stopPropagation(); handleEdit(product) }}
                             title="Editar"
                             className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
                           >
                             <Pencil size={14} />
                           </button>
                           <button
-                            onClick={async () => {
+                            onClick={async e => {
+                              e.stopPropagation()
                               const p = await api.get<Product>(`/api/products/${product.id}`)
                               setPriceRulesProduct(p)
                               setPriceRulesModal(true)
@@ -406,9 +553,8 @@ export default function ProductsPage() {
                           >
                             <Tag size={14} />
                           </button>
-                          {/* Eliminar */}
                           <button
-                            onClick={() => { setDeleteProduct(product); setDeleteModal(true) }}
+                            onClick={e => { e.stopPropagation(); setDeleteProduct(product); setDeleteModal(true) }}
                             title="Eliminar"
                             className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors"
                           >
@@ -421,12 +567,11 @@ export default function ProductsPage() {
                 </tbody>
               </table>
             </div>
-            <Pagination pagination={pagination} onPageChange={handlePageChange} />
+            <Pagination pagination={pagination} onPageChange={handlePageChange} onLimitChange={handleLimitChange} />
           </div>
         )}
       </div>
 
-      {/* Modal crear/editar */}
       <ProductModal
         open={productModal}
         onClose={() => { setProductModal(false); setEditProduct(null) }}
@@ -434,7 +579,6 @@ export default function ProductsPage() {
         product={editProduct}
       />
 
-      {/* Modal ajuste de stock */}
       <AdjustStockModal
         open={adjustModal}
         onClose={() => { setAdjustModal(false); setAdjustProduct(null) }}
@@ -442,7 +586,6 @@ export default function ProductsPage() {
         product={adjustProduct}
       />
 
-      {/* Confirm eliminar */}
       <ConfirmDialog
         open={deleteModal}
         onClose={() => { setDeleteModal(false); setDeleteProduct(null) }}
@@ -470,7 +613,6 @@ export default function ProductsPage() {
         open={printModal}
         onClose={() => setPrintModal(false)}
       />
-
     </AppShell>
   )
 }

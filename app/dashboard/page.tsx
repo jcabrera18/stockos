@@ -7,7 +7,7 @@ import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { StatCardSkeleton, CardListSkeleton } from '@/components/ui/Skeleton'
 import { api } from '@/lib/api'
-import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
+import { formatCurrency, formatDateTime, getPaymentMethodLabel, getPeriodDates, getLocalWeekStart, getLocalMonthStart } from '@/lib/utils'
 import type { DashboardStats, Sale } from '@/types'
 import {
   TrendingUp, TrendingDown, ShoppingCart, AlertTriangle,
@@ -23,7 +23,8 @@ interface SalesByHour { hour: number; label: string; total_sales: number; total_
 interface SalesLast30 { sale_date: string; total_sales: number; total_revenue: number; gross_margin: number }
 interface PaymentMethod { method: string; total: number }
 interface TopProduct { product_id: string; name: string; total_sold: number; total_revenue: number; margin_pct: number }
-interface WeekComparison { this_week: number; prev_week: number; diff_pct: number; this_count: number; prev_count: number }
+interface WeekComparison  { this_week: number;  prev_week: number;  diff_pct: number; this_count: number; prev_count: number }
+interface MonthComparison { this_month: number; prev_month: number; diff_pct: number; this_count: number; prev_count: number }
 interface MarginData { revenue: number; cost: number; margin: number; margin_pct: number }
 interface AccountsReceivable { total: number; top_debtors: { full_name: string; current_balance: number; credit_limit: number }[] }
 interface BranchStats { branch_id: string; branch_name: string; register_count: number; sales_today: number; revenue_today: number; revenue_month: number; open_registers: number }
@@ -60,6 +61,7 @@ export default function DashboardPage() {
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
   const [topProducts, setTopProducts] = useState<TopProduct[]>([])
   const [weekComp, setWeekComp] = useState<WeekComparison | null>(null)
+  const [monthComp, setMonthComp] = useState<MonthComparison | null>(null)
   const [margin, setMargin] = useState<MarginData | null>(null)
   const [accounts, setAccounts] = useState<AccountsReceivable | null>(null)
   const [branchStats, setBranchStats] = useState<BranchStats[]>([])
@@ -70,15 +72,16 @@ export default function DashboardPage() {
     if (!silent) setLoading(true)
     else setRefreshing(true)
     try {
-      const [s, sales, stock, byHour, last30, payments, top, week, mar, acc, branches] = await Promise.all([
-        api.get<DashboardStats>('/api/dashboard/stats'),
+      const [s, sales, stock, byHour, last30, payments, top, week, month, mar, acc, branches] = await Promise.all([
+        api.get<DashboardStats>('/api/dashboard/stats', { today_from: getPeriodDates('today').from }),
         api.get<Sale[]>('/api/dashboard/recent-sales'),
         api.get<typeof lowStock>('/api/dashboard/low-stock'),
         api.get<SalesByHour[]>('/api/dashboard/sales-by-hour'),
         api.get<SalesLast30[]>('/api/dashboard/sales-last-30'),
         api.get<PaymentMethod[]>('/api/dashboard/payment-methods'),
         api.get<TopProduct[]>('/api/dashboard/top-products'),
-        api.get<WeekComparison>('/api/dashboard/week-comparison'),
+        api.get<WeekComparison>('/api/dashboard/week-comparison', { week_from: getLocalWeekStart() }),
+        api.get<MonthComparison>('/api/dashboard/month-comparison', { month_from: getLocalMonthStart() }),
         api.get<MarginData>('/api/dashboard/margin'),
         api.get<AccountsReceivable>('/api/dashboard/accounts-receivable'),
         api.get<BranchStats[]>('/api/branches/stats'),
@@ -91,6 +94,7 @@ export default function DashboardPage() {
       setPaymentMethods(payments)
       setTopProducts(top)
       setWeekComp(week)
+      setMonthComp(month)
       setMargin(mar)
       setAccounts(acc)
       setBranchStats(branches)
@@ -127,7 +131,11 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 space-y-3">
+            <div className="h-4 w-40 rounded bg-[var(--surface2)] animate-pulse" />
+            <div className="h-32 rounded bg-[var(--surface2)] animate-pulse opacity-50" />
+          </div>
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 space-y-3">
             <div className="h-4 w-40 rounded bg-[var(--surface2)] animate-pulse" />
             <div className="h-32 rounded bg-[var(--surface2)] animate-pulse opacity-50" />
@@ -193,8 +201,8 @@ export default function DashboardPage() {
           />
         </div>
 
-        {/* ── Fila 2: Comparativo semana + Cuentas corrientes ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {/* ── Fila 2: Comparativo semana + mes + Cuentas corrientes ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
 
           {/* Comparativo semanas */}
           <Card>
@@ -203,45 +211,65 @@ export default function DashboardPage() {
             </CardHeader>
             {weekComp && (
               <div className="space-y-3">
-                <div className="flex justify-between items-end">
+                <div>
+                  <p className="text-xs text-[var(--text3)] mb-0.5">Esta semana</p>
+                  <p className="text-2xl font-bold mono text-[var(--accent)] truncate">{formatCurrency(weekComp.this_week)}</p>
+                  <p className="text-xs text-[var(--text3)] mt-0.5">{weekComp.this_count} ventas</p>
+                </div>
+                <div className="flex items-start justify-between pt-3 border-t border-[var(--border)]">
                   <div>
-                    <p className="text-xs text-[var(--text3)]">Esta semana</p>
-                    <p className="text-2xl font-bold mono text-[var(--accent)]">{formatCurrency(weekComp.this_week)}</p>
-                    <p className="text-xs text-[var(--text3)]">{weekComp.this_count} ventas</p>
-                  </div>
-                  <div className="text-right">
                     <p className="text-xs text-[var(--text3)]">Semana anterior</p>
-                    <p className="text-lg font-semibold mono text-[var(--text2)]">{formatCurrency(weekComp.prev_week)}</p>
+                    <p className="text-sm font-semibold mono text-[var(--text2)] truncate">{formatCurrency(weekComp.prev_week)}</p>
                     <p className="text-xs text-[var(--text3)]">{weekComp.prev_count} ventas</p>
                   </div>
+                  <span className={`text-sm font-bold mono ${weekComp.diff_pct >= 0 ? 'text-[var(--accent)]' : 'text-[var(--danger)]'}`}>
+                    {weekComp.diff_pct >= 0 ? '+' : ''}{weekComp.diff_pct}%
+                  </span>
                 </div>
-                {/* Barra comparativa */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between text-xs text-[var(--text3)]">
-                    <span>Esta semana</span>
-                    <span className={weekComp.diff_pct >= 0 ? 'text-[var(--accent)]' : 'text-[var(--danger)]'}>
-                      {weekComp.diff_pct >= 0 ? '+' : ''}{weekComp.diff_pct}%
-                    </span>
+                <div className="h-1.5 bg-[var(--surface2)] rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all" style={{
+                    width: `${weekComp.prev_week > 0 ? Math.min(weekComp.this_week / weekComp.prev_week * 100, 150) : 100}%`,
+                    background: weekComp.diff_pct >= 0 ? 'var(--accent)' : 'var(--danger)',
+                  }} />
+                </div>
+              </div>
+            )}
+          </Card>
+
+          {/* Comparativo mes */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Este mes vs anterior</CardTitle>
+            </CardHeader>
+            {monthComp && (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-xs text-[var(--text3)] mb-0.5">Este mes</p>
+                  <p className="text-2xl font-bold mono text-[var(--accent)] truncate">{formatCurrency(monthComp.this_month)}</p>
+                  <p className="text-xs text-[var(--text3)] mt-0.5">{monthComp.this_count} ventas</p>
+                </div>
+                <div className="flex items-start justify-between pt-3 border-t border-[var(--border)]">
+                  <div>
+                    <p className="text-xs text-[var(--text3)]">Mes anterior</p>
+                    <p className="text-sm font-semibold mono text-[var(--text2)] truncate">{formatCurrency(monthComp.prev_month)}</p>
+                    <p className="text-xs text-[var(--text3)]">{monthComp.prev_count} ventas</p>
                   </div>
-                  <div className="h-2 bg-[var(--surface2)] rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{
-                        width: `${weekComp.prev_week > 0 ? Math.min(weekComp.this_week / weekComp.prev_week * 100, 150) : 100}%`,
-                        background: weekComp.diff_pct >= 0 ? 'var(--accent)' : 'var(--danger)',
-                      }}
-                    />
-                  </div>
-                  <div className="h-1.5 bg-[var(--surface2)] rounded-full overflow-hidden">
-                    <div className="h-full bg-[var(--text3)] rounded-full opacity-40" style={{ width: '100%' }} />
-                  </div>
+                  <span className={`text-sm font-bold mono ${monthComp.diff_pct >= 0 ? 'text-[var(--accent)]' : 'text-[var(--danger)]'}`}>
+                    {monthComp.diff_pct >= 0 ? '+' : ''}{monthComp.diff_pct}%
+                  </span>
+                </div>
+                <div className="h-1.5 bg-[var(--surface2)] rounded-full overflow-hidden">
+                  <div className="h-full rounded-full transition-all" style={{
+                    width: `${monthComp.prev_month > 0 ? Math.min(monthComp.this_month / monthComp.prev_month * 100, 150) : 100}%`,
+                    background: monthComp.diff_pct >= 0 ? 'var(--accent)' : 'var(--danger)',
+                  }} />
                 </div>
               </div>
             )}
           </Card>
 
           {/* Cuentas corrientes */}
-          <Card>
+          <Card className="sm:col-span-2 xl:col-span-1">
             <CardHeader>
               <CardTitle>Cuentas corrientes</CardTitle>
               {accounts && accounts.total > 0 && (
@@ -296,7 +324,7 @@ export default function DashboardPage() {
         </Card>
 
         {/* ── Fila 3: Ventas por hora + Métodos de pago ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
 
           {/* Ventas por hora */}
           <Card>
@@ -343,38 +371,41 @@ export default function DashboardPage() {
               <p className="text-sm text-[var(--text3)] text-center py-8">Sin datos</p>
             ) : (
               <div className="flex items-center gap-4">
-                <ResponsiveContainer width="50%" height={160}>
-                  <PieChart>
-                    <Pie
-                      data={[...paymentMethods]}
-                      dataKey="total"
-                      nameKey="method"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={40}
-                      outerRadius={70}
-                      paddingAngle={2}
-                    >
-                      {paymentMethods.map((_, i) => (
-                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      content={({ active, payload, label }) => {
-                        if (!active || !payload?.length) return null
-                        return (
-                          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 shadow-xl text-xs">
-                            <p className="text-[var(--text3)] mb-1">{label}</p>
-                            <p className="font-semibold text-[var(--accent)]">
-                              {formatCurrency(Number(payload[0]?.value ?? 0))}
-                            </p>
-                          </div>
-                        )
-                      }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="flex-1 space-y-2">
+                {/* Wrapper con tamaño fijo para que ResponsiveContainer lo mida correctamente */}
+                <div className="flex-shrink-0" style={{ width: 160, height: 160 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={[...paymentMethods]}
+                        dataKey="total"
+                        nameKey="method"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={40}
+                        outerRadius={70}
+                        paddingAngle={2}
+                      >
+                        {paymentMethods.map((_, i) => (
+                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        content={({ active, payload, label }) => {
+                          if (!active || !payload?.length) return null
+                          return (
+                            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 shadow-xl text-xs">
+                              <p className="text-[var(--text3)] mb-1">{label}</p>
+                              <p className="font-semibold text-[var(--accent)]">
+                                {formatCurrency(Number(payload[0]?.value ?? 0))}
+                              </p>
+                            </div>
+                          )
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex-1 min-w-0 space-y-2">
                   {paymentMethods
                     .sort((a, b) => b.total - a.total)
                     .map((pm, i) => {
@@ -402,7 +433,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Fila 4: Top productos + Ventas recientes + Stock crítico ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
 
           {/* Top 5 productos */}
           <Card padding="none">
