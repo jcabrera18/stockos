@@ -14,43 +14,44 @@ import { formatCurrency, formatDateTime } from '@/lib/utils'
 import type { Pagination as PaginationType } from '@/types'
 import { FileText, CheckCircle, Clock, XCircle, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 interface InvoiceItem {
-  id:          string
+  id: string
   description: string
-  quantity:    number
-  unit_price:  number
-  iva_rate:    number
-  subtotal:    number
+  quantity: number
+  unit_price: number
+  iva_rate: number
+  subtotal: number
 }
 
 interface Invoice {
-  id:                     string
-  invoice_type:           'X' | 'A' | 'B' | 'C' | 'R'
-  numero:                 number
-  fecha:                  string
-  sale_id?:               string
-  customer_id?:           string
-  receptor_name?:         string
-  receptor_cuit?:         string
-  receptor_address?:      string
+  id: string
+  invoice_type: 'X' | 'A' | 'B' | 'C' | 'R'
+  numero: number
+  fecha: string
+  sale_id?: string
+  customer_id?: string
+  receptor_name?: string
+  receptor_cuit?: string
+  receptor_address?: string
   receptor_iva_condition: string
-  net_amount:             number
-  iva_amount:             number
-  total_amount:           number
-  cae?:                   string
-  cae_expiry?:            string
-  afip_status:            'pending' | 'authorized' | 'rejected' | 'not_requested'
-  afip_error?:            string
-  afip_requested:         boolean
-  notes?:                 string
-  created_at:             string
-  invoice_items:          InvoiceItem[]
-  sales?:                 { payment_method: string }
-  users?:                 { full_name: string }
-  branches?:              { name: string }
-  registers?:             { name: string }
-  customers?:             { full_name: string; document?: string }
+  net_amount: number
+  iva_amount: number
+  total_amount: number
+  cae?: string
+  cae_expiry?: string
+  afip_status: 'pending' | 'authorized' | 'rejected' | 'not_requested'
+  afip_error?: string
+  afip_requested: boolean
+  notes?: string
+  created_at: string
+  invoice_items: InvoiceItem[]
+  sales?: { payment_method: string }
+  users?: { full_name: string }
+  branches?: { name: string }
+  registers?: { name: string }
+  customers?: { full_name: string; document?: string }
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -67,16 +68,16 @@ const TYPE_VARIANTS: Record<string, string> = {
 
 const AFIP_LABELS: Record<string, string> = {
   not_requested: 'Sin AFIP',
-  pending:       'Pendiente',
-  authorized:    'Autorizado',
-  rejected:      'Rechazado',
+  pending: 'Pendiente',
+  authorized: 'Autorizado',
+  rejected: 'Rechazado',
 }
 
 const AFIP_VARIANTS: Record<string, string> = {
   not_requested: 'default',
-  pending:       'warning',
-  authorized:    'success',
-  rejected:      'danger',
+  pending: 'warning',
+  authorized: 'success',
+  rejected: 'danger',
 }
 
 const PAYMENT_LABELS: Record<string, string> = {
@@ -87,35 +88,36 @@ const PAYMENT_LABELS: Record<string, string> = {
 type TypeFilter = '' | 'X' | 'A' | 'B' | 'C' | 'R'
 
 export default function InvoicesPage() {
-  const [data, setData]             = useState<Invoice[]>([])
+  const [data, setData] = useState<Invoice[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
-  const [loading, setLoading]       = useState(true)
-  const [page, setPage]             = useState(1)
+  const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('')
-  const [from, setFrom]             = useState('')
-  const [to, setTo]                 = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
 
   // Refs para evitar loops
   const typeRef = useRef(typeFilter)
   const fromRef = useRef(from)
-  const toRef   = useRef(to)
+  const toRef = useRef(to)
   const pageRef = useRef(page)
   useEffect(() => { typeRef.current = typeFilter }, [typeFilter])
   useEffect(() => { fromRef.current = from }, [from])
-  useEffect(() => { toRef.current   = to },   [to])
+  useEffect(() => { toRef.current = to }, [to])
   useEffect(() => { pageRef.current = page }, [page])
 
   // Detail modal
-  const [detailModal, setDetailModal]   = useState(false)
+  const [detailModal, setDetailModal] = useState(false)
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
 
   // Note modal (NC / ND)
-  const [noteModal, setNoteModal]       = useState(false)
-  const [noteTarget, setNoteTarget]     = useState<Invoice | null>(null)
-  const [noteType, setNoteType]         = useState<'NC' | 'ND'>('NC')
-  const [noteReason, setNoteReason]     = useState('')
-  const [noteAmount, setNoteAmount]     = useState('')
+  const [noteModal, setNoteModal] = useState(false)
+  const [noteTarget, setNoteTarget] = useState<Invoice | null>(null)
+  const [noteType, setNoteType] = useState<'NC' | 'ND'>('NC')
+  const [noteReason, setNoteReason] = useState('')
+  const [noteAmount, setNoteAmount] = useState('')
   const [creatingNote, setCreatingNote] = useState(false)
+  const searchParams = useSearchParams()
 
   const handleCreateNote = async () => {
     if (!noteTarget) return
@@ -125,9 +127,9 @@ export default function InvoicesPage() {
     try {
       await api.post('/api/invoices/note', {
         original_invoice_id: noteTarget.id,
-        note_type:           noteType,
-        reason:              noteReason.trim(),
-        amount:              Number(noteAmount),
+        note_type: noteType,
+        reason: noteReason.trim(),
+        amount: Number(noteAmount),
       })
       toast.success(`Nota de ${noteType === 'NC' ? 'Crédito' : 'Débito'} creada`)
       setNoteModal(false)
@@ -140,23 +142,23 @@ export default function InvoicesPage() {
   // Convert modal
   const [convertModal, setConvertModal] = useState(false)
   const [convertTarget, setConvertTarget] = useState<Invoice | null>(null)
-  const [convertType, setConvertType]   = useState<'A' | 'B' | 'C'>('B')
+  const [convertType, setConvertType] = useState<'A' | 'B' | 'C'>('B')
   const [receptorCuit, setReceptorCuit] = useState('')
   const [receptorName, setReceptorName] = useState('')
   const [receptorAddress, setReceptorAddress] = useState('')
-  const [receptorIva, setReceptorIva]   = useState('CF')
-  const [converting, setConverting]     = useState(false)
+  const [receptorIva, setReceptorIva] = useState('CF')
+  const [converting, setConverting] = useState(false)
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true)
     try {
       const params: Record<string, string | number | undefined> = {
-        page:  pageRef.current,
+        page: pageRef.current,
         limit: 20,
       }
       if (typeRef.current) params.invoice_type = typeRef.current
-      if (fromRef.current) params.from         = fromRef.current
-      if (toRef.current)   params.to           = toRef.current
+      if (fromRef.current) params.from = fromRef.current
+      if (toRef.current) params.to = toRef.current
 
       const res = await api.get<{ data: Invoice[]; pagination: PaginationType }>('/api/invoices', params)
       setData(res.data)
@@ -165,8 +167,33 @@ export default function InvoicesPage() {
     finally { setLoading(false) }
   }, [])
 
+  const router = useRouter()
+  const pendingFacturarRef = useRef<string | null>(null)
+
+  // Fetch al cambiar filtros
   useEffect(() => { fetchInvoices() }, [typeFilter, from, to, page, fetchInvoices])
+
+  // Reset página al cambiar filtros
   useEffect(() => { setPage(1) }, [typeFilter, from, to])
+
+  // Capturar param ?facturar al montar — solo una vez
+  useEffect(() => {
+    const facturarId = searchParams.get('facturar')
+    if (facturarId) {
+      pendingFacturarRef.current = facturarId
+      router.replace('/invoices')
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Abrir modal cuando los datos están listos
+  useEffect(() => {
+    if (!pendingFacturarRef.current || data.length === 0) return
+    const found = data.find(i => i.id === pendingFacturarRef.current)
+    if (found) {
+      pendingFacturarRef.current = null
+      if (found.invoice_type === 'X') openConvert(found)
+    }
+  }, [data])
 
   const openConvert = (invoice: Invoice) => {
     setConvertTarget(invoice)
@@ -186,16 +213,20 @@ export default function InvoicesPage() {
     }
     setConverting(true)
     try {
-      await api.post('/api/invoices/convert', {
-        invoice_id:             convertTarget.id,
-        invoice_type:           convertType,
-        receptor_cuit:          receptorCuit  || null,
-        receptor_name:          receptorName  || null,
-        receptor_address:       receptorAddress || null,
+      const updated = await api.post<Invoice>('/api/invoices/convert', {
+        invoice_id: convertTarget.id,
+        invoice_type: convertType,
+        receptor_cuit: receptorCuit || null,
+        receptor_name: receptorName || null,
+        receptor_address: receptorAddress || null,
         receptor_iva_condition: receptorIva,
       })
       toast.success(`Ticket X convertido a Factura ${convertType}`)
       setConvertModal(false)
+      // Abrir el detalle de la factura generada
+      setSelectedInvoice(updated)
+      setDetailModal(true)
+
       fetchInvoices()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al convertir')
@@ -222,11 +253,10 @@ export default function InvoicesPage() {
           <div className="flex gap-1.5">
             {(['', 'X', 'A', 'B', 'C', 'R'] as TypeFilter[]).map(t => (
               <button key={t} onClick={() => setTypeFilter(t)}
-                className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${
-                  typeFilter === t
-                    ? 'bg-[var(--accent)] text-white'
-                    : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-                }`}>
+                className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${typeFilter === t
+                  ? 'bg-[var(--accent)] text-white'
+                  : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                  }`}>
                 {t === '' ? 'Todos' : TYPE_LABELS[t]}
               </button>
             ))}
@@ -420,14 +450,13 @@ export default function InvoicesPage() {
             </div>
 
             {/* AFIP status */}
-            <div className={`flex items-center gap-2 px-3 py-2.5 rounded-[var(--radius-md)] ${
-              selectedInvoice.afip_status === 'authorized' ? 'bg-[var(--accent-subtle)]' :
-              selectedInvoice.afip_status === 'rejected'   ? 'bg-[var(--danger-subtle)]' :
-              'bg-[var(--surface2)]'
-            }`}>
+            <div className={`flex items-center gap-2 px-3 py-2.5 rounded-[var(--radius-md)] ${selectedInvoice.afip_status === 'authorized' ? 'bg-[var(--accent-subtle)]' :
+              selectedInvoice.afip_status === 'rejected' ? 'bg-[var(--danger-subtle)]' :
+                'bg-[var(--surface2)]'
+              }`}>
               {selectedInvoice.afip_status === 'authorized' && <CheckCircle size={14} className="text-[var(--accent)]" />}
-              {selectedInvoice.afip_status === 'rejected'   && <XCircle size={14} className="text-[var(--danger)]" />}
-              {selectedInvoice.afip_status === 'pending'    && <Clock size={14} className="text-[var(--warning)]" />}
+              {selectedInvoice.afip_status === 'rejected' && <XCircle size={14} className="text-[var(--danger)]" />}
+              {selectedInvoice.afip_status === 'pending' && <Clock size={14} className="text-[var(--warning)]" />}
               <div>
                 <p className="text-xs font-medium text-[var(--text)]">
                   {AFIP_LABELS[selectedInvoice.afip_status]}
@@ -493,11 +522,10 @@ export default function InvoicesPage() {
           <div className="grid grid-cols-2 gap-2">
             {(['NC', 'ND'] as const).map(t => (
               <button key={t} onClick={() => setNoteType(t)}
-                className={`py-2.5 text-sm font-semibold rounded-[var(--radius-md)] border transition-all ${
-                  noteType === t
-                    ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)]'
-                }`}>
+                className={`py-2.5 text-sm font-semibold rounded-[var(--radius-md)] border transition-all ${noteType === t
+                  ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                  : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)]'
+                  }`}>
                 {t === 'NC' ? 'Nota de Crédito' : 'Nota de Débito'}
               </button>
             ))}
@@ -545,11 +573,10 @@ export default function InvoicesPage() {
             <div className="grid grid-cols-3 gap-2">
               {(['A', 'B', 'C'] as const).map(t => (
                 <button key={t} onClick={() => setConvertType(t)}
-                  className={`py-2.5 text-sm font-semibold rounded-[var(--radius-md)] border transition-all ${
-                    convertType === t
-                      ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'
-                  }`}>
+                  className={`py-2.5 text-sm font-semibold rounded-[var(--radius-md)] border transition-all ${convertType === t
+                    ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'
+                    }`}>
                   Factura {t}
                 </button>
               ))}

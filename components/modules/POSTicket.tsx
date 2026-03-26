@@ -1,39 +1,41 @@
 'use client'
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
 import { Printer, Plus, X, CheckCircle, CreditCard, MessageCircle, Loader2 } from 'lucide-react'
 import html2canvas from 'html2canvas'
 import { toast } from 'sonner'
+import { useRouter } from 'next/navigation'
+import { api } from '@/lib/api'
 
 interface CartItem {
-  product:    { name: string; unit: string; barcode?: string }
-  quantity:   number
+  product: { name: string; unit: string; barcode?: string }
+  quantity: number
   unit_price: number
-  discount:   number
-  applied_list?:   string
+  discount: number
+  applied_list?: string
   applied_margin?: number
 }
 
 interface TicketSale {
-  id:             string
-  total:          number
-  subtotal:       number
-  discount:       number
+  id: string
+  total: number
+  subtotal: number
+  discount: number
   payment_method: string
-  installments:   number
-  items:          CartItem[]
-  created_at:     string
+  installments: number
+  items: CartItem[]
+  created_at: string
 }
 
 interface POSTicketProps {
-  sale:          TicketSale
-  onNewSale:     () => void
-  onClose:       () => void
+  sale: TicketSale
+  onNewSale: () => void
+  onClose: () => void
   customerPhone?: string
 }
 
 export function POSTicket({ sale, onNewSale, onClose, customerPhone }: POSTicketProps) {
-  const printRef              = useRef<HTMLDivElement>(null)
+  const printRef = useRef<HTMLDivElement>(null)
   const [invoiceModal, setInvoiceModal] = useState(false)
   const [sharing, setSharing] = useState(false)
 
@@ -41,6 +43,19 @@ export function POSTicket({ sale, onNewSale, onClose, customerPhone }: POSTicket
     (a, i) => a + i.unit_price * i.quantity - i.discount, 0
   )
   const itemCount = sale.items.reduce((a, i) => a + i.quantity, 0)
+
+  const router = useRouter()
+  const [invoiceId, setInvoiceId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!sale.id) return
+    api.get(`/api/invoices/sale/${sale.id}`)
+      .then((inv: unknown) => {
+        const i = inv as { id: string; invoice_type: string } | null
+        if (i && i.invoice_type === 'X') setInvoiceId(i.id)
+      })
+      .catch(() => { })
+  }, [sale.id])
 
   const handleShareWhatsApp = async () => {
     if (!printRef.current) return
@@ -191,11 +206,11 @@ export function POSTicket({ sale, onNewSale, onClose, customerPhone }: POSTicket
               fontSize: '12px',
               fontWeight: 600,
             }}>
-              {sale.payment_method === 'efectivo'         && '💵'}
-              {sale.payment_method === 'debito'           && '💳'}
-              {sale.payment_method === 'credito'          && '💳'}
-              {sale.payment_method === 'transferencia'    && '🏦'}
-              {sale.payment_method === 'qr'               && '📱'}
+              {sale.payment_method === 'efectivo' && '💵'}
+              {sale.payment_method === 'debito' && '💳'}
+              {sale.payment_method === 'credito' && '💳'}
+              {sale.payment_method === 'transferencia' && '🏦'}
+              {sale.payment_method === 'qr' && '📱'}
               {sale.payment_method === 'cuenta_corriente' && '📒'}
               {' '}{getPaymentMethodLabel(sale.payment_method)}
               {sale.payment_method === 'credito' && sale.installments > 1 && ` · ${sale.installments} cuotas`}
@@ -394,13 +409,18 @@ export function POSTicket({ sale, onNewSale, onClose, customerPhone }: POSTicket
               {sharing ? <Loader2 size={15} className="animate-spin" /> : <MessageCircle size={15} />}
               WhatsApp
             </button>
-            <button
-              onClick={() => setInvoiceModal(true)}
-              className="flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-sm font-medium text-[var(--text)] hover:bg-[var(--surface2)] transition-colors active:scale-95"
-            >
-              <CreditCard size={15} />
-              Factura
-            </button>
+
+
+            {invoiceId && (
+              <button
+                onClick={() => router.push(`/invoices?facturar=${invoiceId}`)}
+                className="flex items-center justify-center gap-2 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-sm font-medium text-[var(--text)] hover:bg-[var(--surface2)] transition-colors active:scale-95"
+              >
+                <CreditCard size={15} />
+                Factura
+              </button>
+            )}
+
           </div>
           <button
             onClick={onNewSale}
@@ -412,26 +432,6 @@ export function POSTicket({ sale, onNewSale, onClose, customerPhone }: POSTicket
         </div>
 
       </div>
-
-      {/* Modal factura */}
-      {invoiceModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: 'rgba(0,0,0,0.6)' }}
-          onClick={() => setInvoiceModal(false)}
-        >
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6 max-w-sm w-full">
-            <h3 className="text-base font-semibold text-[var(--text)] mb-4">Emitir factura</h3>
-            <p className="text-sm text-[var(--text3)] mb-4">
-              Integración AFIP en configuración. Próximamente disponible.
-            </p>
-            <button onClick={() => setInvoiceModal(false)}
-              className="w-full py-2 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] text-sm text-[var(--text2)]">
-              Cerrar
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

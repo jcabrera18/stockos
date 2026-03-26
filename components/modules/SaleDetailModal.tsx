@@ -5,7 +5,9 @@ import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
-import { Printer, CreditCard, Package, User, Calendar, Hash, FileText, Download } from 'lucide-react'
+import { Printer, CreditCard, Package, User, Calendar, Hash, FileText, Download, Receipt } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+
 
 interface SaleItem {
   id: string
@@ -37,19 +39,19 @@ interface CustomerInfo {
 }
 
 interface InvoiceSummary {
-  id:           string
+  id: string
   invoice_type: string
-  numero:       number
-  fecha:        string
+  numero: number
+  fecha: string
   total_amount: number
-  net_amount:   number
-  iva_amount:   number
-  afip_status:  string
-  cae?:         string
+  net_amount: number
+  iva_amount: number
+  afip_status: string
+  cae?: string
   receptor_name?: string
   receptor_cuit?: string
   receptor_iva_condition: string
-  notes?:       string
+  notes?: string
   invoice_items: { id: string; description: string; quantity: number; unit_price: number; subtotal: number }[]
 }
 
@@ -68,8 +70,34 @@ interface SaleDetailModalProps {
 export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps) {
   const [sale, setSale] = useState<SaleDetail | null>(null)
   const [customer, setCustomer] = useState<CustomerInfo | null>(null)
-  const [invoice, setInvoice] = useState<InvoiceSummary | null>(null)
+  const [invoice, setInvoice] = useState<{
+    id: string
+    invoice_type: string
+    numero: number
+    fecha?: string
+    receptor_name?: string
+    receptor_cuit?: string
+    receptor_address?: string
+    receptor_iva_condition?: string
+    net_amount?: number
+    iva_amount?: number
+    total_amount?: number
+    afip_status?: string
+    cae?: string
+    cae_expiry?: string
+    notes?: string
+    invoice_items?: {
+      id: string
+      description: string
+      quantity: number
+      unit_price: number
+      iva_rate?: number  // ← opcional
+      subtotal: number
+    }[]
+  } | null>(null)
   const [loading, setLoading] = useState(false)
+  const [loadingInvoice, setLoadingInvoice] = useState(false)
+  const router = useRouter()
 
   useEffect(() => {
     if (!open || !saleId) return
@@ -95,6 +123,16 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
       .catch(console.error)
       .finally(() => setLoading(false))
   }, [open, saleId])
+
+  // Cargar el comprobante cuando se abre el modal
+  useEffect(() => {
+    if (!saleId) return
+    setLoadingInvoice(true)
+    api.get(`/api/invoices/sale/${saleId}`)
+      .then((data: unknown) => setInvoice(data as { id: string; invoice_type: string; numero: number } | null))
+      .catch(() => { })
+      .finally(() => setLoadingInvoice(false))
+  }, [saleId])
 
   const handlePrint = () => {
     if (!sale) return
@@ -250,7 +288,7 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
           <th class="right">Subtotal</th>
         </tr></thead>
         <tbody>
-          ${invoice.invoice_items.map(item => `<tr>
+          ${(invoice.invoice_items ?? []).map(item => `<tr>
             <td>${item.description}</td>
             <td class="right">${item.quantity}</td>
             <td class="right">${formatCurrency(item.unit_price)}</td>
@@ -259,12 +297,12 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
         </tbody>
         <tfoot>
           ${isA ? `
-          <tr><td colspan="3" style="color:#6a6a64;font-size:12px">Neto gravado</td><td class="right" style="font-size:12px">${formatCurrency(invoice.net_amount)}</td></tr>
-          <tr><td colspan="3" style="color:#6a6a64;font-size:12px">IVA 21%</td><td class="right" style="font-size:12px">${formatCurrency(invoice.iva_amount)}</td></tr>
+          <tr><td colspan="3" style="color:#6a6a64;font-size:12px">Neto gravado</td><td class="right" style="font-size:12px">${formatCurrency(invoice.net_amount ?? 0)}</td></tr>
+          <tr><td colspan="3" style="color:#6a6a64;font-size:12px">IVA 21%</td><td class="right" style="font-size:12px">${formatCurrency(invoice.iva_amount ?? 0)}</td></tr>
           ` : ''}
           <tr class="total-row">
             <td colspan="3">Total</td>
-            <td class="right" style="color:#15803d">${formatCurrency(invoice.total_amount)}</td>
+            <td class="right" style="color:#15803d">${formatCurrency(invoice.total_amount ?? 0)}</td>
           </tr>
         </tfoot>
       </table>
@@ -418,7 +456,7 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
                   <p className="text-xs font-medium text-[var(--text)]">
                     {TYPE_LABELS[invoice.invoice_type]} #{String(invoice.numero).padStart(8, '0')}
                   </p>
-                  <p className="text-xs text-[var(--text3)]">{formatCurrency(invoice.total_amount)}</p>
+                  <p className="text-xs text-[var(--text3)]">{formatCurrency(invoice.total_amount ?? 0)}</p>
                 </div>
               </div>
               <button
@@ -436,9 +474,18 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
               <Button variant="secondary" onClick={handlePrint}>
                 <Printer size={14} /> Reimprimir ticket
               </Button>
+              {invoice && invoice.invoice_type === 'X' && (
+                <Button
+                  variant="secondary"
+                  onClick={() => router.push(`/invoices?facturar=${invoice.id}`)}
+                >
+                  <Receipt size={15} /> Facturar
+                </Button>
+              )}
               <Button variant="secondary" onClick={onClose}>Cerrar</Button>
             </div>
           </div>
+
         </div>
       )}
     </Modal>
