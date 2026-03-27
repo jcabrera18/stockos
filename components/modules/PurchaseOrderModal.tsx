@@ -7,8 +7,10 @@ import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import type { Supplier, Product } from '@/types'
-import { Search, Plus, X, Trash2 } from 'lucide-react'
+import { Search, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+
+interface Warehouse { id: string; name: string; is_default: boolean }
 
 interface OrderItem {
   product: Product
@@ -24,7 +26,9 @@ interface PurchaseOrderModalProps {
 
 export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModalProps) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [supplierId, setSupplierId] = useState('')
+  const [warehouseId, setWarehouseId] = useState('')
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<OrderItem[]>([])
   const [saving, setSaving] = useState(false)
@@ -37,12 +41,18 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
   useEffect(() => {
     if (!open) return
     api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => { })
+    api.get<Warehouse[]>('/api/warehouses').then(ws => {
+      setWarehouses(ws)
+      const def = ws.find(w => w.is_default) ?? ws[0]
+      if (def) setWarehouseId(def.id)
+    }).catch(() => { })
   }, [open])
 
   // Reset al cerrar
   useEffect(() => {
     if (!open) {
       setSupplierId('')
+      setWarehouseId('')
       setNotes('')
       setItems([])
       setQuery('')
@@ -93,12 +103,13 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
     setSaving(true)
     try {
       await api.post('/api/purchases', {
-        supplier_id: supplierId || null,
+        supplier_id:  supplierId || null,
+        warehouse_id: warehouseId || null,
         notes: notes.trim() || null,
         items: items.map(i => ({
           product_id: i.product.id,
-          quantity: i.quantity,
-          unit_cost: i.unit_cost,
+          quantity:   i.quantity,
+          unit_cost:  i.unit_cost,
         })),
       })
       toast.success('Orden de compra creada')
@@ -117,22 +128,29 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
     <Modal open={open} onClose={onClose} title="Nueva orden de compra" size="xl">
       <div className="space-y-5">
 
-        {/* Proveedor + notas */}
+        {/* Proveedor + depósito + notas */}
         <div className="grid grid-cols-2 gap-3">
           <Select
             label="Proveedor"
-            options={supplierOptions}
+            options={suppliers.map(s => ({ value: s.id, label: s.name }))}
             value={supplierId}
             onChange={e => setSupplierId(e.target.value)}
             placeholder="Sin proveedor"
           />
-          <Input
-            label="Notas"
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            placeholder="Observaciones opcionales..."
+          <Select
+            label="Depósito destino"
+            options={warehouses.map(w => ({ value: w.id, label: w.name }))}
+            value={warehouseId}
+            onChange={e => setWarehouseId(e.target.value)}
+            placeholder="Sin depósito"
           />
         </div>
+        <Input
+          label="Notas"
+          value={notes}
+          onChange={e => setNotes(e.target.value)}
+          placeholder="Observaciones opcionales..."
+        />
 
         {/* Buscador de productos */}
         <div>

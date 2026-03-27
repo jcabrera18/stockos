@@ -168,9 +168,11 @@ export default function OrdersPage() {
   const [registeringPayment, setRegisteringPayment] = useState(false)
 
   const [customerQuery, setCustomerQuery] = useState('')
-  const [customerResults, setCustomerResults] = useState<{ id: string; full_name: string; phone?: string; current_balance: number }[]>([])
+  const [customerResults, setCustomerResults] = useState<{ id: string; full_name: string; phone?: string; current_balance: number; credit_limit: number }[]>([])
   const [searchingCustomers, setSearchingCustomers] = useState(false)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
+  const [selectedCustomerBalance, setSelectedCustomerBalance] = useState<number>(0)
+  const [selectedCustomerCreditLimit, setSelectedCustomerCreditLimit] = useState<number>(0)
 
   // Lista de carga (picking)
   interface PickingItem {
@@ -432,12 +434,17 @@ export default function OrdersPage() {
     setOrderNotes(''); setOrderDiscount(''); setCart([])
     setPayAlreadyCollected(false); setCollectedAmount(''); setCollectedMethod('efectivo')
     setCustomerQuery(''); setCustomerResults([]); setSelectedCustomerId(null)
+    setSelectedCustomerBalance(0); setSelectedCustomerCreditLimit(0)
   }
 
   const cartStockIssues = cart.filter(i => i.quantity > (i.product.stock_current ?? 0))
 
   const handleCreateOrder = async () => {
-    if (!customerName.trim()) { toast.error('El nombre del cliente es obligatorio'); return }
+    if (!selectedCustomerId) { toast.error('Seleccioná un cliente de la lista'); return }
+    if (selectedCustomerCreditLimit > 0 && selectedCustomerBalance >= selectedCustomerCreditLimit) {
+      toast.error(`${customerName} superó su límite de crédito (${formatCurrency(selectedCustomerCreditLimit)}). Saldo actual: ${formatCurrency(selectedCustomerBalance)}`)
+      return
+    }
     if (cart.length === 0) { toast.error('Agregá al menos un producto'); return }
     if (cartStockIssues.length > 0) { toast.error('Hay productos con stock insuficiente'); return }
 
@@ -866,13 +873,18 @@ export default function OrdersPage() {
             {/* Cliente */}
             <div className="sm:col-span-3">
               {selectedCustomerId ? (
-                <div className="flex items-center justify-between px-3 py-2.5 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)]">
+                <div className={`flex items-center justify-between px-3 py-2.5 rounded-[var(--radius-md)] border ${selectedCustomerCreditLimit > 0 && selectedCustomerBalance >= selectedCustomerCreditLimit ? 'bg-[var(--danger-subtle)] border-[var(--danger)]' : 'bg-[var(--accent-subtle)] border-[var(--accent)]'}`}>
                   <div>
-                    <p className="text-xs font-semibold text-[var(--accent)]">{customerName}</p>
-                    <p className="text-xs text-[var(--text3)]">Cliente existente vinculado</p>
+                    <p className={`text-xs font-semibold ${selectedCustomerCreditLimit > 0 && selectedCustomerBalance >= selectedCustomerCreditLimit ? 'text-[var(--danger)]' : 'text-[var(--accent)]'}`}>{customerName}</p>
+                    <p className="text-xs text-[var(--text3)]">
+                      Saldo: <span className={`font-medium ${selectedCustomerBalance > 0 ? 'text-[var(--danger)]' : 'text-[var(--accent)]'}`}>{formatCurrency(selectedCustomerBalance)}</span>
+                      {selectedCustomerCreditLimit > 0 && (
+                        <span className="ml-2 text-[var(--text3)]">· límite: {formatCurrency(selectedCustomerCreditLimit)}</span>
+                      )}
+                    </p>
                   </div>
                   <button
-                    onClick={() => { setSelectedCustomerId(null); setCustomerName(''); setCustomerQuery('') }}
+                    onClick={() => { setSelectedCustomerId(null); setCustomerName(''); setCustomerQuery(''); setSelectedCustomerBalance(0); setSelectedCustomerCreditLimit(0) }}
                     className="text-xs text-[var(--text3)] hover:text-[var(--danger)]">✕</button>
                 </div>
               ) : (
@@ -889,7 +901,7 @@ export default function OrdersPage() {
                         setCustomerQuery(e.target.value)
                         setCustomerName(e.target.value)
                       }}
-                      placeholder="Buscar cliente existente o escribir nombre nuevo..."
+                      placeholder="Buscar y seleccionar cliente..."
                       className="w-full pl-9 pr-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
                     />
                   </div>
@@ -900,6 +912,8 @@ export default function OrdersPage() {
                           onClick={() => {
                             setSelectedCustomerId(c.id)
                             setCustomerName(c.full_name)
+                            setSelectedCustomerBalance(Number(c.current_balance))
+                            setSelectedCustomerCreditLimit(Number(c.credit_limit))
                             setCustomerQuery('')
                             setCustomerResults([])
                           }}
@@ -913,12 +927,6 @@ export default function OrdersPage() {
                           )}
                         </button>
                       ))}
-                      {/* Opción de crear como nuevo sin vincular */}
-                      <div className="px-3 py-2 bg-[var(--surface2)] border-t border-[var(--border)]">
-                        <p className="text-xs text-[var(--text3)]">
-                          O continuá escribiendo para crear como cliente nuevo sin vincular
-                        </p>
-                      </div>
                     </div>
                   )}
                 </div>

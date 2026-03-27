@@ -13,7 +13,7 @@ import { SupplierModal } from '@/components/modules/SupplierModal'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import type { PurchaseOrder, Supplier, PaginatedResponse, Pagination as PaginationType } from '@/types'
-import { Plus, Truck, Building2, CheckCircle, XCircle, Eye } from 'lucide-react'
+import { Plus, Truck, Building2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 type Tab          = 'orders' | 'suppliers'
@@ -36,15 +36,18 @@ export default function PurchasesPage() {
   const [loadingOrders, setLoadingOrders] = useState(true)
   const [orderModal, setOrderModal]   = useState(false)
 
-  // Recibir mercadería
-  const [receivingId, setReceivingId] = useState<string | null>(null)
-  const [receiveModal, setReceiveModal] = useState(false)
-  const [receiving, setReceiving]     = useState(false)
-
   // Detalle orden
-  const [detailOrder, setDetailOrder]   = useState<PurchaseOrder | null>(null)
-  const [detailModal, setDetailModal]   = useState(false)
+  const [detailOrder, setDetailOrder]     = useState<PurchaseOrder | null>(null)
+  const [detailModal, setDetailModal]     = useState(false)
   const [loadingDetail, setLoadingDetail] = useState(false)
+
+  // Recibir mercadería
+  const [receiveModal, setReceiveModal] = useState(false)
+  const [receiving, setReceiving]       = useState(false)
+
+  // Cancelar orden
+  const [cancelModal, setCancelModal] = useState(false)
+  const [cancelling, setCancelling]   = useState(false)
 
   // ── Proveedores ────────────────────────────────────────
   const [suppliers, setSuppliers]     = useState<Supplier[]>([])
@@ -97,23 +100,83 @@ export default function PurchasesPage() {
 
   useEffect(() => { if (tab === 'suppliers') fetchSuppliers() }, [tab, fetchSuppliers])
 
-  // ── Recibir orden ──────────────────────────────────────
-  const handleReceive = async () => {
-    if (!receivingId) return
-    setReceiving(true)
-    try {
-      await api.post(`/api/purchases/${receivingId}/receive`, {})
-      toast.success('Mercadería recibida — stock actualizado')
-      setReceiveModal(false)
-      setReceivingId(null)
-      fetchOrders()
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error al recibir')
-    } finally { setReceiving(false) }
+  // ── Imprimir remito de compra ──────────────────────────
+  const printRemito = (d: PurchaseOrder) => {
+    const win = window.open('', '_blank', 'width=750,height=700')
+    if (!win) return
+    const supplier = (d.suppliers as { name: string } | undefined)?.name ?? 'Sin proveedor'
+    const warehouse = (d as unknown as { warehouse_name?: string }).warehouse_name
+    const date = new Date(d.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const receivedDate = d.received_at ? new Date(d.received_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—'
+    const rows = (d.purchase_items ?? []).map(i => {
+      const prod = i.products as { name: string; barcode?: string; unit?: string } | undefined
+      return `<tr>
+        <td>${prod?.name ?? '—'}${prod?.barcode ? `<br><span class="small">${prod.barcode}</span>` : ''}</td>
+        <td class="center">${i.quantity}${prod?.unit ? ` ${prod.unit}` : ''}</td>
+        <td class="right">${Number(i.unit_cost).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
+        <td class="right">${Number(i.subtotal).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
+      </tr>`
+    }).join('')
+
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito de compra</title>
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:Arial,sans-serif;padding:32px;color:#111;font-size:13px}
+      h1{font-size:22px;margin-bottom:2px}
+      .num{font-size:12px;color:#666;margin-bottom:24px}
+      .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+      .box{border:1px solid #e0e0e0;border-radius:6px;padding:12px}
+      .box .label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+      .box p{font-size:13px;font-weight:600}
+      .box .sub{font-size:12px;color:#555;font-weight:400;margin-top:2px}
+      table{width:100%;border-collapse:collapse;margin-bottom:16px}
+      th{background:#f5f5f5;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;color:#555;border-bottom:2px solid #ddd}
+      td{padding:9px 10px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top}
+      .center{text-align:center} .right{text-align:right}
+      .small{font-size:11px;color:#888}
+      tfoot td{border-top:2px solid #ddd;border-bottom:none;font-weight:600;font-size:15px;color:#1a56db}
+      .footer{margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px}
+      .sign{border-top:1px solid #aaa;padding-top:8px;font-size:11px;color:#666;text-align:center}
+      @media print{button{display:none}}
+    </style></head><body>
+    <h1>Remito de compra</h1>
+    <p class="num">N° ${d.id.slice(0, 8).toUpperCase()} · ${date}</p>
+
+    <div class="grid">
+      <div class="box">
+        <div class="label">Proveedor</div>
+        <p>${supplier}</p>
+      </div>
+      <div class="box">
+        <div class="label">Depósito destino</div>
+        <p>${warehouse ?? 'Sin depósito'}</p>
+        <p class="sub">Recibido: ${receivedDate}</p>
+      </div>
+    </div>
+
+    <table>
+      <thead><tr><th>Producto</th><th class="center">Cantidad</th><th class="right">Precio costo</th><th class="right">Subtotal</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr><td colspan="3"><strong>Total</strong></td><td class="right"><strong>${Number(d.total).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</strong></td></tr>
+      </tfoot>
+    </table>
+
+    ${d.notes ? `<p style="font-size:12px;color:#555;margin-bottom:20px"><em>Notas: ${d.notes}</em></p>` : ''}
+
+    <div class="footer">
+      <div class="sign">Firma responsable depósito</div>
+      <div class="sign">Firma proveedor / transportista</div>
+    </div>
+
+    <script>window.onload=()=>window.print()</script>
+    </body></html>`)
+    win.document.close()
   }
 
   // ── Ver detalle orden ──────────────────────────────────
   const handleDetail = async (order: PurchaseOrder) => {
+    setDetailOrder(null)
     setLoadingDetail(true)
     setDetailModal(true)
     try {
@@ -121,6 +184,39 @@ export default function PurchasesPage() {
       setDetailOrder(data)
     } catch { toast.error('Error al cargar la orden') }
     finally { setLoadingDetail(false) }
+  }
+
+  // ── Recibir orden ──────────────────────────────────────
+  const handleReceive = async () => {
+    if (!detailOrder) return
+    setReceiving(true)
+    try {
+      await api.post(`/api/purchases/${detailOrder.id}/receive`, {})
+      toast.success('Mercadería recibida — stock actualizado')
+      setReceiveModal(false)
+      fetchOrders()
+      // Refrescar detalle
+      const updated = await api.get<PurchaseOrder>(`/api/purchases/${detailOrder.id}`)
+      setDetailOrder(updated)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al recibir')
+    } finally { setReceiving(false) }
+  }
+
+  // ── Cancelar orden ─────────────────────────────────────
+  const handleCancel = async () => {
+    if (!detailOrder) return
+    setCancelling(true)
+    try {
+      await api.patch(`/api/purchases/${detailOrder.id}/cancel`, {})
+      toast.success('Orden cancelada')
+      setCancelModal(false)
+      fetchOrders()
+      const updated = await api.get<PurchaseOrder>(`/api/purchases/${detailOrder.id}`)
+      setDetailOrder(updated)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al cancelar')
+    } finally { setCancelling(false) }
   }
 
   // ── Eliminar proveedor (soft) ──────────────────────────
@@ -210,7 +306,6 @@ export default function PurchasesPage() {
                       <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Proveedor</th>
                       <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Estado</th>
                       <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Total</th>
-                      <th className="px-4 py-3" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--border)]">
@@ -218,7 +313,11 @@ export default function PurchasesPage() {
                       const sc = statusConfig[order.status]
                       const supplier = order.suppliers as { name: string } | undefined
                       return (
-                        <tr key={order.id} className="hover:bg-[var(--surface2)] transition-colors group">
+                        <tr
+                          key={order.id}
+                          onClick={() => handleDetail(order)}
+                          className="hover:bg-[var(--surface2)] transition-colors cursor-pointer"
+                        >
                           <td className="px-4 py-3 text-xs mono text-[var(--text2)]">
                             {formatDate(order.created_at)}
                           </td>
@@ -230,42 +329,6 @@ export default function PurchasesPage() {
                           </td>
                           <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)]">
                             {formatCurrency(order.total)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              {/* Ver detalle */}
-                              <button
-                                onClick={() => handleDetail(order)}
-                                title="Ver detalle"
-                                className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
-                              >
-                                <Eye size={14} />
-                              </button>
-                              {/* Recibir */}
-                              {order.status === 'pending' && (
-                                <button
-                                  onClick={() => { setReceivingId(order.id); setReceiveModal(true) }}
-                                  title="Recibir mercadería"
-                                  className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
-                                >
-                                  <CheckCircle size={14} />
-                                </button>
-                              )}
-                              {/* Cancelar */}
-                              {order.status === 'pending' && (
-                                <button
-                                  onClick={async () => {
-                                    await api.patch(`/api/purchases/${order.id}/cancel`, {})
-                                    toast.success('Orden cancelada')
-                                    fetchOrders()
-                                  }}
-                                  title="Cancelar orden"
-                                  className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors"
-                                >
-                                  <XCircle size={14} />
-                                </button>
-                              )}
-                            </div>
                           </td>
                         </tr>
                       )
@@ -358,12 +421,24 @@ export default function PurchasesPage() {
       {/* Confirm recibir mercadería */}
       <ConfirmDialog
         open={receiveModal}
-        onClose={() => { setReceiveModal(false); setReceivingId(null) }}
+        onClose={() => setReceiveModal(false)}
         onConfirm={handleReceive}
         title="Recibir mercadería"
-        message="¿Confirmás la recepción de esta orden? El stock de todos los productos se actualizará automáticamente y se recalculará el precio de costo promedio."
+        message="¿Confirmás la recepción de esta orden? El stock de los productos se actualizará en el depósito seleccionado y se recalculará el precio de costo promedio."
         confirmLabel="Confirmar recepción"
         loading={receiving}
+      />
+
+      {/* Confirm cancelar orden */}
+      <ConfirmDialog
+        open={cancelModal}
+        onClose={() => setCancelModal(false)}
+        onConfirm={handleCancel}
+        title="Cancelar orden"
+        message="¿Estás seguro que querés cancelar esta orden de compra? Esta acción no se puede deshacer."
+        confirmLabel="Cancelar orden"
+        loading={cancelling}
+        danger
       />
 
       {/* Confirm eliminar proveedor */}
@@ -381,16 +456,17 @@ export default function PurchasesPage() {
       {/* Modal detalle orden */}
       {detailModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-40 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
           onClick={e => { if (e.target === e.currentTarget) setDetailModal(false) }}
         >
-          <div className="w-full max-w-lg bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl">
+          <div className="w-full max-w-lg bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
               <h2 className="text-base font-semibold text-[var(--text)]">Detalle de orden</h2>
               <button onClick={() => setDetailModal(false)} className="p-1 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)]">✕</button>
             </div>
-            <div className="p-5">
+
+            <div className="p-5 overflow-y-auto flex-1">
               {loadingDetail ? (
                 <div className="flex justify-center py-8"><div className="w-6 h-6 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" /></div>
               ) : detailOrder ? (
@@ -403,6 +479,10 @@ export default function PurchasesPage() {
                     <div>
                       <p className="text-xs text-[var(--text3)]">Estado</p>
                       <Badge variant={statusConfig[detailOrder.status].variant}>{statusConfig[detailOrder.status].label}</Badge>
+                    </div>
+                    <div>
+                      <p className="text-xs text-[var(--text3)]">Depósito destino</p>
+                      <p className="text-[var(--text)]">{(detailOrder as unknown as { warehouse_name?: string }).warehouse_name ?? <span className="text-[var(--text3)]">Sin depósito</span>}</p>
                     </div>
                     <div>
                       <p className="text-xs text-[var(--text3)]">Fecha</p>
@@ -452,6 +532,40 @@ export default function PurchasesPage() {
                 </div>
               ) : null}
             </div>
+
+            {/* Footer con acciones */}
+            {detailOrder && (detailOrder.status === 'pending' || detailOrder.status === 'received') && (
+              <div className="px-5 py-4 border-t border-[var(--border)] flex justify-between items-center gap-2">
+                <div>
+                  {detailOrder.status === 'received' && (
+                    <button
+                      onClick={() => printRemito(detailOrder)}
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors border border-[var(--border)]"
+                    >
+                      🖨 Imprimir remito
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  {detailOrder.status === 'pending' && (
+                    <>
+                      <button
+                        onClick={() => setCancelModal(true)}
+                        className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--danger-subtle)] text-[var(--danger)] border border-[var(--danger)] hover:opacity-80 transition-opacity"
+                      >
+                        Cancelar orden
+                      </button>
+                      <button
+                        onClick={() => setReceiveModal(true)}
+                        className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:opacity-90 transition-opacity"
+                      >
+                        Confirmar recepción
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

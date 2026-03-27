@@ -19,6 +19,7 @@ import {
 } from 'recharts'
 
 // ─── Tipos de datos ───────────────────────────────────────
+interface OrdersByDay { day: number; label: string; count: number; total: number }
 interface SalesByHour { hour: number; label: string; total_sales: number; total_revenue: number }
 interface SalesLast30 { sale_date: string; total_sales: number; total_revenue: number; gross_margin: number }
 interface PaymentMethod { method: string; total: number }
@@ -27,7 +28,6 @@ interface WeekComparison  { this_week: number;  prev_week: number;  diff_pct: nu
 interface MonthComparison { this_month: number; prev_month: number; diff_pct: number; this_count: number; prev_count: number }
 interface MarginData { revenue: number; cost: number; margin: number; margin_pct: number }
 interface AccountsReceivable { total: number; top_debtors: { full_name: string; current_balance: number; credit_limit: number }[] }
-interface BranchStats { branch_id: string; branch_name: string; register_count: number; sales_today: number; revenue_today: number; revenue_month: number; open_registers: number }
 
 // ─── Colores para gráficos ────────────────────────────────
 const CHART_COLORS = ['#16a34a', '#0ea5e9', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6']
@@ -56,6 +56,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [recentSales, setRecentSales] = useState<Sale[]>([])
   const [lowStock, setLowStock] = useState<{ id: string; name: string; stock_current: number; stock_min: number; stock_status: string; supplier_name?: string }[]>([])
+  const [ordersByDay, setOrdersByDay] = useState<OrdersByDay[]>([])
   const [salesByHour, setSalesByHour] = useState<SalesByHour[]>([])
   const [salesLast30, setSalesLast30] = useState<SalesLast30[]>([])
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([])
@@ -64,7 +65,6 @@ export default function DashboardPage() {
   const [monthComp, setMonthComp] = useState<MonthComparison | null>(null)
   const [margin, setMargin] = useState<MarginData | null>(null)
   const [accounts, setAccounts] = useState<AccountsReceivable | null>(null)
-  const [branchStats, setBranchStats] = useState<BranchStats[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -72,10 +72,11 @@ export default function DashboardPage() {
     if (!silent) setLoading(true)
     else setRefreshing(true)
     try {
-      const [s, sales, stock, byHour, last30, payments, top, week, month, mar, acc, branches] = await Promise.all([
+      const [s, sales, stock, ordersDay, byHour, last30, payments, top, week, month, mar, acc] = await Promise.all([
         api.get<DashboardStats>('/api/dashboard/stats', { today_from: getPeriodDates('today').from }),
         api.get<Sale[]>('/api/dashboard/recent-sales'),
         api.get<typeof lowStock>('/api/dashboard/low-stock'),
+        api.get<OrdersByDay[]>('/api/dashboard/orders-by-day'),
         api.get<SalesByHour[]>('/api/dashboard/sales-by-hour'),
         api.get<SalesLast30[]>('/api/dashboard/sales-last-30'),
         api.get<PaymentMethod[]>('/api/dashboard/payment-methods'),
@@ -84,11 +85,11 @@ export default function DashboardPage() {
         api.get<MonthComparison>('/api/dashboard/month-comparison', { month_from: getLocalMonthStart() }),
         api.get<MarginData>('/api/dashboard/margin'),
         api.get<AccountsReceivable>('/api/dashboard/accounts-receivable'),
-        api.get<BranchStats[]>('/api/branches/stats'),
       ])
       setStats(s)
       setRecentSales(sales)
       setLowStock(stock)
+      setOrdersByDay(ordersDay)
       setSalesByHour(byHour)
       setSalesLast30(last30)
       setPaymentMethods(payments)
@@ -97,7 +98,6 @@ export default function DashboardPage() {
       setMonthComp(month)
       setMargin(mar)
       setAccounts(acc)
-      setBranchStats(branches)
     } catch (err) { console.error(err) }
     finally { setLoading(false); setRefreshing(false) }
   }, [])
@@ -300,6 +300,42 @@ export default function DashboardPage() {
             )}
           </Card>
         </div>
+
+        {/* ── Gráfico: Pedidos por día del mes ── */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Pedidos por día — mes actual</CardTitle>
+            {ordersByDay.length > 0 && (
+              <span className="text-xs text-[var(--text3)]">
+                {ordersByDay.reduce((a, d) => a + d.count, 0)} pedidos
+              </span>
+            )}
+          </CardHeader>
+          {ordersByDay.every(d => d.count === 0) ? (
+            <p className="text-sm text-[var(--text3)] text-center py-8">Sin pedidos este mes</p>
+          ) : (
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={[...ordersByDay]} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--text3)' }} interval={2} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 9, fill: 'var(--text3)' }} width={25} />
+                <Tooltip
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null
+                    return (
+                      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 shadow-xl text-xs">
+                        <p className="text-[var(--text3)] mb-1">Día {label}</p>
+                        <p className="font-semibold text-[var(--accent)]">{payload[0]?.value} pedidos</p>
+                        <p className="text-[var(--text3)]">{formatCurrency(Number(payload[1]?.value ?? 0))}</p>
+                      </div>
+                    )
+                  }}
+                />
+                <Bar dataKey="count" name="Pedidos" fill="#0ea5e9" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </Card>
 
         {/* ── Gráfico: Evolución 30 días ── */}
         <Card>
