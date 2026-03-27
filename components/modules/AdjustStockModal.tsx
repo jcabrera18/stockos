@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
@@ -15,11 +15,20 @@ interface AdjustStockModalProps {
   warehouseId?: string 
 }
 
-export function AdjustStockModal({ open, onClose, onSaved, product }: AdjustStockModalProps) {
+export function AdjustStockModal({ open, onClose, onSaved, product, warehouseId }: AdjustStockModalProps) {
   const [type, setType] = useState<'add' | 'remove'>('add')
   const [quantity, setQty] = useState('')
   const [reason, setReason] = useState('')
+  const [stockMin, setStockMin] = useState('')
+  const [stockMax, setStockMax] = useState('')
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (product) {
+      setStockMin(String(product.stock_min ?? 0))
+      setStockMax(String(product.stock_max ?? 9999))
+    }
+  }, [product])
 
   const reset = () => { setQty(''); setReason(''); setType('add') }
 
@@ -37,10 +46,21 @@ export function AdjustStockModal({ open, onClose, onSaved, product }: AdjustStoc
     setSaving(true)
     try {
       const delta = type === 'add' ? Number(quantity) : -Number(quantity)
-      await api.post(`/api/products/${product.id}/adjust-stock`, {
-        quantity: delta,
-        reason: reason.trim(),
-      })
+      await Promise.all([
+        warehouseId
+          ? api.patch(`/api/warehouses/${warehouseId}/stock/${product.id}`, {
+              quantity: delta,
+              reason: reason.trim(),
+            })
+          : api.post(`/api/products/${product.id}/adjust-stock`, {
+              quantity: delta,
+              reason: reason.trim(),
+            }),
+        api.patch(`/api/products/${product.id}`, {
+          stock_min: Number(stockMin) || 0,
+          stock_max: Number(stockMax) || 9999,
+        }),
+      ])
       toast.success(`Stock ${type === 'add' ? 'agregado' : 'descontado'} correctamente`)
       reset()
       onSaved()
@@ -119,6 +139,32 @@ export function AdjustStockModal({ open, onClose, onSaved, product }: AdjustStoc
             onChange={e => setReason(e.target.value)}
             placeholder="Ej: Recepción de mercadería, merma, etc."
           />
+
+          {/* Límites de stock */}
+          <div className="border-t border-[var(--border)] pt-4 space-y-3">
+            <p className="text-xs font-medium text-[var(--text3)]">Límites de alerta</p>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Stock mínimo"
+                type="number"
+                min="0"
+                step="1"
+                value={stockMin}
+                onChange={e => setStockMin(e.target.value)}
+                placeholder="0"
+                hint="Alerta si baja de este valor"
+              />
+              <Input
+                label="Stock máximo"
+                type="number"
+                min="0"
+                step="1"
+                value={stockMax}
+                onChange={e => setStockMax(e.target.value)}
+                placeholder="9999"
+              />
+            </div>
+          </div>
 
           <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
             <div className="flex justify-end gap-2">

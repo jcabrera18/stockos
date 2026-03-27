@@ -24,6 +24,7 @@ interface Supplier  { id: string; name: string }
 interface Warehouse { id: string; name: string }
 
 type StockItem = StockSummary & {
+  product_id?: string
   stock_reserved?: number
   warehouse_id?: string
   warehouse_name?: string
@@ -158,7 +159,14 @@ export default function StockPage() {
   }, [fetchStock])
 
   useEffect(() => {
-    api.get<Warehouse[]>('/api/warehouses').then(setWarehouses).catch(() => {})
+    api.get<Warehouse[]>('/api/warehouses').then(wh => {
+      setWarehouses(wh)
+      if (wh.length > 0 && !warehouseRef.current) {
+        const def = wh.find((w: Warehouse & { is_default?: boolean }) => w.is_default) ?? wh[0]
+        setSelectedWarehouse(def.id)
+        warehouseRef.current = def.id
+      }
+    }).catch(() => {})
     api.get<Category[]>('/api/products/categories').then(setCategories).catch(() => {})
     api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => {})
   }, [])
@@ -189,10 +197,10 @@ export default function StockPage() {
       <div className="p-5 space-y-4">
 
         {/* Selector de depósito */}
-        {warehouses.length > 1 && (
+        {warehouses.length > 0 && (
           <div className="flex items-center gap-2 overflow-x-auto pb-1">
             <span className="text-xs text-[var(--text3)] flex-shrink-0">Depósito:</span>
-            {[{ id: '', name: 'Todos' }, ...warehouses].map(w => (
+            {warehouses.map(w => (
               <button key={w.id} onClick={() => setSelectedWarehouse(w.id)}
                 className={`px-3 py-1.5 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedWarehouse === w.id
                   ? 'bg-[var(--accent)] text-white'
@@ -370,7 +378,8 @@ export default function StockPage() {
                   {data.map(item => (
                     <tr key={item.id}
                       onClick={() => {
-                        setAdjustProduct(item as unknown as Product)
+                        const productId = item.product_id ?? item.id
+                        setAdjustProduct({ ...item, id: productId } as unknown as Product)
                         setAdjustWarehouseId(selectedWarehouse || undefined)
                         setAdjustModal(true)
                       }}

@@ -107,12 +107,10 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
         </div>
 
         {/* Botón pagar */}
-        {Number(customer.current_balance) > 0 && (
-          <Button onClick={onPayment} className="w-full">
-            <CreditCard size={15} />
-            Registrar pago
-          </Button>
-        )}
+        <Button onClick={onPayment} className="w-full">
+          <CreditCard size={15} />
+          Registrar pago
+        </Button>
 
         {/* Historial de movimientos */}
         <div className="pb-4">

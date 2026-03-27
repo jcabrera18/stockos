@@ -49,7 +49,6 @@ const SORT_OPTIONS = [
   { value: 'name',          label: 'Nombre' },
   { value: 'sell_price',    label: 'Precio venta' },
   { value: 'cost_price',    label: 'Precio costo' },
-  { value: 'stock_current', label: 'Stock' },
 ]
 
 const selectClass = 'px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed'
@@ -374,15 +373,6 @@ export default function ProductsPage() {
                 </select>
               </div>
 
-              {/* Estado de stock */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-[var(--text3)]">Estado stock</label>
-                <select value={stockStatusFilter} onChange={e => setStockStatusFilter(e.target.value)} className={selectClass}>
-                  <option value="">Todos</option>
-                  {STOCK_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
-              </div>
-
               {/* Rango precio venta */}
               <div className="flex flex-col gap-1 sm:col-span-2">
                 <label className="text-xs font-medium text-[var(--text3)]">Precio venta</label>
@@ -462,15 +452,6 @@ export default function ProductsPage() {
                     </th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Categoría</th>
                     <th
-                      onClick={() => handleSort('stock_current')}
-                      className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group"
-                    >
-                      <div className="flex items-center justify-end gap-1">
-                        Stock
-                        <SortIcon field="stock_current" sortBy={sortBy} sortDir={sortDir} />
-                      </div>
-                    </th>
-                    <th
                       onClick={() => handleSort('cost_price')}
                       className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group hidden sm:table-cell"
                     >
@@ -488,7 +469,6 @@ export default function ProductsPage() {
                         <SortIcon field="sell_price" sortBy={sortBy} sortDir={sortDir} />
                       </div>
                     </th>
-                    <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Estado</th>
                     <th className="px-4 py-3" />
                   </tr>
                 </thead>
@@ -508,22 +488,11 @@ export default function ProductsPage() {
                       <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
                         {getCategoryPath(product.category_id, allCategories)}
                       </td>
-                      <td className="px-4 py-3 text-right mono font-bold text-base" style={{ color: getStockStatusColor(product.stock_status) }}>
-                        {product.stock_current}
-                      </td>
                       <td className="px-4 py-3 text-right mono text-[var(--text2)] hidden sm:table-cell">
                         {formatCurrency(product.cost_price)}
                       </td>
                       <td className="px-4 py-3 text-right mono font-medium text-[var(--text)]">
                         {formatCurrency(product.sell_price)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <Badge variant={
-                          product.stock_status === 'ok' ? 'success' :
-                            product.stock_status === 'bajo' ? 'warning' : 'danger'
-                        }>
-                          {getStockStatusLabel(product.stock_status)}
-                        </Badge>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">

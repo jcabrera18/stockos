@@ -90,7 +90,7 @@ export function TransferModal({ open, onClose, onSaved, warehouses }: TransferMo
         items: items.map(i => ({ product_id: i.product.id, quantity: i.quantity })),
         notes: notes.trim() || null,
       })
-      toast.success('Transferencia realizada')
+      toast.success('Transferencia creada — pendiente de aprobación')
       onSaved()
       onClose()
     } catch (err: unknown) {
@@ -197,7 +197,7 @@ export function TransferModal({ open, onClose, onSaved, warehouses }: TransferMo
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
             <Button onClick={handleSave} loading={saving} disabled={items.length === 0}>
-              Confirmar transferencia
+              Crear transferencia
             </Button>
           </div>
         </div>

@@ -18,12 +18,13 @@ import type { PriceList } from '@/app/price-lists/page'
 import {
   Plus, Search, Package, CheckCircle, Clock, Truck,
   X, Minus, Trash2, ChevronRight, DollarSign, AlertCircle,
-  ClipboardList, Printer,
+  ClipboardList, Printer, Receipt,
 } from 'lucide-react'
+import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────
-type OrderStatus = 'pending' | 'confirmed' | 'preparing' | 'ready' | 'in_transit' | 'delivered' | 'invoiced' | 'cancelled'
+type OrderStatus = 'pending' | 'confirmed' | 'delivered' | 'cancelled'
 type PaymentStatus = 'unpaid' | 'partial' | 'paid' | 'credit'
 type PaymentMethod = 'efectivo' | 'transferencia' | 'debito' | 'credito' | 'qr' | 'cuenta_corriente'
 
@@ -52,6 +53,7 @@ interface OrderSummary {
 
 interface OrderDetail extends OrderSummary {
   warehouse_id?: string
+  sale_id?: string
   order_items: {
     id: string
     product_id: string
@@ -62,6 +64,7 @@ interface OrderDetail extends OrderSummary {
     products: { name: string; barcode?: string; unit: string }
   }[]
   warehouses?: { name: string }
+  customers?: { full_name: string; current_balance: number; document?: string; phone?: string }
 }
 
 interface CartItem {
@@ -81,22 +84,14 @@ interface Warehouse {
 const STATUS_LABELS: Record<OrderStatus, string> = {
   pending: 'Pendiente',
   confirmed: 'Confirmado',
-  preparing: 'En preparación',
-  ready: 'Listo',
-  in_transit: 'En camino',
   delivered: 'Entregado',
-  invoiced: 'Facturado',
   cancelled: 'Cancelado',
 }
 
 const STATUS_VARIANTS: Record<OrderStatus, 'default' | 'success' | 'warning' | 'danger'> = {
   pending: 'warning',
   confirmed: 'default',
-  preparing: 'default',
-  ready: 'success',
-  in_transit: 'warning',
   delivered: 'success',
-  invoiced: 'success',
   cancelled: 'danger',
 }
 
@@ -160,6 +155,10 @@ export default function OrdersPage() {
   const [deliverAmount, setDeliverAmount] = useState('')
   const [deliverNotes, setDeliverNotes] = useState('')
   const [delivering, setDelivering] = useState(false)
+  const [saleDetailId, setSaleDetailId] = useState<string | null>(null)
+
+  // Confirmación cancelación
+  const [cancelConfirmOrder, setCancelConfirmOrder] = useState<{ id: string; customer_name: string } | null>(null)
 
   // Cobro parcial
   const [paymentModal, setPaymentModal] = useState(false)
@@ -173,8 +172,6 @@ export default function OrdersPage() {
   const [searchingCustomers, setSearchingCustomers] = useState(false)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
 
-  const [stockIssues, setStockIssues] = useState<Record<string, { available: number; needed: number }>>({})
-
   // Lista de carga (picking)
   interface PickingItem {
     product_id: string; name: string; barcode?: string; unit: string; total_qty: number
@@ -184,16 +181,108 @@ export default function OrdersPage() {
   const [pickingItems, setPickingItems] = useState<PickingItem[]>([])
   const [loadingPicking, setLoadingPicking] = useState(false)
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
+  const [pickingWarehouseId, setPickingWarehouseId] = useState('')
 
-  const openPickingList = async () => {
-    setPickingModal(true)
-    setCheckedItems(new Set())
+  const fetchPickingList = async (wid: string) => {
     setLoadingPicking(true)
+    setCheckedItems(new Set())
     try {
-      const data = await api.get<PickingItem[]>('/api/orders/picking-list')
+      const params = wid ? { warehouse_id: wid } : {}
+      const data = await api.get<PickingItem[]>('/api/orders/picking-list', params)
       setPickingItems(data)
     } catch { setPickingItems([]) }
     finally { setLoadingPicking(false) }
+  }
+
+  const openPickingList = () => {
+    const defWh = warehouses.find(w => w.is_default)
+    const wid = defWh?.id ?? warehouses[0]?.id ?? ''
+    setPickingWarehouseId(wid)
+    setPickingModal(true)
+    fetchPickingList(wid)
+  }
+
+  const printOrder = (d: OrderDetail) => {
+    const win = window.open('', '_blank', 'width=750,height=700')
+    if (!win) return
+    const date = new Date(d.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const pending = Math.max(0, Number(d.total) - Number(d.paid_amount))
+    const paymentLabel: Record<string, string> = {
+      efectivo: 'Efectivo', transferencia: 'Transferencia', debito: 'Débito',
+      credito: 'Crédito', qr: 'QR', cuenta_corriente: 'Cuenta corriente',
+    }
+    const rows = (d.order_items ?? []).map(i =>
+      `<tr>
+        <td>${i.products.name}${i.products.barcode ? `<br><span class="small">${i.products.barcode}</span>` : ''}</td>
+        <td class="center">${i.quantity} ${i.products.unit}</td>
+        <td class="right">${Number(i.unit_price).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
+        <td class="right">${Number(i.subtotal).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
+      </tr>`
+    ).join('')
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pedido</title>
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:Arial,sans-serif;padding:32px;color:#111;font-size:13px}
+      h1{font-size:22px;margin-bottom:2px}
+      .num{font-size:12px;color:#666;margin-bottom:24px}
+      .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+      .box{border:1px solid #e0e0e0;border-radius:6px;padding:12px}
+      .box .label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+      .box p{font-size:13px;font-weight:600}
+      .box .sub{font-size:12px;color:#555;font-weight:400;margin-top:2px}
+      table{width:100%;border-collapse:collapse;margin-bottom:16px}
+      th{background:#f5f5f5;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;color:#555;border-bottom:2px solid #ddd}
+      td{padding:9px 10px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top}
+      .center{text-align:center} .right{text-align:right}
+      .small{font-size:11px;color:#888}
+      tfoot td{border-top:2px solid #ddd;border-bottom:none;font-weight:600}
+      tfoot .total-row td{font-size:15px;color:#1a56db;padding-top:10px}
+      .saldo{background:#fff8e1;border:1px solid #f59e0b;border-radius:6px;padding:12px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
+      .saldo .amt{font-size:20px;font-weight:700;color:#b45309}
+      .footer{margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px}
+      .sign{border-top:1px solid #aaa;padding-top:8px;font-size:11px;color:#666;text-align:center}
+      @media print{button{display:none}}
+    </style></head><body>
+    <h1>Pedido de venta</h1>
+    <p class="num">N° ${d.id.slice(0, 8).toUpperCase()} · ${date}${d.warehouse_name ? ` · Depósito: ${d.warehouse_name}` : ''}</p>
+
+    <div class="grid">
+      <div class="box">
+        <div class="label">Cliente</div>
+        <p>${d.customer_name}</p>
+        ${d.customers?.document ? `<p class="sub">DNI: ${d.customers.document}</p>` : ''}
+        ${(d.customer_phone || d.customers?.phone) ? `<p class="sub">Tel: ${d.customer_phone || d.customers?.phone}</p>` : ''}
+        ${d.customer_address ? `<p class="sub">${d.customer_address}</p>` : ''}
+        ${d.customers?.current_balance !== undefined ? `<p class="sub" style="margin-top:6px;color:${Number(d.customers.current_balance) > 0 ? '#dc2626' : '#16a34a'}"><strong>Saldo en cuenta: ${Number(d.customers.current_balance).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</strong></p>` : ''}
+      </div>
+      <div class="box">
+        <div class="label">Estado del pago</div>
+        <p>${PAYMENT_STATUS_LABELS[d.payment_status as PaymentStatus] ?? d.payment_status}</p>
+        ${d.payment_method ? `<p class="sub">${paymentLabel[d.payment_method] ?? d.payment_method}</p>` : ''}
+        ${Number(d.paid_amount) > 0 ? `<p class="sub">Cobrado: ${Number(d.paid_amount).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</p>` : ''}
+      </div>
+    </div>
+
+    <table>
+      <thead><tr><th>Producto</th><th class="center">Cant.</th><th class="right">Precio unit.</th><th class="right">Subtotal</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        ${Number(d.discount) > 0 ? `<tr><td colspan="3">Descuento</td><td class="right">− ${Number(d.discount).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td></tr>` : ''}
+        <tr class="total-row"><td colspan="3"><strong>Total</strong></td><td class="right"><strong>${Number(d.total).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</strong></td></tr>
+      </tfoot>
+    </table>
+
+    ${pending > 0 ? `<div class="saldo"><span>Saldo pendiente de cobro de este pedido</span><span class="amt">${pending.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</span></div>` : ''}
+    ${d.notes ? `<p style="font-size:12px;color:#555;margin-bottom:20px"><em>Notas: ${d.notes}</em></p>` : ''}
+    ${d.seller_name ? `<p style="font-size:11px;color:#888">Vendedor: ${d.seller_name}</p>` : ''}
+
+    <div class="footer">
+      <div class="sign">Firma cliente</div>
+      <div class="sign">Firma vendedor</div>
+    </div>
+    </body></html>`)
+    win.document.close()
+    setTimeout(() => win.print(), 300)
   }
 
   const togglePickingCheck = (productId: string) =>
@@ -254,13 +343,25 @@ export default function OrdersPage() {
     const timer = setTimeout(async () => {
       setSearchingProducts(true)
       try {
-        const res = await api.get<{ data: Product[] }>('/api/products', { search: productQuery.trim(), limit: 6 })
-        setProductResults(res.data.filter(p => !cart.find(c => c.product.id === p.id)))
+        if (warehouseId) {
+          // Buscar con stock del depósito seleccionado
+          const res = await api.get<{ data: { product_id: string; product_name: string; stock_current: number; barcode?: string; cost_price?: number; sell_price?: number }[] }>(
+            `/api/warehouses/${warehouseId}/stock`, { search: productQuery.trim(), limit: 6 }
+          )
+          setProductResults(
+            res.data
+              .filter(s => !cart.find(c => c.product.id === s.product_id))
+              .map(s => ({ id: s.product_id, name: s.product_name, stock_current: s.stock_current, barcode: s.barcode, cost_price: s.cost_price ?? 0, sell_price: s.sell_price ?? 0 } as Product))
+          )
+        } else {
+          const res = await api.get<{ data: Product[] }>('/api/products', { search: productQuery.trim(), limit: 6 })
+          setProductResults(res.data.filter(p => !cart.find(c => c.product.id === p.id)))
+        }
       } catch { setProductResults([]) }
       finally { setSearchingProducts(false) }
     }, 300)
     return () => clearTimeout(timer)
-  }, [productQuery, cart])
+  }, [productQuery, cart, warehouseId])
 
   useEffect(() => {
     if (!customerQuery.trim() || customerQuery.length < 2) { setCustomerResults([]); return }
@@ -289,9 +390,9 @@ export default function OrdersPage() {
 
   const addToCart = (product: Product) => {
     const list = priceLists.find(pl => pl.id === priceListId)
-    const price = list
+    const price = list && product.cost_price
       ? Math.round(product.cost_price * (1 + list.margin_pct / 100) * 100) / 100
-      : product.sell_price
+      : (product.sell_price || product.cost_price || 0)
     setCart(prev => [...prev, { product, quantity: 1, unit_price: price, discount: 0 }])
     setProductQuery('')
     setProductResults([])
@@ -333,9 +434,12 @@ export default function OrdersPage() {
     setCustomerQuery(''); setCustomerResults([]); setSelectedCustomerId(null)
   }
 
+  const cartStockIssues = cart.filter(i => i.quantity > (i.product.stock_current ?? 0))
+
   const handleCreateOrder = async () => {
     if (!customerName.trim()) { toast.error('El nombre del cliente es obligatorio'); return }
     if (cart.length === 0) { toast.error('Agregá al menos un producto'); return }
+    if (cartStockIssues.length > 0) { toast.error('Hay productos con stock insuficiente'); return }
 
     setSavingOrder(true)
     try {
@@ -371,7 +475,6 @@ export default function OrdersPage() {
     try {
       await api.post(`/api/orders/${id}/${action}`, {})
       toast.success('Estado actualizado')
-      setStockIssues({})
       fetchOrders()
       if (detail?.id === id) {
         const updated = await api.get<OrderDetail>(`/api/orders/${id}`)
@@ -379,28 +482,6 @@ export default function OrdersPage() {
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al actualizar'
-
-      // Si es error de stock, parsear y marcar los ítems
-      if (msg.includes('Stock insuficiente') && detail) {
-        // Refetch del stock del depósito para marcar visualmente
-        if (detail.warehouse_id) {
-          try {
-            const ws = await api.get<{ data: { product_id: string; stock_current: number }[] }>(
-              `/api/warehouses/${detail.warehouse_id}/stock`, { limit: 200 }
-            )
-            const stockMap = new Map(ws.data.map(s => [s.product_id, s.stock_current]))
-            const issues: Record<string, { available: number; needed: number }> = {}
-            for (const item of detail.order_items) {
-              const available = stockMap.get(item.product_id) ?? 0  // ← directo
-              if (available < item.quantity) {
-                issues[item.product_id] = { available, needed: item.quantity }
-              }
-            }
-            setStockIssues(issues)
-          } catch { }
-        }
-      }
-
       msg.split('\n').forEach((line, i) => {
         setTimeout(() => toast.error(line), i * 150)
       })
@@ -453,18 +534,9 @@ export default function OrdersPage() {
       actions.push({ label: 'Cancelar', action: 'cancel', variant: 'danger' as const })
     }
     if (order.status === 'confirmed') {
-      actions.push({ label: 'En preparación', action: 'prepare', variant: 'success' as const })
-    }
-    if (order.status === 'preparing') {
-      actions.push({ label: 'Listo', action: 'ready', variant: 'success' as const })
-    }
-    if (order.status === 'ready') {
-      actions.push({ label: 'Despachar', action: 'dispatch', variant: 'success' as const })
-    }
-    if (order.status === 'in_transit') {
       actions.push({ label: 'Confirmar entrega', action: 'deliver_modal', variant: 'success' as const })
     }
-    if (['unpaid', 'partial'].includes(order.payment_status) && !['cancelled', 'pending'].includes(order.status)) {
+    if (['unpaid', 'partial'].includes(order.payment_status) && !['cancelled', 'pending', 'delivered'].includes(order.status)) {
       actions.push({ label: 'Registrar cobro', action: 'payment_modal', variant: 'default' as const })
     }
     return actions
@@ -491,7 +563,6 @@ export default function OrdersPage() {
         {/* Filtros */}
         <div className="flex flex-wrap gap-2 items-center">
           {([['', 'Todos'], ['pending', 'Pendientes'], ['confirmed', 'Confirmados'],
-          ['preparing', 'En preparación'], ['ready', 'Listos'], ['in_transit', 'En camino'],
           ['delivered', 'Entregados']] as [string, string][]).map(([val, label]) => (
             <button key={val} onClick={() => setStatusFilter(val as OrderStatus | '')}
               className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${statusFilter === val
@@ -574,6 +645,8 @@ export default function OrdersPage() {
                                   setDeliverOrderId(order.id); setDeliverModal(true)
                                 } else if (a.action === 'payment_modal') {
                                   setPaymentOrderId(order.id); setPaymentModal(true)
+                                } else if (a.action === 'cancel') {
+                                  setCancelConfirmOrder({ id: order.id, customer_name: order.customer_name })
                                 } else {
                                   handleAction(order.id, a.action)
                                 }
@@ -609,8 +682,8 @@ export default function OrdersPage() {
           <div className="space-y-4">
             {/* Status timeline */}
             <div className="flex items-center gap-1 overflow-x-auto pb-1">
-              {(['pending', 'confirmed', 'preparing', 'ready', 'in_transit', 'delivered'] as OrderStatus[]).map((s, i) => {
-                const statuses: OrderStatus[] = ['pending', 'confirmed', 'preparing', 'ready', 'in_transit', 'delivered', 'invoiced', 'cancelled']
+              {(['pending', 'confirmed', 'delivered'] as OrderStatus[]).map((s, i) => {
+                const statuses: OrderStatus[] = ['pending', 'confirmed', 'delivered', 'cancelled']
                 const currentIdx = statuses.indexOf(detail.status)
                 const stepIdx = statuses.indexOf(s)
                 const done = stepIdx < currentIdx
@@ -623,7 +696,7 @@ export default function OrdersPage() {
                       }`}>
                       {STATUS_LABELS[s]}
                     </div>
-                    {i < 5 && <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />}
+                    {i < 2 && <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />}
                   </div>
                 )
               })}
@@ -667,17 +740,6 @@ export default function OrdersPage() {
               <span>· {formatDateTime(detail.created_at)}</span>
             </div>
 
-            {/* Productos */}
-            {/* Banner de stock insuficiente */}
-            {Object.keys(stockIssues).length > 0 && (
-              <div className="flex items-start gap-2 px-3 py-2.5 bg-[var(--danger-subtle)] border border-[var(--danger)] rounded-[var(--radius-md)] text-xs text-[var(--danger)]">
-                <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
-                <span>
-                  <strong>{Object.keys(stockIssues).length} producto(s)</strong> con stock insuficiente. Cambiá el depósito o ajustá el stock antes de confirmar.
-                </span>
-              </div>
-            )}
-
             {/* Tabla de ítems */}
             <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden mb-4">
               <table className="w-full text-sm">
@@ -691,17 +753,10 @@ export default function OrdersPage() {
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
                   {detail.order_items?.map(item => {
-                    const pid = (item as unknown as { product_id: string }).product_id
-                    const issue = stockIssues[item.product_id]   // ← buscar por product_id
                     return (
-                      <tr key={item.id} className={issue ? 'bg-[var(--danger-subtle)]' : ''}>
+                      <tr key={item.id}>
                         <td className="px-3 py-2.5">
                           <p className="font-medium text-[var(--text)]">{item.products.name}</p>
-                          {issue && (
-                            <p className="text-xs text-[var(--danger)] font-medium mt-0.5">
-                              ⚠ Disponible: {issue.available} — Necesita: {issue.needed}
-                            </p>
-                          )}
                         </td>
                         <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">{item.quantity} {item.products.unit}</td>
                         <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">{formatCurrency(item.unit_price)}</td>
@@ -757,29 +812,46 @@ export default function OrdersPage() {
             )}
 
             {/* Acciones del detalle */}
-            {detail.status !== 'delivered' && detail.status !== 'invoiced' && detail.status !== 'cancelled' && (
-              <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
-                <div className="flex justify-end gap-2">                {getActions(detail).map(a => (
-                  <button key={a.action}
-                    onClick={() => {
-                      if (a.action === 'deliver_modal') {
-                        setDeliverOrderId(detail.id); setDeliverModal(true)
-                      } else if (a.action === 'payment_modal') {
-                        setPaymentOrderId(detail.id); setPaymentModal(true)
-                      } else {
-                        handleAction(detail.id, a.action)
-                      }
-                    }}
-                    className={`px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium transition-colors ${a.variant === 'success' ? 'bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]' :
-                      a.variant === 'danger' ? 'bg-[var(--danger-subtle)] text-[var(--danger)] border border-[var(--danger)]' :
-                        'bg-[var(--surface2)] text-[var(--text2)] border border-[var(--border)]'
-                      }`}>
-                    {a.label}
+            <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => printOrder(detail)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors border border-[var(--border)]">
+                    <Printer size={14} /> Imprimir
                   </button>
-                ))}
+                  {detail.sale_id && (
+                    <button
+                      onClick={() => setSaleDetailId(detail.sale_id!)}
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors border border-[var(--border)]">
+                      <Receipt size={14} /> Ver venta
+                    </button>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  {getActions(detail).map(a => (
+                    <button key={a.action}
+                      onClick={() => {
+                        if (a.action === 'deliver_modal') {
+                          setDeliverOrderId(detail.id); setDeliverModal(true)
+                        } else if (a.action === 'payment_modal') {
+                          setPaymentOrderId(detail.id); setPaymentModal(true)
+                        } else if (a.action === 'cancel') {
+                          setCancelConfirmOrder({ id: detail.id, customer_name: detail.customer_name })
+                        } else {
+                          handleAction(detail.id, a.action)
+                        }
+                      }}
+                      className={`px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium transition-colors ${a.variant === 'success' ? 'bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]' :
+                        a.variant === 'danger' ? 'bg-[var(--danger-subtle)] text-[var(--danger)] border border-[var(--danger)]' :
+                          'bg-[var(--surface2)] text-[var(--text2)] border border-[var(--border)]'
+                        }`}>
+                      {a.label}
+                    </button>
+                  ))}
                 </div>
               </div>
-            )}
+            </div>
           </div>
         )}
       </Modal>
@@ -858,10 +930,22 @@ export default function OrdersPage() {
           <div className="grid grid-cols-2 gap-3">
             <Select label="Depósito"
               options={warehouses.map(w => ({ value: w.id, label: w.name }))}
-              value={warehouseId} onChange={e => setWarehouseId(e.target.value)} />
+              value={warehouseId} onChange={e => { setWarehouseId(e.target.value); setCart([]); setProductResults([]) }} />
             <Select label="Lista de precio"
               options={priceLists.map(pl => ({ value: pl.id, label: `${pl.name} (+${pl.margin_pct}%)` }))}
-              value={priceListId} onChange={e => setPriceListId(e.target.value)} />
+              value={priceListId} onChange={e => {
+                const newId = e.target.value
+                setPriceListId(newId)
+                if (cart.length > 0) {
+                  const list = priceLists.find(pl => pl.id === newId)
+                  setCart(prev => prev.map(i => ({
+                    ...i,
+                    unit_price: list && i.product.cost_price
+                      ? Math.round(i.product.cost_price * (1 + list.margin_pct / 100) * 100) / 100
+                      : (i.product.sell_price || i.product.cost_price || i.unit_price),
+                  })))
+                }
+              }} />
           </div>
 
           {/* Buscador de productos */}
@@ -887,7 +971,14 @@ export default function OrdersPage() {
                       {p.barcode && <p className="text-xs mono text-[var(--text3)]">{p.barcode}</p>}
                     </div>
                     <div className="text-right">
-                      <p className="text-xs mono font-medium text-[var(--accent)]">{formatCurrency(p.sell_price)}</p>
+                      <p className="text-xs mono font-medium text-[var(--accent)]">{formatCurrency(
+                        (() => {
+                          const list = priceLists.find(pl => pl.id === priceListId)
+                          return list && p.cost_price
+                            ? Math.round(p.cost_price * (1 + list.margin_pct / 100) * 100) / 100
+                            : (p.sell_price || p.cost_price || 0)
+                        })()
+                      )}</p>
                       <p className="text-xs text-[var(--text3)]">Stock: {p.stock_current}</p>
                     </div>
                   </button>
@@ -895,6 +986,16 @@ export default function OrdersPage() {
               </div>
             )}
           </div>
+
+          {/* Banner de stock insuficiente */}
+          {cartStockIssues.length > 0 && (
+            <div className="flex items-start gap-2 px-3 py-2.5 bg-[var(--danger-subtle)] border border-[var(--danger)] rounded-[var(--radius-md)] text-xs text-[var(--danger)]">
+              <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+              <span>
+                <strong>{cartStockIssues.length} producto(s)</strong> con stock insuficiente. Ajustá las cantidades antes de crear el pedido.
+              </span>
+            </div>
+          )}
 
           {/* Carrito del pedido */}
           {cart.length > 0 && (
@@ -910,9 +1011,18 @@ export default function OrdersPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
-                  {cart.map(item => (
-                    <tr key={item.product.id}>
-                      <td className="px-3 py-2 font-medium text-[var(--text)]">{item.product.name}</td>
+                  {cart.map(item => {
+                    const hasStockIssue = item.quantity > (item.product.stock_current ?? 0)
+                    return (
+                    <tr key={item.product.id} className={hasStockIssue ? 'bg-[var(--danger-subtle)]' : ''}>
+                      <td className="px-3 py-2">
+                        <p className="font-medium text-[var(--text)]">{item.product.name}</p>
+                        {hasStockIssue && (
+                          <p className="text-xs text-[var(--danger)] font-medium mt-0.5">
+                            ⚠ Stock disponible: {item.product.stock_current ?? 0}
+                          </p>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button onClick={() => updateCartQty(item.product.id, -1)}
@@ -950,7 +1060,7 @@ export default function OrdersPage() {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
               <div className="px-3 py-2 border-t border-[var(--border)] flex items-center justify-between gap-3">
@@ -1083,6 +1193,22 @@ export default function OrdersPage() {
         title="Lista de carga"
         size="lg"
       >
+        {/* Selector de depósito */}
+        {warehouses.length > 1 && (
+          <div className="flex gap-2 flex-wrap items-center mb-4">
+            <span className="text-xs text-[var(--text3)]">Depósito:</span>
+            {warehouses.map(w => (
+              <button key={w.id}
+                onClick={() => { setPickingWarehouseId(w.id); fetchPickingList(w.id) }}
+                className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${pickingWarehouseId === w.id
+                  ? 'bg-[var(--accent)] text-white'
+                  : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                }`}>
+                {w.name}
+              </button>
+            ))}
+          </div>
+        )}
         {loadingPicking ? (
           <div className="flex items-center justify-center py-16">
             <div className="w-6 h-6 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
@@ -1187,10 +1313,48 @@ export default function OrdersPage() {
                   ✓ Todo cargado al camión
                 </p>
               )}
+              <div className="pb-6" />
             </div>
           )
         })()}
       </Modal>
+
+      {/* ── Modal detalle de venta vinculada ── */}
+      <SaleDetailModal
+        open={!!saleDetailId}
+        onClose={() => setSaleDetailId(null)}
+        saleId={saleDetailId}
+      />
+
+      {/* ── Confirmación cancelación ── */}
+      {cancelConfirmOrder && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setCancelConfirmOrder(null)} />
+          <div className="relative bg-[var(--surface)] rounded-[var(--radius-lg)] p-6 w-full max-w-sm shadow-xl">
+            <h3 className="text-base font-semibold text-[var(--text)] mb-2">Cancelar pedido</h3>
+            <p className="text-sm text-[var(--text2)] mb-1">
+              ¿Confirmas la cancelación del pedido de <span className="font-medium text-[var(--text)]">{cancelConfirmOrder.customer_name}</span>?
+            </p>
+            <p className="text-xs text-[var(--text3)] mb-5">El stock reservado será devuelto al depósito.</p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setCancelConfirmOrder(null)}
+                className="px-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] text-[var(--text2)] border border-[var(--border)]">
+                Volver
+              </button>
+              <button
+                onClick={async () => {
+                  const { id } = cancelConfirmOrder
+                  setCancelConfirmOrder(null)
+                  await handleAction(id, 'cancel')
+                }}
+                className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--danger)] text-white hover:opacity-90">
+                Cancelar pedido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </AppShell>
   )
 }

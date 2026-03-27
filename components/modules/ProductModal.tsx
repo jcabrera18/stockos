@@ -35,9 +35,6 @@ const emptyForm = {
   supplier_id: '',
   brand_id: '',
   cost_price: '',
-  stock_current: '',
-  stock_min: '',
-  stock_max: '',
   unit: 'unidad',
 }
 
@@ -50,7 +47,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
 
-
   const isEdit = !!product
 
   // Cargar categorías y proveedores
@@ -60,7 +56,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => { })
     api.get<PriceList[]>('/api/price-lists').then(setPriceLists).catch(() => { })
     api.get<{ id: string; name: string }[]>('/api/brands').then(setBrands).catch(() => { })
-
   }, [open])
 
   // Pre-cargar datos al editar
@@ -75,9 +70,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         supplier_id: product.supplier_id ?? '',
         brand_id: (product as Product & { brand_id?: string }).brand_id ?? '',
         cost_price: String(product.cost_price),
-        stock_current: String(product.stock_current),
-        stock_min: String(product.stock_min),
-        stock_max: String(product.stock_max),
         unit: product.unit,
       })
     } else {
@@ -95,7 +87,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     const errs: Record<string, string> = {}
     if (!form.name.trim()) errs.name = 'El nombre es obligatorio'
     if (Number(form.cost_price) < 0) errs.cost_price = 'Debe ser mayor a 0'
-    if (Number(form.stock_min) < 0) errs.stock_min = 'Debe ser mayor o igual a 0'
     return errs
   }
 
@@ -121,9 +112,9 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         brand_id: form.brand_id || null,
         cost_price: costPrice,
         sell_price: sellPrice,
-        stock_current: Number(form.stock_current) || 0,
-        stock_min: Number(form.stock_min) || 0,
-        stock_max: Number(form.stock_max) || 9999,
+        stock_current: 0,
+        stock_min: 0,
+        stock_max: 9999,
         unit: form.unit,
       }
 
@@ -321,41 +312,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
             })}
           </div>
         )}
-
-        {/* Fila 5: Stock */}
-        <div className="grid grid-cols-3 gap-3">
-          <Input
-            label={isEdit ? 'Stock actual' : 'Stock inicial'}
-            type="number"
-            min="0"
-            step="1"
-            value={form.stock_current}
-            onChange={set('stock_current')}
-            placeholder="0"
-            hint={isEdit ? 'Usá ajuste de stock para modificar' : undefined}
-            disabled={isEdit}
-          />
-          <Input
-            label="Stock mínimo"
-            type="number"
-            min="0"
-            step="1"
-            value={form.stock_min}
-            onChange={set('stock_min')}
-            placeholder="0"
-            error={errors.stock_min}
-            hint="Alerta si baja de este valor"
-          />
-          <Input
-            label="Stock máximo"
-            type="number"
-            min="0"
-            step="1"
-            value={form.stock_max}
-            onChange={set('stock_max')}
-            placeholder="9999"
-          />
-        </div>
 
         {/* Descripción */}
         <div className="flex flex-col gap-1">

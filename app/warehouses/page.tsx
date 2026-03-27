@@ -15,7 +15,7 @@ import { TransferModal } from '@/components/modules/TransferModal'
 import { api } from '@/lib/api'
 import { formatCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
 import type { Pagination as PaginationType } from '@/types'
-import { Plus, Warehouse, Pencil, Trash2, Star, Search, SlidersHorizontal, ArrowLeftRight } from 'lucide-react'
+import { Plus, Warehouse, Pencil, Trash2, Star, Search, SlidersHorizontal, ArrowLeftRight, CheckCircle, Printer } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface Warehouse {
@@ -43,6 +43,18 @@ interface WarehouseStock {
 }
 
 type Tab = 'warehouses' | 'stock' | 'transfers'
+
+interface Transfer {
+  id: string
+  created_at: string
+  status: 'pending' | 'approved'
+  notes?: string
+  approved_at?: string
+  from_warehouse: { name: string }
+  to_warehouse: { name: string }
+  users?: { full_name: string }
+  warehouse_transfer_items: { quantity: number; products: { name: string; barcode?: string; unit?: string } }[]
+}
 
 const emptyForm = { name: '', address: '', is_default: false }
 
@@ -72,8 +84,10 @@ export default function WarehousesPage() {
 
   // Transferencias
   const [transferModal, setTransferModal] = useState(false)
-  const [transfers, setTransfers] = useState<unknown[]>([])
+  const [transfers, setTransfers] = useState<Transfer[]>([])
   const [loadingTransfers, setLoadingTransfers] = useState(false)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
+  const [transferDetail, setTransferDetail] = useState<Transfer | null>(null)
 
   const selectedWarehouseRef = useRef(selectedWarehouse)
   const stockSearchRef = useRef(stockSearch)
@@ -126,11 +140,67 @@ export default function WarehousesPage() {
   const fetchTransfers = useCallback(async () => {
     setLoadingTransfers(true)
     try {
-      const res = await api.get<{ data: unknown[] }>('/api/warehouses/transfers')
+      const res = await api.get<{ data: Transfer[] }>('/api/warehouses/transfers')
       setTransfers(res.data)
     } catch (err) { console.error(err) }
     finally { setLoadingTransfers(false) }
   }, [])
+
+  const handleApprove = async (t: Transfer) => {
+    setApprovingId(t.id)
+    try {
+      const approved = await api.post<Transfer>(`/api/warehouses/transfers/${t.id}/approve`, {})
+      toast.success('Transferencia aprobada — stock actualizado')
+      setTransfers(prev => prev.map(tr => tr.id === approved.id ? approved : tr))
+      fetchStock()
+      printRemito(approved)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al aprobar')
+    } finally { setApprovingId(null) }
+  }
+
+  const printRemito = (t: Transfer) => {
+    const win = window.open('', '_blank', 'width=700,height=600')
+    if (!win) return
+    const date = new Date(t.approved_at ?? t.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const rows = t.warehouse_transfer_items.map(i =>
+      `<tr><td>${i.products.name}</td><td>${i.products.barcode ?? '—'}</td><td style="text-align:center">${i.quantity}</td><td>${i.products.unit ?? 'unidad'}</td></tr>`
+    ).join('')
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:32px;color:#111;font-size:13px}
+      h1{font-size:20px;margin:0 0 4px}
+      .sub{color:#666;font-size:12px;margin-bottom:24px}
+      .info{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px}
+      .box{border:1px solid #ddd;border-radius:6px;padding:10px}
+      .box label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px}
+      .box p{font-weight:600;margin:2px 0 0}
+      table{width:100%;border-collapse:collapse;margin-top:8px}
+      th{background:#f3f4f6;text-align:left;padding:8px;font-size:11px;text-transform:uppercase;color:#555}
+      td{padding:8px;border-bottom:1px solid #eee;font-size:13px}
+      .footer{margin-top:48px;display:grid;grid-template-columns:1fr 1fr;gap:40px}
+      .sign{border-top:1px solid #999;padding-top:8px;font-size:11px;color:#666;text-align:center}
+      @media print{button{display:none}}
+    </style></head><body>
+    <h1>Remito de Transferencia</h1>
+    <p class="sub">N° ${t.id.slice(0, 8).toUpperCase()} · ${date}</p>
+    <div class="info">
+      <div class="box"><label>Depósito origen</label><p>${t.from_warehouse?.name ?? '—'}</p></div>
+      <div class="box"><label>Depósito destino</label><p>${t.to_warehouse?.name ?? '—'}</p></div>
+    </div>
+    ${t.notes ? `<p style="margin-bottom:16px;color:#555"><strong>Notas:</strong> ${t.notes}</p>` : ''}
+    <table>
+      <thead><tr><th>Producto</th><th>Código</th><th style="text-align:center">Cant.</th><th>Unidad</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="footer">
+      <div class="sign">Firma origen</div>
+      <div class="sign">Firma destino</div>
+    </div>
+    </body></html>`)
+    win.document.close()
+    setTimeout(() => win.print(), 300)
+  }
 
   useEffect(() => {
     if (tab === 'transfers') fetchTransfers()
@@ -355,21 +425,21 @@ export default function WarehousesPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-[var(--border)]">
+                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">N°</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Fecha</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Origen</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Destino</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Productos</th>
+                    <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Estado</th>
+                    <th className="px-4 py-3" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
-                  {(transfers as {
-                    id: string
-                    created_at: string
-                    from_warehouse: { name: string }
-                    to_warehouse: { name: string }
-                    warehouse_transfer_items: { products: { name: string }; quantity: number }[]
-                  }[]).map(t => (
-                    <tr key={t.id} className="hover:bg-[var(--surface2)] transition-colors">
+                  {transfers.map(t => (
+                    <tr key={t.id}
+                      onClick={() => setTransferDetail(t)}
+                      className="hover:bg-[var(--surface2)] transition-colors cursor-pointer group">
+                      <td className="px-4 py-3 text-xs mono text-[var(--text3)]">#{t.id.slice(0, 8).toUpperCase()}</td>
                       <td className="px-4 py-3 text-xs mono text-[var(--text2)]">
                         {new Date(t.created_at).toLocaleDateString('es-AR')}
                       </td>
@@ -386,6 +456,34 @@ export default function WarehousesPage() {
                             <span className="text-xs text-[var(--text3)]">
                               +{t.warehouse_transfer_items.length - 3} más
                             </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <Badge variant={t.status === 'approved' ? 'success' : 'warning'}>
+                          {t.status === 'approved' ? 'Aprobado' : 'Pendiente'}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
+                          {t.status === 'pending' && (
+                            <button
+                              onClick={() => handleApprove(t)}
+                              disabled={approvingId === t.id}
+                              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded font-medium bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white transition-colors disabled:opacity-50"
+                            >
+                              <CheckCircle size={12} />
+                              {approvingId === t.id ? 'Aprobando…' : 'Aprobar'}
+                            </button>
+                          )}
+                          {t.status === 'approved' && (
+                            <button
+                              onClick={() => printRemito(t)}
+                              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded font-medium bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)] transition-colors"
+                            >
+                              <Printer size={12} />
+                              Remito
+                            </button>
                           )}
                         </div>
                       </td>
@@ -459,6 +557,108 @@ export default function WarehousesPage() {
         onSaved={() => { fetchTransfers(); fetchStock() }}
         warehouses={warehouses}
       />
+
+      {/* Modal detalle de transferencia */}
+      {transferDetail && (
+        <Modal open={!!transferDetail} onClose={() => setTransferDetail(null)} title="Detalle de transferencia" size="lg">
+          <div className="space-y-5 pb-5">
+            {/* Estado + metadatos */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Badge variant={transferDetail.status === 'approved' ? 'success' : 'warning'}>
+                  {transferDetail.status === 'approved' ? 'Aprobado' : 'Pendiente'}
+                </Badge>
+                <span className="text-xs mono text-[var(--text3)]">#{transferDetail.id.slice(0, 8).toUpperCase()}</span>
+              </div>
+              <span className="text-xs text-[var(--text3)]">
+                {new Date(transferDetail.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+              </span>
+            </div>
+
+            {/* Origen → Destino */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3">
+                <p className="text-xs text-[var(--text3)] mb-1">Depósito origen</p>
+                <p className="font-semibold text-[var(--text)]">{transferDetail.from_warehouse?.name ?? '—'}</p>
+              </div>
+              <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3">
+                <p className="text-xs text-[var(--text3)] mb-1">Depósito destino</p>
+                <p className="font-semibold text-[var(--text)]">{transferDetail.to_warehouse?.name ?? '—'}</p>
+              </div>
+            </div>
+
+            {/* Creado por / Aprobado */}
+            <div className="grid grid-cols-2 gap-3 text-xs text-[var(--text2)]">
+              {transferDetail.users?.full_name && (
+                <p><span className="text-[var(--text3)]">Creado por:</span> {transferDetail.users.full_name}</p>
+              )}
+              {transferDetail.approved_at && (
+                <p><span className="text-[var(--text3)]">Aprobado:</span> {new Date(transferDetail.approved_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })}</p>
+              )}
+            </div>
+
+            {/* Notas */}
+            {transferDetail.notes && (
+              <p className="text-sm text-[var(--text2)] bg-[var(--surface2)] rounded-[var(--radius-md)] px-3 py-2">
+                <span className="text-[var(--text3)] text-xs">Notas:</span> {transferDetail.notes}
+              </p>
+            )}
+
+            {/* Productos */}
+            <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--border)]">
+                    <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)]">Producto</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Código</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Cantidad</th>
+                    <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Unidad</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]">
+                  {transferDetail.warehouse_transfer_items?.map((item, i) => (
+                    <tr key={i}>
+                      <td className="px-3 py-2.5 font-medium text-[var(--text)]">{item.products?.name}</td>
+                      <td className="px-3 py-2.5 mono text-xs text-[var(--text3)] hidden sm:table-cell">{item.products?.barcode ?? '—'}</td>
+                      <td className="px-3 py-2.5 text-right mono font-bold">{item.quantity}</td>
+                      <td className="px-3 py-2.5 text-[var(--text3)] hidden sm:table-cell">{item.products?.unit ?? 'unidad'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Acciones */}
+            <div className="flex justify-end gap-2 pt-1">
+              {transferDetail.status === 'pending' && (
+                <Button
+                  onClick={async () => {
+                    setApprovingId(transferDetail.id)
+                    try {
+                      const approved = await api.post<Transfer>(`/api/warehouses/transfers/${transferDetail.id}/approve`, {})
+                      toast.success('Transferencia aprobada — stock actualizado')
+                      setTransfers(prev => prev.map(tr => tr.id === approved.id ? approved : tr))
+                      setTransferDetail(approved)
+                      fetchStock()
+                      printRemito(approved)
+                    } catch (err: unknown) {
+                      toast.error(err instanceof Error ? err.message : 'Error al aprobar')
+                    } finally { setApprovingId(null) }
+                  }}
+                  loading={approvingId === transferDetail.id}
+                >
+                  <CheckCircle size={14} /> Aprobar
+                </Button>
+              )}
+              {transferDetail.status === 'approved' && (
+                <Button variant="secondary" onClick={() => printRemito(transferDetail)}>
+                  <Printer size={14} /> Imprimir remito
+                </Button>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
     </AppShell>
   )
 }
