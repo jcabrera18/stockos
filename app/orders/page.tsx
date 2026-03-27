@@ -370,7 +370,7 @@ export default function OrdersPage() {
     const timer = setTimeout(async () => {
       setSearchingCustomers(true)
       try {
-        const data = await api.get<{ id: string; full_name: string; phone?: string; current_balance: number }[]>(
+        const data = await api.get<{ id: string; full_name: string; phone?: string; current_balance: number; credit_limit: number }[]>(
           `/api/customers/search?q=${encodeURIComponent(customerQuery)}`
         )
         setCustomerResults(data)
