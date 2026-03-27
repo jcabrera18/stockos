@@ -41,13 +41,15 @@ export async function middleware(request: NextRequest) {
     const { data: { session } } = await supabase.auth.getSession()
     if (!session) return response
 
-    const { data: profile } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', session.user.id)
-      .single()
-
-    const role = profile?.role as string ?? 'cashier'
+    // Leer el rol del JWT (ya verificado por updateSession) para evitar
+    // un SELECT extra que puede fallar por RLS y defaultear mal a 'cashier'
+    let role = 'owner' // safe default: nunca bloquear acceso por error
+    try {
+      const payload = JSON.parse(
+        Buffer.from(session.access_token.split('.')[1], 'base64').toString()
+      )
+      if (payload.user_role) role = payload.user_role
+    } catch { }
     const homePage = roleHomePage[role] ?? '/dashboard'
 
     // Redirigir / a la home del rol

@@ -4,12 +4,13 @@ import { createClient } from '@/lib/supabase/client'
 import { api } from '@/lib/api'
 
 interface UserProfile {
-  id:          string
-  business_id: string
-  role:        string
-  is_active:   boolean
-  email?:      string
-  full_name?:  string
+  id:           string
+  business_id:  string
+  role:         string
+  is_active:    boolean
+  warehouse_id: string | null
+  email?:       string
+  full_name?:   string
 }
 
 export function useAuth() {

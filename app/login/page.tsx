@@ -16,7 +16,13 @@ interface Branch {
 
 type Step = 'credentials' | 'workstation'
 
-const RESTRICTED_ROLES = ['cajero', 'repositor']
+const ROLE_REDIRECT: Record<string, string> = {
+  owner:   '/dashboard',
+  admin:   '/dashboard',
+  cashier: '/pos',       // pasa por selector de sucursal/caja
+  stocker: '/dashboard',
+  seller:  '/orders',
+}
 
 export default function LoginPage() {
   const router = useRouter()
@@ -58,29 +64,24 @@ export default function LoginPage() {
       const profile = await api.get<{ role: string }>('/api/auth/me')
       setUserRole(profile.role)
 
-      if (RESTRICTED_ROLES.includes(profile.role)) {
-        // Cajero/repositor → mostrar selector de sucursal y caja
+      if (profile.role === 'cashier') {
+        // Cajero → selector de sucursal y caja antes de ir al POS
         setLoadingBranches(true)
         try {
           const br = await api.get<Branch[]>('/api/branches')
           setBranches(br)
-
-          // Si solo hay una sucursal, preseleccionarla
           if (br.length === 1) {
             setSelectedBranch(br[0])
-            if (br[0].registers.length === 1) {
-              setSelectedRegister(br[0].registers[0])
-            }
+            if (br[0].registers.length === 1) setSelectedRegister(br[0].registers[0])
           }
         } catch { setError('Error al cargar sucursales') }
         finally { setLoadingBranches(false) }
-
         setStep('workstation')
         setLoading(false)
       } else {
-        // Owner/admin → ir directo al dashboard, mantener loading hasta que navegue
+        // Seller → /orders, owner/admin → /dashboard, resto → /dashboard
         setWorkstation(null)
-        router.replace('/dashboard')
+        router.replace(ROLE_REDIRECT[profile.role] ?? '/dashboard')
       }
     } catch {
       setError('Error al iniciar sesión')

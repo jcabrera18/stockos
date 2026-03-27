@@ -21,6 +21,7 @@ import {
   ClipboardList, Printer, Receipt,
 } from 'lucide-react'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
+import { useAuth } from '@/hooks/useAuth'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────
@@ -114,6 +115,8 @@ const PAYMENT_METHODS = [
 // ─── Componente principal ─────────────────────────────────
 export default function OrdersPage() {
   const router = useRouter()
+  const { user: authUser } = useAuth()
+  const sellerWarehouseId = authUser?.role === 'seller' ? (authUser.warehouse_id ?? null) : null
 
   // Lista
   const [orders, setOrders] = useState<OrderSummary[]>([])
@@ -332,8 +335,12 @@ export default function OrdersPage() {
     ]).then(([wh, pl]) => {
       setWarehouses(wh)
       setPriceLists(pl)
-      const def = wh.find(w => w.is_default)
-      if (def) setWarehouseId(def.id)
+      if (sellerWarehouseId) {
+        setWarehouseId(sellerWarehouseId)
+      } else {
+        const def = wh.find(w => w.is_default)
+        if (def) setWarehouseId(def.id)
+      }
       const defPl = pl.find(p => p.is_default)
       if (defPl) setPriceListId(defPl.id)
     }).catch(() => { })
@@ -935,10 +942,12 @@ export default function OrdersPage() {
           </div>
 
           {/* Depósito + lista de precio */}
-          <div className="grid grid-cols-2 gap-3">
-            <Select label="Depósito"
-              options={warehouses.map(w => ({ value: w.id, label: w.name }))}
-              value={warehouseId} onChange={e => { setWarehouseId(e.target.value); setCart([]); setProductResults([]) }} />
+          <div className={`grid gap-3 ${sellerWarehouseId ? 'grid-cols-1' : 'grid-cols-2'}`}>
+            {!sellerWarehouseId && (
+              <Select label="Depósito"
+                options={warehouses.map(w => ({ value: w.id, label: w.name }))}
+                value={warehouseId} onChange={e => { setWarehouseId(e.target.value); setCart([]); setProductResults([]) }} />
+            )}
             <Select label="Lista de precio"
               options={priceLists.map(pl => ({ value: pl.id, label: `${pl.name} (+${pl.margin_pct}%)` }))}
               value={priceListId} onChange={e => {
