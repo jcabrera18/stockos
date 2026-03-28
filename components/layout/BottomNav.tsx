@@ -21,12 +21,10 @@ export function BottomNav() {
 
   // ── Nav principal (barra inferior) ───────────────────────
   const ALL_NAV_ITEMS = [
-    { href: '/dashboard',     label: 'Inicio',    icon: LayoutDashboard, roles: ['owner', 'admin'] },
-    { href: '/pos',           label: 'POS',        icon: Zap,             roles: ['owner', 'admin', 'cashier'] },
-    { href: '/cash-register', label: 'Caja',       icon: CreditCard,      roles: ['owner', 'admin', 'cashier'] },
-    { href: '/sales',         label: 'Ventas',     icon: ShoppingCart,    roles: ['owner', 'admin', 'cashier'] },
-    { href: '/orders',        label: 'Pedidos',    icon: ClipboardList,   roles: ['owner', 'admin', 'cashier', 'stocker', 'seller'] },
-    { href: '/stock',         label: 'Inventario', icon: Boxes,           roles: ['owner', 'admin', 'stocker'] },
+    { href: '/dashboard', label: 'Inicio', icon: LayoutDashboard, roles: ['owner', 'admin'] },
+    { href: '/orders', label: 'Pedidos', icon: ClipboardList, roles: ['owner', 'admin', 'cashier', 'stocker', 'seller'] },
+    { href: '/cash-register', label: 'Caja', icon: CreditCard, roles: ['owner', 'admin', 'cashier'] },
+    { href: '/sales', label: 'Ventas', icon: ShoppingCart, roles: ['owner', 'admin', 'cashier'] },
   ]
 
   const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
@@ -36,35 +34,38 @@ export function BottomNav() {
     {
       label: 'Operación',
       items: [
-        { href: '/invoices',      label: 'Comprobantes',     icon: Receipt,       roles: ['owner', 'admin', 'cashier'] },
-        { href: '/customers',     label: 'Cuentas ctes.',    icon: Users,         roles: ['owner', 'admin', 'cashier'] },
-        { href: '/purchases',     label: 'Compras',          icon: Truck,         roles: ['owner', 'admin', 'stocker'] },
-        { href: '/warehouses',    label: 'Depósitos',        icon: Warehouse,     roles: ['owner', 'admin', 'stocker'] },
+        { href: '/orders', label: 'Pedidos', icon: ClipboardList, roles: ['owner', 'admin', 'cashier', 'stocker', 'seller'] },
+        { href: '/stock', label: 'Inventario', icon: Boxes, roles: ['owner', 'admin', 'stocker'] },
+        { href: '/invoices', label: 'Comprobantes', icon: Receipt, roles: ['owner', 'admin', 'cashier'] },
+        { href: '/customers', label: 'Cuentas ctes.', icon: Users, roles: ['owner', 'admin', 'cashier'] },
+        { href: '/purchases', label: 'Compras', icon: Truck, roles: ['owner', 'admin', 'stocker'] },
+        { href: '/warehouses', label: 'Depósitos', icon: Warehouse, roles: ['owner', 'admin', 'stocker'] },
+        { href: '/pos', label: 'POS', icon: Zap, roles: ['owner', 'admin', 'cashier'] },
       ]
     },
     {
       label: 'Catálogo',
       items: [
-        { href: '/products',      label: 'Productos',        icon: Package,       roles: ['owner', 'admin'] },
-        { href: '/categories',    label: 'Categorías',       icon: Tag,           roles: ['owner', 'admin'] },
-        { href: '/brands',        label: 'Marcas',           icon: Award,         roles: ['owner', 'admin'] },
-        { href: '/price-lists',   label: 'Precios',          icon: PercentCircle, roles: ['owner', 'admin'] },
-        { href: '/promotions',    label: 'Promociones',      icon: Percent,       roles: ['owner', 'admin'] },
+        { href: '/products', label: 'Productos', icon: Package, roles: ['owner', 'admin'] },
+        { href: '/categories', label: 'Categorías', icon: Tag, roles: ['owner', 'admin'] },
+        { href: '/brands', label: 'Marcas', icon: Award, roles: ['owner', 'admin'] },
+        { href: '/price-lists', label: 'Precios', icon: PercentCircle, roles: ['owner', 'admin'] },
+        { href: '/promotions', label: 'Promociones', icon: Percent, roles: ['owner', 'admin'] },
       ]
     },
     {
       label: 'Administración',
       items: [
-        { href: '/finances',      label: 'Finanzas',         icon: BarChart3,     roles: ['owner', 'admin'] },
-        { href: '/branches',      label: 'Sucursales',       icon: Building2,     roles: ['owner', 'admin'] },
-        { href: '/settings',      label: 'Configuración',    icon: Settings,      roles: ['owner', 'admin'] },
+        { href: '/finances', label: 'Finanzas', icon: BarChart3, roles: ['owner', 'admin'] },
+        { href: '/branches', label: 'Sucursales', icon: Building2, roles: ['owner', 'admin'] },
+        { href: '/settings', label: 'Configuración', icon: Settings, roles: ['owner', 'admin'] },
       ]
     },
   ]
 
-  const [drawerOpen, setDrawerOpen]       = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
   const [confirmSignOut, setConfirmSignOut] = useState(false)
-  const [pendingHref, setPendingHref]     = useState<string | null>(null)
+  const [pendingHref, setPendingHref] = useState<string | null>(null)
 
   useEffect(() => { setPendingHref(null) }, [pathname])
 
@@ -86,7 +87,7 @@ export function BottomNav() {
           ) : (
             <>
               {NAV_ITEMS.slice(0, 4).map(({ href, label, icon: Icon }) => {
-                const active  = pathname === href || pathname.startsWith(href + '/')
+                const active = pathname === href || pathname.startsWith(href + '/')
                 const pending = pendingHref === href
                 return (
                   <Link key={href} href={href}
