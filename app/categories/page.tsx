@@ -54,13 +54,13 @@ export default function CategoriesPage() {
   const [deleteCat, setDeleteCat] = useState<Category | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  const fetchCategories = useCallback(async () => {
-    setLoading(true)
+  const fetchCategories = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const data = await api.get<Category[]>('/api/products/categories')
       setCategories(data)
     } catch (err) { console.error(err) }
-    finally { setLoading(false) }
+    finally { if (!silent) setLoading(false) }
   }, [])
 
   useEffect(() => { fetchCategories() }, [fetchCategories])
@@ -96,12 +96,13 @@ export default function CategoriesPage() {
         // Por simplicidad: delete + create
         await api.delete(`/api/products/categories/${editCat.id}`)
         toast.success('Categoría actualizada')
+        setModal(false)
       } else {
         await api.post('/api/products/categories', payload)
         toast.success('Categoría creada')
+        setModal(false)
       }
-      setModal(false)
-      fetchCategories()
+      fetchCategories(true)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
     } finally { setSaving(false) }
@@ -115,7 +116,7 @@ export default function CategoriesPage() {
       toast.success('Categoría eliminada')
       setDeleteModal(false)
       setDeleteCat(null)
-      fetchCategories()
+      fetchCategories(true)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar')
     } finally { setDeleting(false) }

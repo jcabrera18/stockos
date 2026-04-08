@@ -80,6 +80,8 @@ async function checkPromo(product: Product, quantity: number, unitPrice: number)
   return { discount: 0, promo_label: '', promotion_id: null }
 }
 
+const POS_CART_KEY = 'stockos_pos_cart'
+
 export default function POSPage() {
   const router = useRouter()
 
@@ -131,7 +133,31 @@ export default function POSPage() {
   const cartRef = useRef(cart)
   useEffect(() => { cartRef.current = cart }, [cart])
 
-  useEffect(() => { qtyRef.current?.focus() }, [])
+  // Restaurar carrito guardado al montar
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(POS_CART_KEY)
+      if (saved) {
+        const { cart: c, saleDiscount: d, selectedCustomer: sc } = JSON.parse(saved)
+        if (c?.length > 0) {
+          setCart(c)
+          if (d) setSaleDiscount(d)
+          if (sc) setSelectedCustomer(sc)
+        }
+      }
+    } catch { }
+  }, [])
+
+  // Persistir carrito en localStorage cada vez que cambia
+  useEffect(() => {
+    if (cart.length > 0) {
+      localStorage.setItem(POS_CART_KEY, JSON.stringify({ cart, saleDiscount, selectedCustomer }))
+    } else {
+      localStorage.removeItem(POS_CART_KEY)
+    }
+  }, [cart, saleDiscount, selectedCustomer])
+
+  useEffect(() => { searchRef.current?.focus() }, [])
 
   // Cargar branches para el modal de selección de workstation
   useEffect(() => {
@@ -169,10 +195,13 @@ export default function POSPage() {
   useEffect(() => {
     if (!query.trim()) { setResults([]); return }
     if (debounceRef.current) clearTimeout(debounceRef.current)
+    // Barcodes (solo dígitos): sin debounce — el scanner ya envía Enter inmediatamente
+    // Búsqueda por texto: 300ms para no disparar en cada tecla
+    const isBarcode = /^\d{8,14}$/.test(query.trim())
     debounceRef.current = setTimeout(async () => {
       setSearching(true)
       try {
-        if (/^\d{8,14}$/.test(query.trim())) {
+        if (isBarcode) {
           try {
             const p = await api.get<Product>(`/api/products/barcode/${query.trim()}`, selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : undefined)
             addToCart(p)
@@ -185,7 +214,7 @@ export default function POSPage() {
         setActiveResultIndex(res.data.length > 0 ? 0 : -1)
       } catch { setResults([]); setActiveResultIndex(-1) }
       finally { setSearching(false) }
-    }, 300)
+    }, isBarcode ? 0 : 300)
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -209,34 +238,51 @@ export default function POSPage() {
   const addToCart = useCallback(async (product: Product, qty?: number) => {
     if (isAddingRef.current) return
     isAddingRef.current = true
+
     const quantity = qty ?? pendingQtyRef.current
-    if (product.stock_current <= 0) {
+    const stockAvailable = product.stock_current ?? 0
+
+    if (stockAvailable <= 0) {
       toast.error(`${product.name} sin stock`)
       isAddingRef.current = false
       return
     }
+
+    const existing = cartRef.current.find(i => i.product.id === product.id)
+    const newQty = existing ? existing.quantity + quantity : quantity
+
+    if (newQty > stockAvailable) {
+      toast.error(`Stock máximo: ${stockAvailable}`)
+      isAddingRef.current = false
+      return
+    }
+
+    // Agregar al carrito inmediatamente con precio base — el cajero puede escanear el siguiente ya
+    if (existing) {
+      setCart(prev => prev.map(i => i.product.id === product.id ? { ...i, quantity: newQty } : i))
+    } else {
+      setCart(prev => [...prev, { product, quantity, unit_price: product.sell_price, discount: 0, applied_list: undefined, applied_margin: undefined, promo_label: undefined, promotion_id: null }])
+    }
+
+    setPendingQty(1); pendingQtyRef.current = 1
+    setResults([]); setQuery('')
+    setTimeout(() => searchRef.current?.focus(), 50)
+
+    // Liberar lock antes de las llamadas de precio para no bloquear el siguiente escaneo
+    isAddingRef.current = false
+
+    // Actualizar precio y promo en background (paralelo, no bloquea)
     try {
-      const existing = cartRef.current.find(i => i.product.id === product.id)
-      if (existing) {
-        const newQty = existing.quantity + quantity
-        if (newQty > product.stock_current) { toast.error(`Stock máximo: ${product.stock_current}`); return }
-        const pricing = await getPriceForQuantity(product.id, newQty)
-        const promo = await checkPromo(product, newQty, pricing.price)
-        setCart(prev => prev.map(i =>
-          i.product.id === product.id
-            ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
-            : i
-        ))
-      } else {
-        if (quantity > product.stock_current) { toast.error(`Stock máximo: ${product.stock_current}`); return }
-        const pricing = await getPriceForQuantity(product.id, quantity)
-        const promo = await checkPromo(product, quantity, pricing.price)
-        setCart(prev => [...prev, { product, quantity, unit_price: pricing.price, discount: promo.discount, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, promo_label: promo.promo_label, promotion_id: promo.promotion_id }])
-      }
-      setPendingQty(1); pendingQtyRef.current = 1
-      setResults([]); setQuery('')
-      setTimeout(() => qtyRef.current?.focus(), 50)
-    } finally { isAddingRef.current = false }
+      const [pricing, promo] = await Promise.all([
+        getPriceForQuantity(product.id, newQty),
+        checkPromo(product, newQty, product.sell_price),
+      ])
+      setCart(prev => prev.map(i =>
+        i.product.id === product.id
+          ? { ...i, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
+          : i
+      ))
+    } catch { /* precio base ya está en el carrito, no es crítico */ }
   }, [])
 
   const updateQty = async (id: string, delta: number) => {
@@ -315,10 +361,11 @@ console.log('workstation:', workstation)
   }
 
   const handleNewSale = () => {
+    localStorage.removeItem(POS_CART_KEY)
     setCart([]); setSaleDiscount(0); setPaymentMethod('efectivo'); setInstallments(1)
     setCompletedSale(null); setSelectedCustomer(null); setCustomerQuery('')
     setStep('cart')
-    setTimeout(() => qtyRef.current?.focus(), 100)
+    setTimeout(() => searchRef.current?.focus(), 100)
   }
 
   if (step === 'ticket' && completedSale) {
@@ -410,17 +457,20 @@ console.log('workstation:', workstation)
         {/* Cantidad + Buscador */}
         <div className="px-4 py-3 border-b border-[var(--border)]">
           <div className="flex gap-2">
-            <div className="relative flex-shrink-0">
+            {/* Qty — clickeable, solo resaltado cuando > 1 */}
+            <div className="relative flex-shrink-0 group">
               <input ref={qtyRef} type="number" min="1" max="999" value={pendingQty}
                 onChange={e => { const val = Math.max(1, Number(e.target.value) || 1); setPendingQty(val); pendingQtyRef.current = val }}
                 onFocus={e => e.target.select()}
+                onBlur={e => { if (!e.target.value || Number(e.target.value) < 1) { setPendingQty(1); pendingQtyRef.current = 1 } }}
                 onKeyDown={e => {
                   if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); searchRef.current?.focus(); return }
                   if (!/^\d$/.test(e.key) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault()
                 }}
-                className="w-16 text-center text-sm font-bold mono py-3 rounded-[var(--radius-lg)] bg-[var(--surface2)] border-2 border-[var(--accent)] text-[var(--accent)] focus:outline-none"
+                title="Cantidad (presioná * en el buscador para cambiar)"
+                className={`w-14 text-center text-sm font-bold mono py-3 rounded-[var(--radius-lg)] bg-[var(--surface2)] border-2 focus:outline-none cursor-pointer transition-colors ${pendingQty > 1 ? 'border-[var(--accent)] text-[var(--accent)]' : 'border-[var(--border)] text-[var(--text3)] focus:border-[var(--accent)] focus:text-[var(--accent)]'}`}
               />
-              <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[10px] text-[var(--text3)] bg-[var(--bg)] px-1 whitespace-nowrap">cant.</span>
+              <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[10px] text-[var(--text3)] bg-[var(--bg)] px-1 whitespace-nowrap">×</span>
             </div>
             <div className="relative flex-1">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
@@ -428,6 +478,8 @@ console.log('workstation:', workstation)
               <input ref={searchRef} value={query}
                 onChange={e => { setQuery(e.target.value); setActiveResultIndex(-1) }}
                 onKeyDown={async e => {
+                  // Espacio (campo vacío) → saltar al input de cantidad
+                  if (e.key === ' ' && !query.trim()) { e.preventDefault(); qtyRef.current?.focus(); return }
                   if (e.key === 'ArrowDown') { e.preventDefault(); setActiveResultIndex(prev => Math.min(prev + 1, results.length - 1)); return }
                   if (e.key === 'ArrowUp') { e.preventDefault(); setActiveResultIndex(prev => Math.max(prev - 1, -1)); return }
                   if (e.key === 'Enter') {
@@ -451,6 +503,16 @@ console.log('workstation:', workstation)
               />
             </div>
           </div>
+          {pendingQty > 1 && (
+            <p className="mt-1.5 text-xs text-[var(--accent)] font-medium pl-1">
+              Próximo escaneo: ×{pendingQty} unidades
+            </p>
+          )}
+          {pendingQty === 1 && (
+            <p className="mt-1 text-[10px] text-[var(--text3)] pl-1">
+              Presioná <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">Espacio</kbd> para cambiar cantidad
+            </p>
+          )}
         </div>
 
         {/* Resultados */}
