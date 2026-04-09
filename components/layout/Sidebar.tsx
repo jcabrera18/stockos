@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  LayoutDashboard, Package, Boxes, ShoppingCart,
+  LayoutDashboard, Package, ShoppingCart,
   Truck, BarChart3, Settings, Sun, Moon, LogOut, Zap, Layers, Tag, Users, PercentCircle, Warehouse, ClipboardList, CreditCard, Building2, Award, Percent, Receipt
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -54,7 +54,6 @@ export function Sidebar() {
     { href: '/customers', label: 'Cuentas ctes.', icon: Users, roles: ['owner', 'admin', 'cashier'] },
 
     // ── Stock y logística ──
-    { href: '/stock', label: 'Inventario', icon: Boxes, roles: ['owner', 'admin', 'stocker'] },
     { href: '/purchases', label: 'Compras', icon: Truck, roles: ['owner', 'admin', 'stocker'] },
     { href: '/warehouses', label: 'Depósitos', icon: Warehouse, roles: ['owner', 'admin', 'stocker'] },
 
@@ -72,7 +71,7 @@ export function Sidebar() {
   ]
 
   const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(role))
-  const GROUP_STARTS = ['/stock', '/products', '/finances']
+  const GROUP_STARTS = ['/purchases', '/products', '/finances']
 
   return (
     <>
@@ -97,7 +96,7 @@ export function Sidebar() {
           ) : NAV_ITEMS.map(({ href, label, icon: Icon }) => {
             const active = pathname === href || pathname.startsWith(href + '/')
             const pending = pendingHref === href
-            const GROUP_STARTS = ['/stock', '/products', '/finances']
+            const GROUP_STARTS = ['/purchases', '/products', '/finances']
 
             return (
               <div key={href}>

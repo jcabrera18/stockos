@@ -11,6 +11,12 @@ interface UserProfile {
   warehouse_id: string | null
   email?:       string
   full_name?:   string
+  business?: {
+    name:    string
+    cuit:    string | null
+    address: string | null
+    phone:   string | null
+  } | null
 }
 
 export function useAuth() {

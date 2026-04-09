@@ -18,7 +18,7 @@ import type { PriceList } from '@/app/price-lists/page'
 import {
   Plus, Search, Package, CheckCircle, Clock, Truck,
   X, Minus, Trash2, ChevronRight, DollarSign, AlertCircle,
-  ClipboardList, Printer, Receipt,
+  ClipboardList, Printer, Receipt, FileText,
 } from 'lucide-react'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 import { useAuth } from '@/hooks/useAuth'
@@ -109,7 +109,6 @@ const PAYMENT_METHODS = [
   { value: 'debito', label: 'Débito' },
   { value: 'credito', label: 'Crédito' },
   { value: 'qr', label: 'QR' },
-  { value: 'cuenta_corriente', label: 'Cta. Corriente' },
 ]
 
 // ─── Componente principal ─────────────────────────────────
@@ -159,6 +158,7 @@ export default function OrdersPage() {
   const [deliverNotes, setDeliverNotes] = useState('')
   const [delivering, setDelivering] = useState(false)
   const [saleDetailId, setSaleDetailId] = useState<string | null>(null)
+  const [detailInvoice, setDetailInvoice] = useState<{ id: string; invoice_type: string; numero: number } | null>(null)
 
   // Confirmación cancelación
   const [cancelConfirmOrder, setCancelConfirmOrder] = useState<{ id: string; customer_name: string } | null>(null)
@@ -166,6 +166,7 @@ export default function OrdersPage() {
   // Cobro parcial
   const [paymentModal, setPaymentModal] = useState(false)
   const [paymentOrderId, setPaymentOrderId] = useState<string | null>(null)
+  const [paymentOrderPending, setPaymentOrderPending] = useState(0)
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('efectivo')
   const [paymentAmount, setPaymentAmount] = useState('')
   const [registeringPayment, setRegisteringPayment] = useState(false)
@@ -390,9 +391,15 @@ export default function OrdersPage() {
   const openDetail = async (id: string) => {
     setDetailModal(true)
     setLoadingDetail(true)
+    setDetailInvoice(null)
     try {
       const d = await api.get<OrderDetail>(`/api/orders/${id}`)
       setDetail(d)
+      if (d.sale_id) {
+        api.get<{ id: string; invoice_type: string; numero: number } | null>(`/api/invoices/sale/${d.sale_id}`)
+          .then(inv => { if (inv) setDetailInvoice(inv) })
+          .catch(() => {})
+      }
     } catch { toast.error('Error al cargar el pedido') }
     finally { setLoadingDetail(false) }
   }
@@ -532,9 +539,14 @@ export default function OrdersPage() {
       })
       toast.success('Pago registrado')
       setPaymentModal(false)
+      const closedOrderId = paymentOrderId
       setPaymentOrderId(null)
       setPaymentAmount('')
       fetchOrders()
+      if (detail?.id === closedOrderId) {
+        const updated = await api.get<OrderDetail>(`/api/orders/${closedOrderId}`)
+        setDetail(updated)
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al registrar pago')
     } finally { setRegisteringPayment(false) }
@@ -550,7 +562,7 @@ export default function OrdersPage() {
     if (order.status === 'confirmed') {
       actions.push({ label: 'Confirmar entrega', action: 'deliver_modal', variant: 'success' as const })
     }
-    if (['unpaid', 'partial'].includes(order.payment_status) && !['cancelled', 'pending', 'delivered'].includes(order.status)) {
+    if (['unpaid', 'partial'].includes(order.payment_status) && order.status !== 'cancelled') {
       actions.push({ label: 'Registrar cobro', action: 'payment_modal', variant: 'default' as const })
     }
     return actions
@@ -658,7 +670,9 @@ export default function OrdersPage() {
                                 if (a.action === 'deliver_modal') {
                                   setDeliverOrderId(order.id); setDeliverModal(true)
                                 } else if (a.action === 'payment_modal') {
-                                  setPaymentOrderId(order.id); setPaymentModal(true)
+                                  setPaymentOrderId(order.id)
+                                  setPaymentOrderPending(Math.max(0, Number(order.total) - Number(order.paid_amount)))
+                                  setPaymentModal(true)
                                 } else if (a.action === 'cancel') {
                                   setCancelConfirmOrder({ id: order.id, customer_name: order.customer_name })
                                 } else {
@@ -686,7 +700,7 @@ export default function OrdersPage() {
       </div>
 
       {/* ── Modal detalle ── */}
-      <Modal open={detailModal} onClose={() => { setDetailModal(false); setDetail(null) }}
+      <Modal open={detailModal} onClose={() => { setDetailModal(false); setDetail(null); setDetailInvoice(null) }}
         title="Detalle del pedido" size="lg">
         {loadingDetail ? (
           <div className="flex justify-center py-8">
@@ -696,24 +710,41 @@ export default function OrdersPage() {
           <div className="space-y-4">
             {/* Status timeline */}
             <div className="flex items-center gap-1 overflow-x-auto pb-1">
-              {(['pending', 'confirmed', 'delivered'] as OrderStatus[]).map((s, i) => {
-                const statuses: OrderStatus[] = ['pending', 'confirmed', 'delivered', 'cancelled']
-                const currentIdx = statuses.indexOf(detail.status)
-                const stepIdx = statuses.indexOf(s)
-                const done = stepIdx < currentIdx
-                const current = s === detail.status
-                return (
-                  <div key={s} className="flex items-center gap-1 flex-shrink-0">
-                    <div className={`px-2 py-1 rounded text-xs font-medium ${current ? 'bg-[var(--accent)] text-white' :
-                      done ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' :
-                        'bg-[var(--surface2)] text-[var(--text3)]'
-                      }`}>
-                      {STATUS_LABELS[s]}
+              {detail.status === 'cancelled' ? (
+                <>
+                  {(['pending', 'confirmed', 'delivered'] as OrderStatus[]).map((s, i) => (
+                    <div key={s} className="flex items-center gap-1 flex-shrink-0">
+                      <div className="px-2 py-1 rounded text-xs font-medium bg-[var(--surface2)] text-[var(--text3)]">
+                        {STATUS_LABELS[s]}
+                      </div>
+                      {i < 2 && <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />}
                     </div>
-                    {i < 2 && <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />}
+                  ))}
+                  <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />
+                  <div className="px-2 py-1 rounded text-xs font-medium bg-[var(--danger-subtle)] text-[var(--danger)]">
+                    Cancelado
                   </div>
-                )
-              })}
+                </>
+              ) : (
+                (['pending', 'confirmed', 'delivered'] as OrderStatus[]).map((s, i) => {
+                  const statuses: OrderStatus[] = ['pending', 'confirmed', 'delivered']
+                  const currentIdx = statuses.indexOf(detail.status)
+                  const stepIdx = statuses.indexOf(s)
+                  const done = stepIdx < currentIdx
+                  const current = s === detail.status
+                  return (
+                    <div key={s} className="flex items-center gap-1 flex-shrink-0">
+                      <div className={`px-2 py-1 rounded text-xs font-medium ${current ? 'bg-[var(--accent)] text-white' :
+                        done ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' :
+                          'bg-[var(--surface2)] text-[var(--text3)]'
+                        }`}>
+                        {STATUS_LABELS[s]}
+                      </div>
+                      {i < 2 && <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />}
+                    </div>
+                  )
+                })
+              )}
             </div>
 
             {/* Info cliente + pago */}
@@ -752,6 +783,12 @@ export default function OrdersPage() {
               {detail.seller_name && <span>Vendedor: <strong>{detail.seller_name}</strong></span>}
               {detail.warehouse_name && <span>· Depósito: <strong>{detail.warehouse_name}</strong></span>}
               <span>· {formatDateTime(detail.created_at)}</span>
+              {detail.sale_id && (
+                <span>· Venta: <strong className="text-[var(--accent)]">#{detail.sale_id.slice(0, 8).toUpperCase()}</strong></span>
+              )}
+              {detailInvoice && (
+                <span>· Comprobante: <strong className="text-[var(--accent)]">{detailInvoice.invoice_type}-{String(detailInvoice.numero).padStart(5, '0')}</strong></span>
+              )}
             </div>
 
             {/* Tabla de ítems */}
@@ -841,6 +878,13 @@ export default function OrdersPage() {
                       <Receipt size={14} /> Ver venta
                     </button>
                   )}
+                  {detailInvoice && (
+                    <button
+                      onClick={() => router.push(`/invoices`)}
+                      className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors border border-[var(--border)]">
+                      <FileText size={14} /> Comprobante {detailInvoice.invoice_type}-{String(detailInvoice.numero).padStart(5, '0')}
+                    </button>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   {getActions(detail).map(a => (
@@ -849,7 +893,9 @@ export default function OrdersPage() {
                         if (a.action === 'deliver_modal') {
                           setDeliverOrderId(detail.id); setDeliverModal(true)
                         } else if (a.action === 'payment_modal') {
-                          setPaymentOrderId(detail.id); setPaymentModal(true)
+                          setPaymentOrderId(detail.id)
+                          setPaymentOrderPending(Math.max(0, Number(detail.total) - Number(detail.paid_amount)))
+                          setPaymentModal(true)
                         } else if (a.action === 'cancel') {
                           setCancelConfirmOrder({ id: detail.id, customer_name: detail.customer_name })
                         } else {
@@ -1180,19 +1226,31 @@ export default function OrdersPage() {
       </Modal>
 
       {/* ── Modal registrar cobro ── */}
-      <Modal open={paymentModal} onClose={() => { setPaymentModal(false); setPaymentOrderId(null) }}
+      <Modal open={paymentModal} onClose={() => { setPaymentModal(false); setPaymentOrderId(null); setPaymentOrderPending(0) }}
         title="Registrar cobro" size="sm">
         <div className="space-y-4">
           <Select label="Método de cobro *"
             options={PAYMENT_METHODS}
             value={paymentMethod}
             onChange={e => setPaymentMethod(e.target.value as PaymentMethod)} />
-          <Input label="Monto *" type="number" min="0"
-            value={paymentAmount} placeholder="0.00"
-            onChange={e => setPaymentAmount(e.target.value)} />
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm font-medium text-[var(--text2)]">Monto *</span>
+              {paymentOrderPending > 0 && (
+                <button
+                  onClick={() => setPaymentAmount(String(paymentOrderPending))}
+                  className="text-xs font-medium text-[var(--accent)] hover:underline">
+                  Total adeudado: {formatCurrency(paymentOrderPending)}
+                </button>
+              )}
+            </div>
+            <Input type="number" min="0"
+              value={paymentAmount} placeholder="0.00"
+              onChange={e => setPaymentAmount(e.target.value)} />
+          </div>
           <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
             <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => { setPaymentModal(false); setPaymentOrderId(null) }} disabled={registeringPayment}>
+              <Button variant="secondary" onClick={() => { setPaymentModal(false); setPaymentOrderId(null); setPaymentOrderPending(0) }} disabled={registeringPayment}>
                 Cancelar
               </Button>
               <Button onClick={handleRegisterPayment} loading={registeringPayment} disabled={!paymentAmount}>

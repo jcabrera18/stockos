@@ -2,7 +2,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  LayoutDashboard, Package, Boxes, Building2, Zap, ShoppingCart,
+  LayoutDashboard, Package, Building2, Zap, ShoppingCart,
   BarChart3, CreditCard, Menu, X, Settings, LogOut, Sun, Moon,
   Tag, Users, PercentCircle, Warehouse, ClipboardList, Award,
   Percent, Receipt, Truck
@@ -35,7 +35,6 @@ export function BottomNav() {
       label: 'Operación',
       items: [
         { href: '/orders', label: 'Pedidos', icon: ClipboardList, roles: ['owner', 'admin', 'cashier', 'stocker', 'seller'] },
-        { href: '/stock', label: 'Inventario', icon: Boxes, roles: ['owner', 'admin', 'stocker'] },
         { href: '/invoices', label: 'Comprobantes', icon: Receipt, roles: ['owner', 'admin', 'cashier'] },
         { href: '/customers', label: 'Cuentas ctes.', icon: Users, roles: ['owner', 'admin', 'cashier'] },
         { href: '/purchases', label: 'Compras', icon: Truck, roles: ['owner', 'admin', 'stocker'] },

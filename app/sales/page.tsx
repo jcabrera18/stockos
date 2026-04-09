@@ -29,6 +29,8 @@ export default function SalesPage() {
   const [maxAmount, setMaxAmount] = useState('')
   const [debouncedMin, setDebouncedMin] = useState('')
   const [debouncedMax, setDebouncedMax] = useState('')
+  const [ticketSearch, setTicketSearch] = useState('')
+  const [debouncedTicket, setDebouncedTicket] = useState('')
   const [customerFilter, setCustomerFilter] = useState<{ id: string; full_name: string } | null>(null)
   const [customerSearch, setCustomerSearch] = useState('')
   const [customerOptions, setCustomerOptions] = useState<{ id: string; full_name: string }[]>([])
@@ -39,6 +41,7 @@ export default function SalesPage() {
   const paymentRef = useRef(paymentFilter)
   const minAmountRef = useRef(minAmount)
   const maxAmountRef = useRef(maxAmount)
+  const ticketRef = useRef(debouncedTicket)
   const customerRef = useRef(customerFilter)
   const pageRef = useRef(page)
 
@@ -54,6 +57,11 @@ export default function SalesPage() {
   }, [maxAmount])
   useEffect(() => { minAmountRef.current = debouncedMin }, [debouncedMin])
   useEffect(() => { maxAmountRef.current = debouncedMax }, [debouncedMax])
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedTicket(ticketSearch), ticketSearch ? 400 : 0)
+    return () => clearTimeout(t)
+  }, [ticketSearch])
+  useEffect(() => { ticketRef.current = debouncedTicket }, [debouncedTicket])
   useEffect(() => { customerRef.current = customerFilter }, [customerFilter])
 
   const fetchSales = useCallback(async () => {
@@ -68,6 +76,7 @@ export default function SalesPage() {
       if (paymentRef.current) params.payment_method = paymentRef.current
       if (minAmountRef.current) params.min_amount = Number(minAmountRef.current)
       if (maxAmountRef.current) params.max_amount = Number(maxAmountRef.current)
+      if (ticketRef.current) params.ticket = ticketRef.current
       if (customerRef.current) params.customer_id = customerRef.current.id
 
       const res = await api.get<PaginatedResponse<Sale>>('/api/sales', params)
@@ -82,7 +91,7 @@ export default function SalesPage() {
     pageRef.current = 1
     setPage(1)
     fetchSales()
-  }, [period, paymentFilter, debouncedMin, debouncedMax, customerFilter, fetchSales])
+  }, [period, paymentFilter, debouncedMin, debouncedMax, debouncedTicket, customerFilter, fetchSales])
 
   // Cambio de página desde el componente Pagination
   const handlePageChange = useCallback((newPage: number) => {
@@ -160,6 +169,14 @@ export default function SalesPage() {
             <option value="cuenta_corriente">Cta. Cte.</option>
           </select>
 
+          {/* N° Ticket */}
+          <input
+            value={ticketSearch}
+            onChange={e => setTicketSearch(e.target.value.toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 8))}
+            placeholder="N° Ticket..."
+            className="text-xs px-3 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] w-28 font-mono uppercase"
+          />
+
           {/* Filtro por cliente */}
           {customerFilter ? (
             <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--accent-subtle)] border border-[var(--accent)] text-xs">
@@ -219,9 +236,9 @@ export default function SalesPage() {
           </div>
 
           {/* Limpiar filtros */}
-          {(paymentFilter || minAmount || maxAmount) && (
+          {(paymentFilter || minAmount || maxAmount || ticketSearch) && (
             <button
-              onClick={() => { setPaymentFilter(''); setMinAmount(''); setMaxAmount(''); setCustomerFilter(null); setCustomerSearch('') }} className="text-xs text-[var(--danger)] hover:underline"
+              onClick={() => { setPaymentFilter(''); setMinAmount(''); setMaxAmount(''); setTicketSearch(''); setCustomerFilter(null); setCustomerSearch('') }} className="text-xs text-[var(--danger)] hover:underline"
             >
               Limpiar
             </button>
@@ -248,6 +265,7 @@ export default function SalesPage() {
                 <thead>
                   <tr className="border-b border-[var(--border)]">
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Fecha</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">N° Ticket</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Vendedor</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Sucursal / Caja</th>
                     <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Método</th>
@@ -264,6 +282,9 @@ export default function SalesPage() {
                     >
                       <td className="px-4 py-3 text-[var(--text2)] text-xs mono">
                         {formatDateTime(sale.created_at)}
+                      </td>
+                      <td className="px-4 py-3 text-xs mono text-[var(--text3)] hidden sm:table-cell">
+                        #{sale.id.slice(-8).toUpperCase()}
                       </td>
                       <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
                         {(sale.users as { full_name: string } | undefined)?.full_name ?? '—'}

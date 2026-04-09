@@ -11,6 +11,7 @@ import { toast } from 'sonner'
 import { POSTicket } from '@/components/modules/POSTicket'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
 import { useWorkstation } from '@/hooks/useWorkstation'
+import { useAuth } from '@/hooks/useAuth'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 
@@ -99,6 +100,8 @@ export default function POSPage() {
 
   const [cart, setCart] = useState<CartItem[]>([])
   const [saleDiscount, setSaleDiscount] = useState(0)
+  const [customPriceFocusId, setCustomPriceFocusId] = useState<string | null>(null)
+  const priceInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const [step, setStep] = useState<'cart' | 'payment' | 'ticket'>('cart')
   const [paymentMethod, setPaymentMethod] = useState('efectivo')
@@ -129,9 +132,21 @@ export default function POSPage() {
   const [tempRegisterId, setTempRegisterId] = useState('')
 
   const { workstation, setWorkstation, loaded } = useWorkstation()
+  const { user } = useAuth()
 
   const cartRef = useRef(cart)
   useEffect(() => { cartRef.current = cart }, [cart])
+
+  // Auto-foco en el input de precio cuando se agrega un producto de precio libre
+  useEffect(() => {
+    if (!customPriceFocusId) return
+    const el = priceInputRefs.current[customPriceFocusId]
+    if (el) {
+      el.focus()
+      el.select()
+      setCustomPriceFocusId(null)
+    }
+  }, [customPriceFocusId, cart])
 
   // Restaurar carrito guardado al montar
   useEffect(() => {
@@ -240,9 +255,10 @@ export default function POSPage() {
     isAddingRef.current = true
 
     const quantity = qty ?? pendingQtyRef.current
+    const isCustomPrice = product.price_mode === 'custom'
     const stockAvailable = product.stock_current ?? 0
 
-    if (stockAvailable <= 0) {
+    if (!isCustomPrice && stockAvailable <= 0) {
       toast.error(`${product.name} sin stock`)
       isAddingRef.current = false
       return
@@ -251,7 +267,7 @@ export default function POSPage() {
     const existing = cartRef.current.find(i => i.product.id === product.id)
     const newQty = existing ? existing.quantity + quantity : quantity
 
-    if (newQty > stockAvailable) {
+    if (!isCustomPrice && newQty > stockAvailable) {
       toast.error(`Stock máximo: ${stockAvailable}`)
       isAddingRef.current = false
       return
@@ -261,15 +277,26 @@ export default function POSPage() {
     if (existing) {
       setCart(prev => prev.map(i => i.product.id === product.id ? { ...i, quantity: newQty } : i))
     } else {
-      setCart(prev => [...prev, { product, quantity, unit_price: product.sell_price, discount: 0, applied_list: undefined, applied_margin: undefined, promo_label: undefined, promotion_id: null }])
+      // Precio libre arranca en 0 para que el cajero lo ingrese manualmente
+      const initialPrice = isCustomPrice ? 0 : product.sell_price
+      setCart(prev => [...prev, { product, quantity, unit_price: initialPrice, discount: 0, applied_list: undefined, applied_margin: undefined, promo_label: undefined, promotion_id: null }])
     }
 
     setPendingQty(1); pendingQtyRef.current = 1
     setResults([]); setQuery('')
-    setTimeout(() => searchRef.current?.focus(), 50)
+
+    if (isCustomPrice && !existing) {
+      // Auto-focalizar el input de precio para que el cajero lo ingrese de inmediato
+      setCustomPriceFocusId(product.id)
+    } else {
+      setTimeout(() => searchRef.current?.focus(), 50)
+    }
 
     // Liberar lock antes de las llamadas de precio para no bloquear el siguiente escaneo
     isAddingRef.current = false
+
+    // Precio libre: el cajero ingresa el precio manualmente, no hay fetch de lista
+    if (isCustomPrice) return
 
     // Actualizar precio y promo en background (paralelo, no bloquea)
     try {
@@ -289,6 +316,10 @@ export default function POSPage() {
     const item = cart.find(i => i.product.id === id)
     if (!item) return
     const newQty = Math.max(1, item.quantity + delta)
+    if (item.product.price_mode === 'custom') {
+      setCart(prev => prev.map(i => i.product.id === id ? { ...i, quantity: newQty } : i))
+      return
+    }
     const pricing = await getPriceForQuantity(id, newQty)
     const promo = await checkPromo(item.product, newQty, pricing.price)
     setCart(prev => prev.map(i =>
@@ -308,13 +339,14 @@ export default function POSPage() {
 
   const subtotal = cart.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
   const total = Math.max(0, subtotal - saleDiscount)
+  const hasMissingCustomPrice = cart.some(i => i.product.price_mode === 'custom' && i.unit_price === 0)
 
   const handleConfirm = async () => {
     if (cart.length === 0) return
     setProcessing(true)
     try {
       const payload = {
-        items: cart.map(i => ({ product_id: i.product.id, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount })),
+        items: cart.map(i => ({ product_id: i.product.id, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount, subtotal: i.unit_price * i.quantity - i.discount })),
         discount: saleDiscount,
         payment_method: paymentMethod,
         installments: paymentMethod === 'credito' ? installments : 1,
@@ -369,7 +401,19 @@ console.log('workstation:', workstation)
   }
 
   if (step === 'ticket' && completedSale) {
-    return <POSTicket sale={completedSale} onNewSale={handleNewSale} onClose={() => router.push('/sales')} customerPhone={selectedCustomer?.phone} />
+    return (
+      <POSTicket
+        sale={completedSale}
+        onNewSale={handleNewSale}
+        onClose={() => router.push('/sales')}
+        customerPhone={selectedCustomer?.phone}
+        customerName={selectedCustomer?.full_name}
+        business={user?.business ?? undefined}
+        branchName={workstation?.branch_name}
+        registerName={workstation?.register_name}
+        sellerName={user?.full_name}
+      />
+    )
   }
 
   const cartItemCount = cart.reduce((a, i) => a + i.quantity, 0)
@@ -553,7 +597,7 @@ console.log('workstation:', workstation)
       </div>
 
       {/* Panel derecho — carrito */}
-      <div className={`sm:w-96 flex-shrink-0 flex flex-col bg-[var(--surface)] pb-14 sm:pb-0 ${mobileView === 'search' ? 'hidden sm:flex' : 'flex flex-1'}`}>
+      <div className={`sm:w-[440px] flex-shrink-0 flex flex-col bg-[var(--surface)] pb-14 sm:pb-0 ${mobileView === 'search' ? 'hidden sm:flex' : 'flex flex-1'}`}>
 
         {/* Cliente */}
         <div className="px-3 py-3 border-b border-[var(--border)]">
@@ -639,43 +683,75 @@ console.log('workstation:', workstation)
               <p className="text-xs">El carrito está vacío</p>
             </div>
           ) : cart.map(item => (
-            <div key={item.product.id} className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3 space-y-2">
+            <div key={item.product.id} className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3.5 space-y-3">
+              {/* Nombre + X */}
               <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-medium text-[var(--text)] leading-tight">{item.product.name}</p>
-                <button onClick={() => removeItem(item.product.id)} className="text-[var(--text3)] hover:text-[var(--danger)] flex-shrink-0 mt-0.5"><X size={13} /></button>
+                <p className="text-base font-semibold text-[var(--text)] leading-tight">{item.product.name}</p>
+                <button onClick={() => removeItem(item.product.id)} className="p-1 text-[var(--text3)] hover:text-[var(--danger)] flex-shrink-0 transition-colors"><X size={15} /></button>
               </div>
-              {item.applied_list && (
-                <span className="text-xs text-[var(--text3)]">
-                  Lista: <span className="text-[var(--accent)]">{item.applied_list}</span>
-                  {item.applied_margin !== undefined && ` (+${item.applied_margin}%)`}
-                </span>
-              )}
-              {item.promo_label && (
-                <span className="text-xs text-[var(--warning)] font-medium">
-                  🎉 {item.promo_label}
-                </span>
-              )}
-              <div className="flex items-center gap-2">
-                <div className="flex items-center bg-[var(--surface)] rounded-[var(--radius-md)] border border-[var(--border)]">
-                  <button onClick={() => updateQty(item.product.id, -1)} className="p-2.5 hover:text-[var(--accent)] active:text-[var(--accent)]"><Minus size={13} /></button>
-                  <span className="text-sm mono font-semibold w-8 text-center">{item.quantity}</span>
-                  <button onClick={() => updateQty(item.product.id, 1)} className="p-2.5 hover:text-[var(--accent)] active:text-[var(--accent)]"><Plus size={13} /></button>
+
+              {/* Tags: precio libre, lista y promo */}
+              {(item.product.price_mode === 'custom' || item.applied_list || item.promo_label) && (
+                <div className="flex flex-wrap gap-1.5">
+                  {item.product.price_mode === 'custom' && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-[var(--warning-subtle,#fef3c7)] text-[var(--warning)] font-medium">
+                      Precio libre
+                    </span>
+                  )}
+                  {item.applied_list && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-[var(--accent-subtle)] text-[var(--accent)] font-medium">
+                      {item.applied_list}{item.applied_margin !== undefined && ` +${item.applied_margin}%`}
+                    </span>
+                  )}
+                  {item.promo_label && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-[var(--warning-subtle,#fef3c7)] text-[var(--warning)] font-medium">
+                      🎉 {item.promo_label}
+                    </span>
+                  )}
                 </div>
-                <div className="flex items-center gap-1 flex-1">
-                  <span className="text-xs text-[var(--text3)]">$</span>
-                  <input type="number" min="0" step="0.01" value={item.unit_price}
+              )}
+
+              {/* Controles: qty + precio + descuento — todos con label encima, alineados al fondo */}
+              <div className="flex items-end gap-2">
+                {/* Cantidad */}
+                <div className="flex flex-col items-center gap-1">
+                  <span className="text-[10px] text-[var(--text3)] self-start">Cant.</span>
+                  <div className="flex items-center bg-[var(--surface)] rounded-[var(--radius-md)] border border-[var(--border)]">
+                    <button onClick={() => updateQty(item.product.id, -1)} className="px-3 py-2 hover:text-[var(--accent)] active:text-[var(--accent)] transition-colors"><Minus size={14} /></button>
+                    <span className="text-base mono font-bold w-9 text-center">{item.quantity}</span>
+                    <button onClick={() => updateQty(item.product.id, 1)} className="px-3 py-2 hover:text-[var(--accent)] active:text-[var(--accent)] transition-colors"><Plus size={14} /></button>
+                  </div>
+                </div>
+
+                {/* Precio unitario */}
+                <div className="flex flex-col flex-1 gap-1">
+                  <span className="text-[10px] text-[var(--text3)]">
+                    Precio unit.{item.product.price_mode === 'custom' && item.unit_price === 0 && (
+                      <span className="ml-1 text-[var(--warning)]">← ingresá el precio</span>
+                    )}
+                  </span>
+                  <input
+                    ref={el => { priceInputRefs.current[item.product.id] = el }}
+                    type="number" min="0" step="0.01" value={item.unit_price}
                     onChange={e => updateItemPrice(item.product.id, e.target.value)}
-                    className="w-full text-sm mono text-right bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 focus:outline-none focus:border-[var(--accent)]" />
+                    onFocus={e => e.target.select()}
+                    className={`w-full text-sm mono text-right bg-[var(--surface)] border rounded-[var(--radius-sm)] px-2 py-2 focus:outline-none focus:border-[var(--accent)] ${item.product.price_mode === 'custom' && item.unit_price === 0 ? 'border-[var(--warning)]' : 'border-[var(--border)]'}`}
+                  />
                 </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-xs text-[var(--text3)]">-$</span>
+
+                {/* Descuento */}
+                <div className="flex flex-col w-[72px] gap-1">
+                  <span className="text-[10px] text-[var(--text3)]">Desc. $</span>
                   <input type="number" min="0" step="0.01" value={item.discount || ''} placeholder="0"
                     onChange={e => updateItemDiscount(item.product.id, e.target.value)}
-                    className="w-16 text-sm mono text-right bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 focus:outline-none focus:border-[var(--accent)]" />
+                    className="w-full text-sm mono text-right bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-sm)] px-2 py-2 focus:outline-none focus:border-[var(--accent)]" />
                 </div>
               </div>
-              <div className="text-right">
-                <span className="text-sm mono font-bold text-[var(--text)]">{formatCurrency(item.unit_price * item.quantity - item.discount)}</span>
+
+              {/* Subtotal del item */}
+              <div className="flex items-center justify-between pt-1 border-t border-[var(--border)]">
+                <span className="text-xs text-[var(--text3)]">{item.quantity} × {formatCurrency(item.unit_price)}{item.discount > 0 && ` − ${formatCurrency(item.discount)}`}</span>
+                <span className="text-base mono font-bold text-[var(--text)]">{formatCurrency(item.unit_price * item.quantity - item.discount)}</span>
               </div>
             </div>
           ))}
@@ -703,7 +779,12 @@ console.log('workstation:', workstation)
               <span className="text-base font-semibold text-[var(--text)]">Total</span>
               <span className="text-2xl font-bold mono text-[var(--accent)]">{formatCurrency(total)}</span>
             </div>
-            <button onClick={() => setStep('payment')} disabled={cart.length === 0}
+            {hasMissingCustomPrice && (
+              <p className="text-xs text-[var(--warning)] text-center">
+                Ingresá el precio de los productos marcados como "precio libre"
+              </p>
+            )}
+            <button onClick={() => setStep('payment')} disabled={cart.length === 0 || hasMissingCustomPrice}
               className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-[var(--radius-md)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed active:scale-95">
               Cobrar {cart.length > 0 ? formatCurrency(total) : ''}
             </button>

@@ -14,11 +14,15 @@ import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
 import { TransferModal } from '@/components/modules/TransferModal'
 import { api } from '@/lib/api'
 import { formatCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
-import type { Pagination as PaginationType } from '@/types'
-import { Plus, Warehouse, Pencil, Trash2, Star, Search, SlidersHorizontal, ArrowLeftRight, CheckCircle, Printer } from 'lucide-react'
+import type { PaginatedResponse, Pagination as PaginationType, Category } from '@/types'
+import {
+  Plus, Warehouse, Pencil, Trash2, Star, Search, ArrowLeftRight,
+  CheckCircle, Printer, Filter, X, ChevronUp, ChevronDown, ArrowUpDown,
+  SlidersHorizontal,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
-interface Warehouse {
+interface WarehouseItem {
   id: string
   name: string
   address?: string
@@ -27,15 +31,15 @@ interface Warehouse {
   created_at: string
 }
 
-interface WarehouseStock {
+interface StockItem {
   id: string
-  warehouse_id: string
-  warehouse_name: string
-  product_id: string
-  product_name: string
+  product_id?: string
+  product_name?: string
+  name?: string
   barcode?: string
   cost_price: number
   stock_current: number
+  stock_reserved?: number
   stock_min: number
   stock_max: number
   category_name?: string
@@ -43,6 +47,9 @@ interface WarehouseStock {
 }
 
 type Tab = 'warehouses' | 'stock' | 'transfers'
+type StockFilter = 'all' | 'ok' | 'bajo' | 'critico' | 'sin_stock'
+type SortField = 'name' | 'stock_current' | 'cost_price' | 'stock_min'
+type SortDir = 'asc' | 'desc'
 
 interface Transfer {
   id: string
@@ -56,31 +63,55 @@ interface Transfer {
   warehouse_transfer_items: { quantity: number; products: { name: string; barcode?: string; unit?: string } }[]
 }
 
+interface Supplier { id: string; name: string }
+
+const selectClass = 'px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]'
+
+function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortField; sortDir: SortDir }) {
+  if (sortBy !== field) return <ArrowUpDown size={11} className="opacity-25 group-hover:opacity-60 transition-opacity" />
+  return sortDir === 'asc' ? <ChevronUp size={11} className="text-[var(--accent)]" /> : <ChevronDown size={11} className="text-[var(--accent)]" />
+}
+
 const emptyForm = { name: '', address: '', is_default: false }
 
 export default function WarehousesPage() {
   const [tab, setTab] = useState<Tab>('warehouses')
-  const [warehouses, setWarehouses] = useState<Warehouse[]>([])
-  const [selectedWarehouse, setSelectedWarehouse] = useState<Warehouse | null>(null)
+  const [warehouses, setWarehouses] = useState<WarehouseItem[]>([])
+  const [selectedWarehouse, setSelectedWarehouse] = useState<WarehouseItem | null>(null)
   const [loading, setLoading] = useState(true)
 
   // Modales warehouse
   const [warehouseModal, setWarehouseModal] = useState(false)
-  const [editWarehouse, setEditWarehouse] = useState<Warehouse | null>(null)
+  const [editWarehouse, setEditWarehouse] = useState<WarehouseItem | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [deleteModal, setDeleteModal] = useState(false)
-  const [deleteWarehouse, setDeleteWarehouse] = useState<Warehouse | null>(null)
+  const [deleteWarehouse, setDeleteWarehouse] = useState<WarehouseItem | null>(null)
   const [deleting, setDeleting] = useState(false)
 
-  // Stock del depósito
-  const [stockData, setStockData] = useState<WarehouseStock[]>([])
+  // Stock
+  const [stockData, setStockData] = useState<StockItem[]>([])
   const [stockPag, setStockPag] = useState<PaginationType>({ total: 0, page: 1, limit: 50, pages: 0 })
   const [stockPage, setStockPage] = useState(1)
   const [stockSearch, setStockSearch] = useState('')
+  const [debouncedStockSearch, setDebouncedStockSearch] = useState('')
   const [loadingStock, setLoadingStock] = useState(false)
   const [adjustModal, setAdjustModal] = useState(false)
-  const [adjustItem, setAdjustItem] = useState<WarehouseStock | null>(null)
+  const [adjustItem, setAdjustItem] = useState<StockItem | null>(null)
+
+  // Stock filters
+  const [stockFilter, setStockFilter] = useState<StockFilter>('all')
+  const [sortBy, setSortBy] = useState<SortField>('name')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [categories, setCategories] = useState<Category[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [supplierFilter, setSupplierFilter] = useState('')
+  const [minStockInput, setMinStockInput] = useState('')
+  const [maxStockInput, setMaxStockInput] = useState('')
+  const [minStock, setMinStock] = useState('')
+  const [maxStock, setMaxStock] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
 
   // Transferencias
   const [transferModal, setTransferModal] = useState(false)
@@ -89,16 +120,44 @@ export default function WarehousesPage() {
   const [approvingId, setApprovingId] = useState<string | null>(null)
   const [transferDetail, setTransferDetail] = useState<Transfer | null>(null)
 
+  // Refs
   const selectedWarehouseRef = useRef(selectedWarehouse)
-  const stockSearchRef = useRef(stockSearch)
+  const stockSearchRef = useRef(debouncedStockSearch)
   const stockPageRef = useRef(stockPage)
+  const stockFilterRef = useRef<StockFilter>('all')
+  const sortByRef = useRef<SortField>('name')
+  const sortDirRef = useRef<SortDir>('asc')
+  const categoryRef = useRef('')
+  const supplierRef = useRef('')
+  const minStockRef = useRef('')
+  const maxStockRef = useRef('')
+
   useEffect(() => { selectedWarehouseRef.current = selectedWarehouse }, [selectedWarehouse])
-  useEffect(() => { stockSearchRef.current = stockSearch }, [stockSearch])
+  useEffect(() => { stockSearchRef.current = debouncedStockSearch }, [debouncedStockSearch])
+  useEffect(() => { stockFilterRef.current = stockFilter }, [stockFilter])
+  useEffect(() => { categoryRef.current = categoryFilter }, [categoryFilter])
+  useEffect(() => { supplierRef.current = supplierFilter }, [supplierFilter])
+  useEffect(() => { minStockRef.current = minStock }, [minStock])
+  useEffect(() => { maxStockRef.current = maxStock }, [maxStock])
+
+  // Debounces
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedStockSearch(stockSearch), stockSearch ? 300 : 0)
+    return () => clearTimeout(t)
+  }, [stockSearch])
+  useEffect(() => {
+    const t = setTimeout(() => setMinStock(minStockInput), 400)
+    return () => clearTimeout(t)
+  }, [minStockInput])
+  useEffect(() => {
+    const t = setTimeout(() => setMaxStock(maxStockInput), 400)
+    return () => clearTimeout(t)
+  }, [maxStockInput])
 
   const fetchWarehouses = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await api.get<Warehouse[]>('/api/warehouses')
+      const data = await api.get<WarehouseItem[]>('/api/warehouses')
       setWarehouses(data)
       if (!selectedWarehouseRef.current && data.length > 0) {
         setSelectedWarehouse(data.find(w => w.is_default) ?? data[0])
@@ -113,11 +172,24 @@ export default function WarehousesPage() {
     if (!selectedWarehouseRef.current) return
     setLoadingStock(true)
     try {
-      const res = await api.get<{ data: WarehouseStock[]; pagination: PaginationType }>(
-        `/api/warehouses/${selectedWarehouseRef.current.id}/stock`,
-        { search: stockSearchRef.current || undefined, page: stockPageRef.current, limit: 50 }
-      )
-      setStockData(res.data)
+      const res = await api.get<PaginatedResponse<StockItem>>('/api/stock', {
+        warehouse_id:  selectedWarehouseRef.current.id,
+        search:        stockSearchRef.current || undefined,
+        stock_status:  stockFilterRef.current !== 'all' ? stockFilterRef.current : undefined,
+        category_id:   categoryRef.current || undefined,
+        supplier_id:   supplierRef.current || undefined,
+        min_stock:     minStockRef.current ? Number(minStockRef.current) : undefined,
+        max_stock:     maxStockRef.current ? Number(maxStockRef.current) : undefined,
+        sort_by:       sortByRef.current,
+        sort_dir:      sortDirRef.current,
+        page:          stockPageRef.current,
+        limit:         50,
+      })
+      const mapped = res.data.map(item => ({
+        ...item,
+        product_name: (item as StockItem & { product_name?: string }).product_name ?? item.name,
+      }))
+      setStockData(mapped)
       setStockPag(res.pagination)
     } catch (err) { console.error(err) }
     finally { setLoadingStock(false) }
@@ -129,13 +201,31 @@ export default function WarehousesPage() {
       setStockPage(1)
       fetchStock()
     }
-  }, [tab, selectedWarehouse, stockSearch, fetchStock])
+  }, [tab, selectedWarehouse, debouncedStockSearch, stockFilter, categoryFilter, supplierFilter, minStock, maxStock, fetchStock])
 
   const handleStockPageChange = useCallback((newPage: number) => {
     stockPageRef.current = newPage
     setStockPage(newPage)
     fetchStock()
   }, [fetchStock])
+
+  const handleSort = useCallback((field: SortField) => {
+    const newDir: SortDir = sortByRef.current === field && sortDirRef.current === 'asc' ? 'desc' : 'asc'
+    sortByRef.current = field
+    sortDirRef.current = newDir
+    sortDirRef.current = newDir
+    stockPageRef.current = 1
+    setSortBy(field)
+    setSortDir(newDir)
+    setStockPage(1)
+    fetchStock()
+  }, [fetchStock])
+
+  // Cargar categorías y proveedores para filtros
+  useEffect(() => {
+    api.get<Category[]>('/api/products/categories').then(setCategories).catch(() => {})
+    api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => {})
+  }, [])
 
   const fetchTransfers = useCallback(async () => {
     setLoadingTransfers(true)
@@ -212,7 +302,7 @@ export default function WarehousesPage() {
     setWarehouseModal(true)
   }
 
-  const openEdit = (w: Warehouse) => {
+  const openEdit = (w: WarehouseItem) => {
     setEditWarehouse(w)
     setForm({ name: w.name, address: w.address ?? '', is_default: w.is_default })
     setWarehouseModal(true)
@@ -251,10 +341,26 @@ export default function WarehousesPage() {
     } finally { setDeleting(false) }
   }
 
+  const clearStockFilters = () => {
+    setCategoryFilter(''); setSupplierFilter('')
+    setMinStockInput(''); setMaxStockInput('')
+  }
+
+  const hasExtraFilter = !!(categoryFilter || supplierFilter || minStockInput || maxStockInput)
+  const activeFilterCount = [categoryFilter, supplierFilter, (minStockInput || maxStockInput) ? 'stock' : ''].filter(Boolean).length
+
+  const statusFilters: { key: StockFilter; label: string }[] = [
+    { key: 'all',       label: 'Todos' },
+    { key: 'critico',   label: 'Crítico' },
+    { key: 'sin_stock', label: 'Sin stock' },
+    { key: 'bajo',      label: 'Bajo' },
+    { key: 'ok',        label: 'OK' },
+  ]
+
   const tabs: { key: Tab; label: string }[] = [
     { key: 'warehouses', label: 'Depósitos' },
-    { key: 'stock', label: 'Stock por depósito' },
-    { key: 'transfers', label: 'Transferencias' },
+    { key: 'stock',      label: 'Inventario' },
+    { key: 'transfers',  label: 'Transferencias' },
   ]
 
   return (
@@ -325,7 +431,7 @@ export default function WarehousesPage() {
                   <button
                     onClick={() => { setSelectedWarehouse(w); setTab('stock') }}
                     className="mt-3 w-full text-xs text-[var(--accent)] hover:underline text-left">
-                    Ver stock →
+                    Ver inventario →
                   </button>
                 </div>
               ))}
@@ -333,80 +439,223 @@ export default function WarehousesPage() {
           )
         )}
 
-        {/* ── Tab: Stock ── */}
+        {/* ── Tab: Inventario ── */}
         {tab === 'stock' && (
           <div className="space-y-3">
+
             {/* Selector de depósito */}
-            <div className="flex gap-2 flex-wrap items-center">
-              <span className="text-xs text-[var(--text3)]">Depósito:</span>
-              {warehouses.map(w => (
-                <button key={w.id} onClick={() => setSelectedWarehouse(w)}
-                  className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${selectedWarehouse?.id === w.id
-                      ? 'bg-[var(--accent)] text-white'
-                      : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-                    }`}>
-                  {w.name}
+            {warehouses.length > 0 && (
+              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                <span className="text-xs text-[var(--text3)] flex-shrink-0">Depósito:</span>
+                {warehouses.map(w => (
+                  <button key={w.id} onClick={() => setSelectedWarehouse(w)}
+                    className={`px-3 py-1.5 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedWarehouse?.id === w.id
+                        ? 'bg-[var(--accent)] text-white'
+                        : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                      }`}>
+                    {w.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Pills de estado + búsqueda + filtros */}
+            <div className="flex flex-wrap gap-2 items-center">
+              {statusFilters.map(f => (
+                <button key={f.key} onClick={() => setStockFilter(f.key)}
+                  className={`px-3 py-1.5 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${stockFilter === f.key
+                    ? 'bg-[var(--accent)] text-white'
+                    : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                  }`}>
+                  {f.label}
                 </button>
               ))}
-              <div className="relative ml-auto">
-                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
-                <input value={stockSearch} onChange={e => setStockSearch(e.target.value)}
-                  placeholder="Buscar..."
-                  className="pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
-                />
+              <div className="flex gap-2 ml-auto items-center">
+                <div className="relative">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
+                  <input value={stockSearch} onChange={e => setStockSearch(e.target.value)}
+                    placeholder="Buscar..."
+                    className="w-full min-w-[130px] pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                </div>
+                <button
+                  onClick={() => setShowFilters(v => !v)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-full font-medium border transition-colors flex-shrink-0 ${showFilters || hasExtraFilter ? 'bg-[var(--accent)] border-[var(--accent)] text-white' : 'bg-[var(--surface2)] border-[var(--border)] text-[var(--text2)] hover:bg-[var(--surface3)]'}`}
+                >
+                  <Filter size={12} />
+                  Filtros
+                  {activeFilterCount > 0 && (
+                    <span className="bg-white/25 text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
               </div>
             </div>
 
+            {/* Panel de filtros */}
+            {showFilters && (
+              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-[var(--text3)]">Categoría</label>
+                    <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} className={selectClass}>
+                      <option value="">Todas</option>
+                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-[var(--text3)]">Proveedor</label>
+                    <select value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)} className={selectClass}>
+                      <option value="">Todos</option>
+                      {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="flex flex-col gap-1 sm:col-span-2">
+                    <label className="text-xs font-medium text-[var(--text3)]">Cantidad en stock</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number" min="0" value={minStockInput}
+                        onChange={e => setMinStockInput(e.target.value)}
+                        placeholder="Mínimo"
+                        className={`${selectClass} flex-1 min-w-0`}
+                      />
+                      <span className="text-xs text-[var(--text3)] flex-shrink-0">—</span>
+                      <input
+                        type="number" min="0" value={maxStockInput}
+                        onChange={e => setMaxStockInput(e.target.value)}
+                        placeholder="Máximo"
+                        className={`${selectClass} flex-1 min-w-0`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-[var(--text3)]">Ordenar por</label>
+                    <div className="flex gap-1">
+                      <select value={sortBy} onChange={e => handleSort(e.target.value as SortField)} className={`${selectClass} flex-1 min-w-0`}>
+                        <option value="name">Nombre</option>
+                        <option value="stock_current">Stock actual</option>
+                        <option value="stock_min">Stock mínimo</option>
+                        <option value="cost_price">Precio costo</option>
+                      </select>
+                      <button
+                        onClick={() => handleSort(sortBy)}
+                        title={sortDir === 'asc' ? 'Ascendente' : 'Descendente'}
+                        className="px-2.5 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)] hover:border-[var(--accent)] transition-colors"
+                      >
+                        {sortDir === 'asc' ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {activeFilterCount > 0 && (
+                  <button onClick={clearStockFilters} className="flex items-center gap-1 text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">
+                    <X size={12} /> Limpiar filtros
+                  </button>
+                )}
+              </div>
+            )}
+
             {loadingStock ? <PageLoader /> : stockData.length === 0 ? (
-              <EmptyState icon={Warehouse} title="Sin stock en este depósito"
-                description="Agregá productos o transferí stock desde otro depósito."
+              <EmptyState icon={Warehouse} title="Sin resultados"
+                description="Probá con otro filtro o transferí stock desde otro depósito."
               />
             ) : (
               <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-[var(--border)]">
-                      <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Producto</th>
-                      <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Categoría</th>
-                      <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Stock</th>
-                      <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Mín</th>
-                      <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Estado</th>
-                      <th className="px-4 py-3" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[var(--border)]">
-                    {stockData.map(item => (
-                      <tr key={item.id} className="hover:bg-[var(--surface2)] transition-colors group">
-                        <td className="px-4 py-3">
-                          <p className="font-medium text-[var(--text)]">{item.product_name}</p>
-                          {item.barcode && <p className="text-xs mono text-[var(--text3)]">{item.barcode}</p>}
-                        </td>
-                        <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">{item.category_name ?? '—'}</td>
-                        <td className="px-4 py-3 text-right mono font-bold text-base"
-                          style={{ color: getStockStatusColor(item.stock_status) }}>
-                          {item.stock_current}
-                        </td>
-                        <td className="px-4 py-3 text-right mono text-[var(--text3)] hidden sm:table-cell">{item.stock_min}</td>
-                        <td className="px-4 py-3 text-center">
-                          <Badge variant={
-                            item.stock_status === 'ok' ? 'success' :
-                              item.stock_status === 'bajo' ? 'warning' : 'danger'
-                          }>
-                            {getStockStatusLabel(item.stock_status)}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={() => { setAdjustItem(item); setAdjustModal(true) }}
-                            title="Ajustar stock"
-                            className="opacity-0 group-hover:opacity-100 p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all">
-                            <SlidersHorizontal size={14} />
-                          </button>
-                        </td>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[var(--border)]">
+                        <th
+                          onClick={() => handleSort('name')}
+                          className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group"
+                        >
+                          <div className="flex items-center gap-1">
+                            Producto
+                            <SortIcon field="name" sortBy={sortBy} sortDir={sortDir} />
+                          </div>
+                        </th>
+                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Categoría</th>
+                        <th
+                          onClick={() => handleSort('stock_current')}
+                          className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group"
+                        >
+                          <div className="flex items-center justify-end gap-1">
+                            Stock
+                            <SortIcon field="stock_current" sortBy={sortBy} sortDir={sortDir} />
+                          </div>
+                        </th>
+                        <th
+                          onClick={() => handleSort('stock_min')}
+                          className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group hidden sm:table-cell"
+                        >
+                          <div className="flex items-center justify-end gap-1">
+                            Mín
+                            <SortIcon field="stock_min" sortBy={sortBy} sortDir={sortDir} />
+                          </div>
+                        </th>
+                        <th
+                          onClick={() => handleSort('cost_price')}
+                          className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group hidden md:table-cell"
+                        >
+                          <div className="flex items-center justify-end gap-1">
+                            P. Costo
+                            <SortIcon field="cost_price" sortBy={sortBy} sortDir={sortDir} />
+                          </div>
+                        </th>
+                        <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Estado</th>
+                        <th className="px-4 py-3" />
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)]">
+                      {stockData.map(item => (
+                        <tr key={item.id} className="hover:bg-[var(--surface2)] transition-colors group">
+                          <td className="px-4 py-3">
+                            <p className="font-medium text-[var(--text)]">{item.product_name ?? item.name}</p>
+                            {item.barcode && <p className="text-xs mono text-[var(--text3)]">{item.barcode}</p>}
+                          </td>
+                          <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">{item.category_name ?? '—'}</td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="mono font-bold text-base" style={{ color: getStockStatusColor(item.stock_status) }}>
+                              {item.stock_current}
+                            </span>
+                            {(item.stock_reserved ?? 0) > 0 && (
+                              <div className="text-xs text-[var(--warning)]">
+                                {item.stock_current - (item.stock_reserved ?? 0)} disp.
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right mono text-[var(--text3)] hidden sm:table-cell">{item.stock_min}</td>
+                          <td className="px-4 py-3 text-right mono text-[var(--text2)] hidden md:table-cell">
+                            {formatCurrency(item.cost_price)}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <Badge variant={
+                              item.stock_status === 'ok' ? 'success' :
+                                item.stock_status === 'bajo' ? 'warning' : 'danger'
+                            }>
+                              {getStockStatusLabel(item.stock_status)}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => { setAdjustItem(item); setAdjustModal(true) }}
+                              title="Ajustar stock"
+                              className="opacity-0 group-hover:opacity-100 p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all"
+                            >
+                              <SlidersHorizontal size={14} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
                 <Pagination pagination={stockPag} onPageChange={handleStockPageChange} />
               </div>
             )}
@@ -533,7 +782,7 @@ export default function WarehousesPage() {
         danger
       />
 
-      {/* Modal ajuste de stock en depósito */}
+      {/* Modal ajuste de stock */}
       {adjustItem && (
         <AdjustStockModal
           open={adjustModal}
@@ -541,8 +790,8 @@ export default function WarehousesPage() {
           onSaved={fetchStock}
           product={{
             ...adjustItem,
-            id: adjustItem.product_id,
-            name: adjustItem.product_name,
+            id: adjustItem.product_id ?? adjustItem.id,
+            name: adjustItem.product_name ?? adjustItem.name ?? '',
             stock_current: adjustItem.stock_current,
             stock_min: adjustItem.stock_min,
           } as unknown as import('@/types').Product}
@@ -562,7 +811,6 @@ export default function WarehousesPage() {
       {transferDetail && (
         <Modal open={!!transferDetail} onClose={() => setTransferDetail(null)} title="Detalle de transferencia" size="lg">
           <div className="space-y-5 pb-5">
-            {/* Estado + metadatos */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Badge variant={transferDetail.status === 'approved' ? 'success' : 'warning'}>
@@ -575,7 +823,6 @@ export default function WarehousesPage() {
               </span>
             </div>
 
-            {/* Origen → Destino */}
             <div className="grid grid-cols-2 gap-3">
               <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3">
                 <p className="text-xs text-[var(--text3)] mb-1">Depósito origen</p>
@@ -587,7 +834,6 @@ export default function WarehousesPage() {
               </div>
             </div>
 
-            {/* Creado por / Aprobado */}
             <div className="grid grid-cols-2 gap-3 text-xs text-[var(--text2)]">
               {transferDetail.users?.full_name && (
                 <p><span className="text-[var(--text3)]">Creado por:</span> {transferDetail.users.full_name}</p>
@@ -597,14 +843,12 @@ export default function WarehousesPage() {
               )}
             </div>
 
-            {/* Notas */}
             {transferDetail.notes && (
               <p className="text-sm text-[var(--text2)] bg-[var(--surface2)] rounded-[var(--radius-md)] px-3 py-2">
                 <span className="text-[var(--text3)] text-xs">Notas:</span> {transferDetail.notes}
               </p>
             )}
 
-            {/* Productos */}
             <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
@@ -628,7 +872,6 @@ export default function WarehousesPage() {
               </table>
             </div>
 
-            {/* Acciones */}
             <div className="flex justify-end gap-2 pt-1">
               {transferDetail.status === 'pending' && (
                 <Button

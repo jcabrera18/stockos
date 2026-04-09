@@ -12,7 +12,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import type { Pagination as PaginationType } from '@/types'
-import { FileText, CheckCircle, Clock, XCircle, RefreshCw } from 'lucide-react'
+import { FileText, CheckCircle, Clock, XCircle, RefreshCw, Printer } from 'lucide-react'
 import { toast } from 'sonner'
 import { useRouter, useSearchParams } from 'next/navigation'
 
@@ -95,15 +95,23 @@ function InvoicesPageInner() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
+  const [ticketSearch, setTicketSearch] = useState('')
+  const [debouncedTicket, setDebouncedTicket] = useState('')
 
   // Refs para evitar loops
   const typeRef = useRef(typeFilter)
   const fromRef = useRef(from)
   const toRef = useRef(to)
+  const ticketRef = useRef(debouncedTicket)
   const pageRef = useRef(page)
   useEffect(() => { typeRef.current = typeFilter }, [typeFilter])
   useEffect(() => { fromRef.current = from }, [from])
   useEffect(() => { toRef.current = to }, [to])
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedTicket(ticketSearch), ticketSearch ? 400 : 0)
+    return () => clearTimeout(t)
+  }, [ticketSearch])
+  useEffect(() => { ticketRef.current = debouncedTicket }, [debouncedTicket])
   useEffect(() => { pageRef.current = page }, [page])
 
   // Detail modal
@@ -159,6 +167,7 @@ function InvoicesPageInner() {
       if (typeRef.current) params.invoice_type = typeRef.current
       if (fromRef.current) params.from = fromRef.current
       if (toRef.current) params.to = toRef.current
+      if (ticketRef.current) params.ticket = ticketRef.current
 
       const res = await api.get<{ data: Invoice[]; pagination: PaginationType }>('/api/invoices', params)
       setData(res.data)
@@ -171,10 +180,10 @@ function InvoicesPageInner() {
   const pendingFacturarRef = useRef<string | null>(null)
 
   // Fetch al cambiar filtros
-  useEffect(() => { fetchInvoices() }, [typeFilter, from, to, page, fetchInvoices])
+  useEffect(() => { fetchInvoices() }, [typeFilter, from, to, debouncedTicket, page, fetchInvoices])
 
   // Reset página al cambiar filtros
-  useEffect(() => { setPage(1) }, [typeFilter, from, to])
+  useEffect(() => { setPage(1) }, [typeFilter, from, to, debouncedTicket])
 
   // Capturar param ?facturar al montar — solo una vez
   useEffect(() => {
@@ -233,6 +242,89 @@ function InvoicesPageInner() {
     } finally { setConverting(false) }
   }
 
+  const handlePrintInvoice = (invoice: Invoice) => {
+    const win = window.open('', '_blank', 'width=520,height=800')
+    if (!win) return
+
+    const typeLabel = TYPE_LABELS[invoice.invoice_type] ?? invoice.invoice_type
+    const numero = String(invoice.numero).padStart(8, '0')
+    const isA = invoice.invoice_type === 'A'
+
+    win.document.write(`<!DOCTYPE html><html><head>
+      <meta charset="utf-8"><title>${typeLabel} #${numero}</title>
+      <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Inter',Arial,sans-serif; background:#fff; color:#1a1a18; padding:32px; max-width:480px; margin:0 auto; }
+        .mono { font-family:'Courier New',monospace; }
+        h1 { font-size:22px; font-weight:700; margin-bottom:4px; }
+        .sub { font-size:12px; color:#6a6a64; margin-bottom:24px; }
+        .section { margin-bottom:20px; }
+        .label { font-size:10px; color:#8a8a84; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px; }
+        .divider { border:none; border-top:1px dashed #d4d4cc; margin:16px 0; }
+        table { width:100%; border-collapse:collapse; font-size:12px; }
+        th { text-align:left; padding:6px 0; font-size:10px; color:#8a8a84; text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid #e5e5e2; }
+        td { padding:8px 0; border-bottom:1px solid #f5f5f4; vertical-align:top; }
+        td.right { text-align:right; font-family:'Courier New',monospace; }
+        .total-row td { font-size:15px; font-weight:700; border-bottom:none; padding-top:12px; }
+        @media print { body { padding:16px; } }
+      </style>
+    </head><body>
+      <div class="section">
+        <div class="label">Comprobante</div>
+        <h1>${typeLabel}</h1>
+        <div class="sub">N° ${numero} · ${invoice.fecha}</div>
+      </div>
+
+      <div class="section">
+        <div class="label">Receptor</div>
+        <div style="font-size:14px;font-weight:600">${invoice.receptor_name ?? 'Consumidor Final'}</div>
+        ${invoice.receptor_cuit ? `<div class="mono" style="font-size:12px;color:#6a6a64">CUIT: ${invoice.receptor_cuit}</div>` : ''}
+        <div style="font-size:12px;color:#6a6a64">Condición IVA: ${invoice.receptor_iva_condition}</div>
+      </div>
+
+      <hr class="divider">
+
+      <table>
+        <thead><tr>
+          <th style="width:50%">Descripción</th>
+          <th class="right">Cant.</th>
+          <th class="right">P. Unit.</th>
+          <th class="right">Subtotal</th>
+        </tr></thead>
+        <tbody>
+          ${invoice.invoice_items.map(item => `<tr>
+            <td>${item.description}</td>
+            <td class="right">${item.quantity}</td>
+            <td class="right">${formatCurrency(item.unit_price)}</td>
+            <td class="right">${formatCurrency(item.subtotal)}</td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot>
+          ${isA ? `
+          <tr><td colspan="3" style="color:#6a6a64;font-size:12px">Neto gravado</td><td class="right" style="font-size:12px">${formatCurrency(invoice.net_amount)}</td></tr>
+          <tr><td colspan="3" style="color:#6a6a64;font-size:12px">IVA 21%</td><td class="right" style="font-size:12px">${formatCurrency(invoice.iva_amount)}</td></tr>
+          ` : ''}
+          <tr class="total-row">
+            <td colspan="3">Total</td>
+            <td class="right" style="color:#15803d">${formatCurrency(invoice.total_amount)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      ${invoice.cae ? `<hr class="divider">
+      <div class="section">
+        <div class="label">AFIP</div>
+        <div class="mono" style="font-size:12px">CAE: ${invoice.cae}</div>
+        ${invoice.cae_expiry ? `<div style="font-size:12px;color:#6a6a64">Vto. CAE: ${invoice.cae_expiry}</div>` : ''}
+      </div>` : ''}
+
+      ${invoice.notes ? `<hr class="divider"><div style="font-size:12px;color:#6a6a64;font-style:italic">${invoice.notes}</div>` : ''}
+    </body></html>`)
+    win.document.close()
+    win.focus()
+    setTimeout(() => { win.print(); win.close() }, 400)
+  }
+
   return (
     <AppShell>
       <PageHeader
@@ -262,6 +354,14 @@ function InvoicesPageInner() {
             ))}
           </div>
 
+          {/* N° Ticket */}
+          <input
+            value={ticketSearch}
+            onChange={e => setTicketSearch(e.target.value.toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 8))}
+            placeholder="N° Ticket..."
+            className="text-xs px-3 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] w-28 font-mono uppercase"
+          />
+
           {/* Fechas */}
           <div className="flex items-center gap-2 ml-auto">
             <input type="date" value={from} onChange={e => setFrom(e.target.value)}
@@ -283,6 +383,7 @@ function InvoicesPageInner() {
               <thead>
                 <tr className="border-b border-[var(--border)]">
                   <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Comprobante</th>
+                  <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">N° Ticket</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Fecha</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Receptor</th>
                   <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Total</th>
@@ -311,6 +412,9 @@ function InvoicesPageInner() {
                             ` · ${(inv.registers as { name: string }).name}`}
                         </p>
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-xs mono text-[var(--text3)] hidden sm:table-cell">
+                      {inv.sale_id ? `#${inv.sale_id.slice(-8).toUpperCase()}` : '—'}
                     </td>
                     <td className="px-4 py-3 text-xs text-[var(--text2)] hidden md:table-cell">
                       {inv.fecha}
@@ -377,6 +481,14 @@ function InvoicesPageInner() {
                 <p className="text-xs text-[var(--text3)] mb-1">Fecha</p>
                 <p className="text-sm text-[var(--text)]">{selectedInvoice.fecha}</p>
               </div>
+              {selectedInvoice.sale_id && (
+                <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3">
+                  <p className="text-xs text-[var(--text3)] mb-1">N° Ticket</p>
+                  <p className="text-sm font-bold mono text-[var(--text)]">
+                    #{selectedInvoice.sale_id.slice(-8).toUpperCase()}
+                  </p>
+                </div>
+              )}
               <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3">
                 <p className="text-xs text-[var(--text3)] mb-1">Método de pago</p>
                 <p className="text-sm text-[var(--text)]">
@@ -507,6 +619,18 @@ function InvoicesPageInner() {
                 </Button>
               </div>
             )}
+
+            {/* Acciones */}
+            <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-2 border-t border-[var(--border)]">
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => handlePrintInvoice(selectedInvoice)}>
+                  <Printer size={14} /> Reimprimir comprobante
+                </Button>
+                <Button variant="secondary" onClick={() => { setDetailModal(false); setSelectedInvoice(null) }}>
+                  Cerrar
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </Modal>

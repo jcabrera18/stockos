@@ -57,6 +57,7 @@ export interface Product {
   stock_min: number
   stock_max: number
   unit: string
+  price_mode: 'fixed' | 'custom'
   is_active: boolean
   created_at: string
   updated_at: string

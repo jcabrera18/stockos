@@ -6,7 +6,7 @@ const roleHomePage: Record<string, string> = {
   owner:   '/dashboard',
   admin:   '/dashboard',
   cashier: '/pos',
-  stocker: '/stock',
+  stocker: '/warehouses',
   seller:  '/orders',
 }
 
@@ -15,7 +15,7 @@ const roleAllowedPaths: Record<string, string[]> = {
   owner:   ['/'],  // owner ve todo
   admin:   ['/'],  // admin ve todo
   cashier: ['/pos', '/sales', '/orders', '/customers', '/cash-register'],
-  stocker: ['/stock', '/purchases', '/warehouses', '/orders'],
+  stocker: ['/purchases', '/warehouses', '/orders'],
   seller:  ['/orders'],
 }
 

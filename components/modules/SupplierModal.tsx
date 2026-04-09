@@ -12,11 +12,12 @@ interface SupplierModalProps {
   onClose: () => void
   onSaved: () => void
   supplier?: Supplier | null
+  zIndex?: number
 }
 
 const emptyForm = { name: '', cuit: '', phone: '', email: '', address: '', notes: '' }
 
-export function SupplierModal({ open, onClose, onSaved, supplier }: SupplierModalProps) {
+export function SupplierModal({ open, onClose, onSaved, supplier, zIndex }: SupplierModalProps) {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -72,7 +73,7 @@ export function SupplierModal({ open, onClose, onSaved, supplier }: SupplierModa
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={isEdit ? 'Editar proveedor' : 'Nuevo proveedor'} size="md">
+    <Modal open={open} onClose={onClose} title={isEdit ? 'Editar proveedor' : 'Nuevo proveedor'} size="md" zIndex={zIndex}>
       <div className="space-y-4">
         <Input label="Nombre *" value={form.name} onChange={set('name')} placeholder="Ej: Distribuidora Norte" error={errors.name} />
         <div className="grid grid-cols-2 gap-3">

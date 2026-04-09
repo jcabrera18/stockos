@@ -7,6 +7,7 @@ import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
 import { Printer, CreditCard, Package, User, Calendar, Hash, FileText, Download, Receipt } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { useAuth } from '@/hooks/useAuth'
 
 
 interface SaleItem {
@@ -98,6 +99,7 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
   const [loading, setLoading] = useState(false)
   const [loadingInvoice, setLoadingInvoice] = useState(false)
   const router = useRouter()
+  const { user } = useAuth()
 
   useEffect(() => {
     if (!open || !saleId) return
@@ -136,98 +138,96 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
 
   const handlePrint = () => {
     if (!sale) return
-    const win = window.open('', '_blank', 'width=420,height=700')
+    const win = window.open('', '_blank', 'width=350,height=800')
     if (!win) return
 
     const itemsSubtotal = sale.sale_items.reduce(
       (a, i) => a + i.unit_price * i.quantity - i.discount, 0
     )
-    const itemCount = sale.sale_items.reduce((a, i) => a + i.quantity, 0)
+    const isInvoiced = !!(invoice && invoice.afip_status === 'authorized' && invoice.cae)
+    const invoiceTypeLabel = (type: string) => {
+      const map: Record<string, string> = {
+        A: 'FACTURA A', B: 'FACTURA B', C: 'FACTURA C',
+        NCA: 'NOTA DE CRÉDITO A', NCB: 'NOTA DE CRÉDITO B', NCC: 'NOTA DE CRÉDITO C',
+        R: 'REMITO',
+      }
+      return map[type] ?? `COMPROBANTE ${type}`
+    }
 
-    win.document.write(`
-    <!DOCTYPE html><html><head>
-    <meta charset="utf-8"><title>Ticket StockOS</title>
-    <style>
-      * { margin:0; padding:0; box-sizing:border-box; }
-      body { font-family:'Inter',sans-serif; background:#fff; color:#1a1a18; width:380px; }
-      .mono { font-family:'IBM Plex Mono',monospace; }
-    </style>
+    const sep = `<div style="border-top:1px dashed #999;margin:8px 0;"></div>`
+    const itemsHtml = sale.sale_items.map(item => {
+      const lineTotal = item.unit_price * item.quantity - item.discount
+      return `
+        <div style="margin-bottom:6px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+            <span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity} ${item.products.unit} ${item.products.name}</span>
+            <span style="flex-shrink:0;">${formatCurrency(lineTotal)}</span>
+          </div>
+          <div style="font-size:10px;color:#555;">
+            &nbsp;&nbsp;c/u ${formatCurrency(item.unit_price)}${item.discount > 0 ? ` &minus; dto ${formatCurrency(item.discount)}` : ''}
+          </div>
+        </div>`
+    }).join('')
+
+    win.document.write(`<!DOCTYPE html><html><head>
+      <meta charset="utf-8"><title>Ticket</title>
+      <style>
+        @page { size: 80mm auto; margin: 3mm 2mm; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; background: #fff; }
+      </style>
     </head><body>
-    <div style="background:linear-gradient(135deg,#15803d 0%,#16a34a 60%,#22c55e 100%);padding:24px 20px 20px;color:#fff">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start">
-        <div>
-          <div style="font-size:11px;opacity:0.8;margin-bottom:2px;letter-spacing:0.05em;text-transform:uppercase">StockOS · Punto de Venta</div>
-          <div style="font-size:13px;opacity:0.9">${formatDateTime(sale.created_at)}</div>
+      <div style="padding:14px 12px;">
+        <div style="text-align:center;margin-bottom:2px;">
+          <div style="font-size:15px;font-weight:bold;letter-spacing:0.04em;">${user?.business?.name ?? 'StockOS'}</div>
+          ${user?.business?.cuit ? `<div>CUIT: ${user.business.cuit}</div>` : ''}
+          ${user?.business?.address ? `<div style="font-size:10px;margin-top:1px;">${user.business.address}</div>` : ''}
+          ${user?.business?.phone ? `<div style="font-size:10px;">Tel: ${user.business.phone}</div>` : ''}
         </div>
-        <div style="text-align:right">
-          <div style="font-size:10px;opacity:0.7;margin-bottom:2px">Comprobante</div>
-          <div style="font-family:monospace;font-size:13px;font-weight:600;letter-spacing:0.08em">#${sale.id.slice(-8).toUpperCase()}</div>
+        ${sep}
+        <div style="font-size:11px;line-height:1.5;">
+          <div>Fecha: ${formatDateTime(sale.created_at)}</div>
+          <div>N&#176; Ticket: #${sale.id.slice(-8).toUpperCase()}</div>
+          ${sale.users ? `<div>Cajero: ${sale.users.full_name}</div>` : ''}
+          ${customer ? `<div>Cliente: ${customer.full_name}</div>` : ''}
         </div>
-      </div>
-      <div style="margin-top:20px;text-align:center">
-        <div style="font-size:11px;opacity:0.8;margin-bottom:4px;letter-spacing:0.05em;text-transform:uppercase">Total pagado</div>
-        <div style="font-size:40px;font-weight:700;letter-spacing:-0.02em;line-height:1">${formatCurrency(sale.total)}</div>
-      </div>
-      <div style="margin-top:16px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.2);border-radius:20px;padding:5px 14px;font-size:12px;font-weight:600">
-        ${getPaymentMethodLabel(sale.payment_method)}
-        ${sale.payment_method === 'credito' && sale.installments > 1 ? ` · ${sale.installments} cuotas` : ''}
-        ${customer ? ` · ${customer.full_name}` : ''}
-      </div>
-    </div>
-
-    <div style="background:#f5f5f4;padding:0 20px 20px">
-      <div style="display:flex;gap:8px;margin-bottom:16px;padding-top:16px">
-        <div style="flex:1;background:#fff;border-radius:10px;padding:10px 12px;text-align:center">
-          <div style="font-size:18px;font-weight:700;font-family:monospace">${itemCount}</div>
-          <div style="font-size:10px;color:#6a6a64;margin-top:1px">${itemCount === 1 ? 'producto' : 'productos'}</div>
+        ${sep}
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;font-weight:bold;font-size:10px;margin-bottom:6px;">
+          <span>DESCRIPCIÓN</span><span>IMPORTE</span>
         </div>
-        ${sale.discount > 0 ? `
-        <div style="flex:1;background:#fff;border-radius:10px;padding:10px 12px;text-align:center">
-          <div style="font-size:18px;font-weight:700;font-family:monospace;color:#dc2626">-${formatCurrency(sale.discount)}</div>
-          <div style="font-size:10px;color:#6a6a64;margin-top:1px">descuento</div>
-        </div>` : ''}
-      </div>
-
-      <div style="background:#fff;border-radius:10px;overflow:hidden;margin-bottom:12px">
-        <div style="padding:10px 14px;border-bottom:1px solid #e5e5e2;font-size:10px;font-weight:600;color:#6a6a64;letter-spacing:0.05em;text-transform:uppercase;display:flex;justify-content:space-between">
-          <span>Detalle</span><span>Importe</span>
-        </div>
-        ${sale.sale_items.map((item, i) => `
-        <div style="padding:10px 14px;${i < sale.sale_items.length - 1 ? 'border-bottom:1px solid #f5f5f4;' : ''}display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
-          <div style="flex:1">
-            <div style="font-size:12px;font-weight:600">${item.products.name}</div>
-            <div style="font-size:10px;color:#8a8a84;margin-top:2px">
-              ${item.quantity} ${item.products.unit} × ${formatCurrency(item.unit_price)}
-              ${item.discount > 0 ? `<span style="color:#dc2626"> − ${formatCurrency(item.discount)}</span>` : ''}
-            </div>
+        ${itemsHtml}
+        ${sep}
+        <div style="line-height:1.6;">
+          ${sale.discount > 0 ? `
+          <div style="display:flex;justify-content:space-between;">
+            <span>Subtotal</span><span>${formatCurrency(itemsSubtotal)}</span>
           </div>
-          <div style="font-size:13px;font-family:monospace;font-weight:600;flex-shrink:0">
-            ${formatCurrency(item.unit_price * item.quantity - item.discount)}
+          <div style="display:flex;justify-content:space-between;">
+            <span>Descuento</span><span>-${formatCurrency(sale.discount)}</span>
+          </div>` : ''}
+          <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;margin-top:2px;">
+            <span>TOTAL</span><span>${formatCurrency(sale.total)}</span>
           </div>
-        </div>`).join('')}
-      </div>
-
-      <div style="background:#fff;border-radius:10px;padding:12px 14px;margin-bottom:12px">
-        ${sale.discount > 0 ? `
-        <div style="display:flex;justify-content:space-between;font-size:12px;color:#6a6a64;margin-bottom:6px">
-          <span>Subtotal</span><span style="font-family:monospace">${formatCurrency(itemsSubtotal)}</span>
+          <div style="margin-top:4px;font-size:11px;">
+            Pago: ${getPaymentMethodLabel(sale.payment_method)}${sale.payment_method === 'credito' && sale.installments > 1 ? ` (${sale.installments} cuotas)` : ''}
+          </div>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:12px;color:#dc2626;margin-bottom:8px">
-          <span>Descuento</span><span style="font-family:monospace">− ${formatCurrency(sale.discount)}</span>
-        </div>` : ''}
-        <div style="display:flex;justify-content:space-between;font-size:15px;font-weight:700;${sale.discount > 0 ? 'padding-top:8px;border-top:1px dashed #e5e5e2' : ''}">
-          <span>Total</span>
-          <span style="font-family:monospace;color:#15803d">${formatCurrency(sale.total)}</span>
+        ${sep}
+        ${isInvoiced && invoice ? `
+        <div style="text-align:center;line-height:1.6;">
+          <div style="font-weight:bold;font-size:12px;">${invoiceTypeLabel(invoice.invoice_type)}</div>
+          ${invoice.numero !== undefined ? `<div>N&#176;: ${String(invoice.numero).padStart(8, '0')}</div>` : ''}
+          <div>CAE: ${invoice.cae}</div>
+          ${invoice.cae_expiry ? `<div>Vto. CAE: ${invoice.cae_expiry}</div>` : ''}
+        </div>` : `
+        <div style="text-align:center;font-weight:bold;padding:2px 0;letter-spacing:0.03em;">*** NO VALIDO COMO FACTURA ***</div>`}
+        ${sep}
+        <div style="text-align:center;font-size:10px;line-height:1.6;">
+          <div>&#161;Gracias por su compra!</div>
+          <div style="color:#888;">Powered by StockOS</div>
         </div>
       </div>
-
-      <div style="text-align:center">
-        <div style="font-size:12px;color:#8a8a84;margin-bottom:6px">¡Gracias por su compra!</div>
-        <div style="font-size:10px;color:#b4b2a9">⚡ Powered by StockOS</div>
-      </div>
-    </div>
-    </body></html>
-  `)
+    </body></html>`)
     win.document.close()
     win.focus()
     setTimeout(() => { win.print(); win.close() }, 400)
@@ -344,7 +344,8 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
               </div>
               <div className="flex items-center gap-1.5 text-xs text-[var(--text2)]">
                 <Hash size={11} className="text-[var(--text3)]" />
-                <span className="mono">{sale.id.slice(-8).toUpperCase()}</span>
+                <span className="text-[var(--text3)]">N° Ticket:</span>
+                <span className="mono font-semibold">#{sale.id.slice(-8).toUpperCase()}</span>
               </div>
               {sale.users && (
                 <div className="flex items-center gap-1.5 text-xs text-[var(--text2)]">

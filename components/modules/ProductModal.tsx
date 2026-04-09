@@ -6,8 +6,10 @@ import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
+import { Plus } from 'lucide-react'
 import type { Product, Category, Supplier } from '@/types'
 import type { PriceList } from '@/app/price-lists/page'
+import { SupplierModal } from '@/components/modules/SupplierModal'
 
 interface ProductModalProps {
   open: boolean
@@ -36,6 +38,7 @@ const emptyForm = {
   brand_id: '',
   cost_price: '',
   unit: 'unidad',
+  price_mode: 'fixed' as 'fixed' | 'custom',
 }
 
 export function ProductModal({ open, onClose, onSaved, product }: ProductModalProps) {
@@ -46,6 +49,14 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
+  const [supplierSubModal, setSupplierSubModal] = useState(false)
+  const [brandSubModal, setBrandSubModal] = useState(false)
+  const [newBrandName, setNewBrandName] = useState('')
+  const [savingBrand, setSavingBrand] = useState(false)
+  const [categorySubModal, setCategorySubModal] = useState(false)
+  const [newCatName, setNewCatName] = useState('')
+  const [newCatParent, setNewCatParent] = useState('')
+  const [savingCat, setSavingCat] = useState(false)
 
   const isEdit = !!product
 
@@ -71,6 +82,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         brand_id: (product as Product & { brand_id?: string }).brand_id ?? '',
         cost_price: String(product.cost_price),
         unit: product.unit,
+        price_mode: product.price_mode ?? 'fixed',
       })
     } else {
       setForm(emptyForm)
@@ -112,10 +124,11 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         brand_id: form.brand_id || null,
         cost_price: costPrice,
         sell_price: sellPrice,
-        stock_current: 0,
+        stock_current: form.price_mode === 'custom' ? 999999 : 0,
         stock_min: 0,
-        stock_max: 9999,
+        stock_max: form.price_mode === 'custom' ? 999999 : 9999,
         unit: form.unit,
+        price_mode: form.price_mode,
       }
 
       if (isEdit) {
@@ -138,49 +151,81 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const supplierOptions = suppliers.map(s => ({ value: s.id, label: s.name }))
   const brandOptions = brands.map(b => ({ value: b.id, label: b.name }))
 
-  interface CategoryWithChildren extends Category {
-    children: CategoryWithChildren[]
+  const handleSupplierSaved = async () => {
+    const prevIds = new Set(suppliers.map(s => s.id))
+    const updated = await api.get<Supplier[]>('/api/purchases/suppliers').catch(() => suppliers)
+    setSuppliers(updated)
+    // auto-select el recién creado
+    const newOne = updated.find(s => !prevIds.has(s.id))
+    if (newOne) setForm(f => ({ ...f, supplier_id: newOne.id }))
+    setSupplierSubModal(false)
   }
 
-  function buildCategoryTree(cats: Category[]): CategoryWithChildren[] {
-    const map = new Map<string, CategoryWithChildren>()
-    const roots: CategoryWithChildren[] = []
-    cats.forEach(c => map.set(c.id, { ...c, children: [] }))
-    cats.forEach(c => {
-      const node = map.get(c.id)!
-      if (c.parent_id && map.has(c.parent_id)) map.get(c.parent_id)!.children.push(node)
-      else roots.push(node)
-    })
-    return roots
+  const handleBrandQuickSave = async () => {
+    if (!newBrandName.trim()) return
+    setSavingBrand(true)
+    try {
+      const created = await api.post<{ id: string; name: string }>('/api/brands', { name: newBrandName.trim() })
+      const updated = await api.get<{ id: string; name: string }[]>('/api/brands').catch(() => brands)
+      setBrands(updated)
+      setForm(f => ({ ...f, brand_id: created.id }))
+      setNewBrandName('')
+      setBrandSubModal(false)
+      toast.success('Marca creada')
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al crear marca')
+    } finally {
+      setSavingBrand(false)
+    }
+  }
+
+  const handleCategoryQuickSave = async () => {
+    if (!newCatName.trim()) return
+    setSavingCat(true)
+    try {
+      const created = await api.post<Category>('/api/products/categories', {
+        name: newCatName.trim(),
+        parent_id: newCatParent || null,
+      })
+      const updated = await api.get<Category[]>('/api/products/categories').catch(() => categories)
+      setCategories(updated)
+      setForm(f => ({ ...f, category_id: created.id }))
+      setNewCatName('')
+      setNewCatParent('')
+      setCategorySubModal(false)
+      toast.success('Categoría creada')
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al crear categoría')
+    } finally {
+      setSavingCat(false)
+    }
   }
 
   // Cascada de categorías derivada de form.category_id
   const categoryMap = new Map(categories.map(c => [c.id, c]))
-  const l1Tree = buildCategoryTree(categories)
 
-  let catL1 = '', catL2 = '', catL3 = ''
+  // childrenMap: parent_id (null para raíz) → hijos
+  const childrenMap = new Map<string | null, Category[]>()
+  categories.forEach(c => {
+    const key = c.parent_id ?? null
+    if (!childrenMap.has(key)) childrenMap.set(key, [])
+    childrenMap.get(key)!.push(c)
+  })
+
+  // Reconstruir el path desde la raíz hasta la categoría seleccionada
+  const categoryPath: string[] = []
   if (form.category_id) {
-    const cat = categoryMap.get(form.category_id)
-    if (cat) {
-      if (!cat.parent_id) {
-        catL1 = form.category_id
-      } else {
-        const parent = categoryMap.get(cat.parent_id)
-        if (parent) {
-          if (!parent.parent_id) {
-            catL1 = parent.id; catL2 = form.category_id
-          } else {
-            const grandparent = categoryMap.get(parent.parent_id)
-            if (grandparent) { catL1 = grandparent.id; catL2 = parent.id; catL3 = form.category_id }
-          }
-        }
-      }
+    let cur: string | undefined = form.category_id
+    while (cur) {
+      categoryPath.unshift(cur)
+      cur = categoryMap.get(cur)?.parent_id ?? undefined
     }
   }
 
-  const l2Options = catL1 ? (l1Tree.find(c => c.id === catL1)?.children ?? []) : []
-  const l2Node = l2Options.find(c => c.id === catL2)
-  const l3Options = catL2 ? (l2Node?.children ?? []) : []
+  // Cantidad de dropdowns: longitud del path + 1 si el último nodo tiene hijos, mínimo 1
+  const lastSelected = categoryPath[categoryPath.length - 1] ?? null
+  const hasMoreChildren = (childrenMap.get(lastSelected) ?? []).length > 0
+  const numDropdowns = Math.max(1, categoryPath.length + (hasMoreChildren ? 1 : 0))
 
   const selectClass = 'w-full px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
 
@@ -230,34 +275,39 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
 
         {/* Fila 3: Categoría en cascada */}
         <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-[var(--text2)]">Categoría</label>
-          <div className="grid grid-cols-3 gap-2">
-            <select
-              value={catL1}
-              onChange={e => { setForm(f => ({ ...f, category_id: e.target.value })); setErrors(er => ({ ...er, category_id: '' })) }}
-              className={selectClass}
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium text-[var(--text2)]">Categoría</label>
+            <button
+              type="button"
+              onClick={() => { setNewCatName(''); setNewCatParent(''); setCategorySubModal(true) }}
+              title="Crear categoría"
+              className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
             >
-              <option value="">Sin categoría</option>
-              {l1Tree.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <select
-              value={catL2}
-              disabled={l2Options.length === 0}
-              onChange={e => { setForm(f => ({ ...f, category_id: e.target.value || catL1 })); setErrors(er => ({ ...er, category_id: '' })) }}
-              className={selectClass}
-            >
-              <option value="">{catL1 ? 'General' : '—'}</option>
-              {l2Options.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            <select
-              value={catL3}
-              disabled={l3Options.length === 0}
-              onChange={e => { setForm(f => ({ ...f, category_id: e.target.value || catL2 })); setErrors(er => ({ ...er, category_id: '' })) }}
-              className={selectClass}
-            >
-              <option value="">{catL2 ? 'General' : '—'}</option>
-              {l3Options.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+              <Plus size={12} /> Nueva
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {Array.from({ length: numDropdowns }).map((_, i) => {
+              const parentId = i === 0 ? null : (categoryPath[i - 1] ?? null)
+              const options = childrenMap.get(parentId) ?? []
+              const selectedValue = categoryPath[i] ?? ''
+              return (
+                <select
+                  key={i}
+                  value={selectedValue}
+                  disabled={options.length === 0}
+                  onChange={e => {
+                    const val = e.target.value
+                    setForm(f => ({ ...f, category_id: val || categoryPath[i - 1] || '' }))
+                    setErrors(er => ({ ...er, category_id: '' }))
+                  }}
+                  className={`${selectClass} flex-1 min-w-[110px]`}
+                >
+                  <option value="">{i === 0 ? 'Sin categoría' : 'General'}</option>
+                  {options.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )
+            })}
           </div>
         </div>
 
@@ -273,24 +323,67 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
             placeholder="0.00"
             error={errors.cost_price}
           />
-          <Select
-            label="Proveedor"
-            options={supplierOptions}
-            value={form.supplier_id}
-            onChange={set('supplier_id')}
-            placeholder="Sin proveedor"
-          />
-          <Select
-            label="Marca"
-            options={brandOptions}
-            value={form.brand_id}
-            onChange={set('brand_id')}
-            placeholder="Sin marca"
-          />
+          {/* Proveedor con botón + */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-[var(--text2)]">Proveedor</label>
+              <button
+                type="button"
+                onClick={() => setSupplierSubModal(true)}
+                title="Crear proveedor"
+                className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+              >
+                <Plus size={12} /> Nuevo
+              </button>
+            </div>
+            <Select
+              options={supplierOptions}
+              value={form.supplier_id}
+              onChange={set('supplier_id')}
+              placeholder="Sin proveedor"
+            />
+          </div>
+          {/* Marca con botón + */}
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-[var(--text2)]">Marca</label>
+              <button
+                type="button"
+                onClick={() => { setNewBrandName(''); setBrandSubModal(true) }}
+                title="Crear marca"
+                className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+              >
+                <Plus size={12} /> Nueva
+              </button>
+            </div>
+            <Select
+              options={brandOptions}
+              value={form.brand_id}
+              onChange={set('brand_id')}
+              placeholder="Sin marca"
+            />
+          </div>
         </div>
 
+        {/* Precio libre toggle */}
+        <label className="flex items-center gap-3 cursor-pointer select-none">
+          <div className="relative flex-shrink-0">
+            <input
+              type="checkbox"
+              className="sr-only peer"
+              checked={form.price_mode === 'custom'}
+              onChange={e => setForm(f => ({ ...f, price_mode: e.target.checked ? 'custom' : 'fixed' }))}
+            />
+            <div className="w-9 h-5 rounded-full bg-[var(--border)] peer-checked:bg-[var(--accent)] transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-[var(--text)]">Precio libre por venta</p>
+            <p className="text-xs text-[var(--text3)]">El cajero ingresa el precio en cada venta (ej: verdura, carne por peso)</p>
+          </div>
+        </label>
+
         {/* Precios por lista */}
-        {form.cost_price && Number(form.cost_price) > 0 && categories.length >= 0 && (
+        {form.price_mode === 'fixed' && form.cost_price && Number(form.cost_price) > 0 && categories.length >= 0 && (
           <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
             <p className="text-xs font-medium text-[var(--text3)] mb-1">Precio según lista</p>
             {priceLists.slice(0, 3).map(list => {
@@ -337,6 +430,73 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         </div>
 
       </div>
+
+      {/* Sub-modal: Nuevo proveedor */}
+      <SupplierModal
+        open={supplierSubModal}
+        onClose={() => setSupplierSubModal(false)}
+        onSaved={handleSupplierSaved}
+        zIndex={60}
+      />
+
+      {/* Sub-modal: Nueva categoría */}
+      {categorySubModal && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+        >
+          <div className="w-full max-w-sm bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl p-5 space-y-4">
+            <h3 className="text-base font-semibold text-[var(--text)]">Nueva categoría</h3>
+            <Input
+              label="Nombre *"
+              value={newCatName}
+              onChange={e => setNewCatName(e.target.value)}
+              placeholder="Ej: Bebidas, Lácteos..."
+              autoFocus
+            />
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-[var(--text2)]">Categoría padre</label>
+              <select
+                value={newCatParent}
+                onChange={e => setNewCatParent(e.target.value)}
+                className="w-full px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+              >
+                <option value="">Sin padre (categoría principal)</option>
+                {categories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="secondary" onClick={() => setCategorySubModal(false)} disabled={savingCat}>Cancelar</Button>
+              <Button onClick={handleCategoryQuickSave} loading={savingCat} disabled={!newCatName.trim()}>Crear categoría</Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-modal: Nueva marca */}
+      {brandSubModal && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+        >
+          <div className="w-full max-w-sm bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl p-5 space-y-4">
+            <h3 className="text-base font-semibold text-[var(--text)]">Nueva marca</h3>
+            <Input
+              label="Nombre *"
+              value={newBrandName}
+              onChange={e => setNewBrandName(e.target.value)}
+              placeholder="Ej: Arcor"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="secondary" onClick={() => setBrandSubModal(false)} disabled={savingBrand}>Cancelar</Button>
+              <Button onClick={handleBrandQuickSave} loading={savingBrand} disabled={!newBrandName.trim()}>Crear marca</Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Modal>
   )
 }
