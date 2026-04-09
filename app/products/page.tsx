@@ -309,7 +309,7 @@ export default function ProductsPage() {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar por nombre o código..."
+              placeholder="Buscar por nombre, código de barras o SKU..."
               className="w-full pl-9 pr-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
