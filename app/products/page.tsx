@@ -173,6 +173,7 @@ export default function ProductsPage() {
     pageRef.current = newPage
     setPage(newPage)
     fetchProducts()
+    document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [fetchProducts])
 
   const handleLimitChange = useCallback((newLimit: number) => {

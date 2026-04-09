@@ -44,6 +44,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const [form, setForm] = useState(emptyForm)
   const [barcodes, setBarcodes] = useState<string[]>([])
   const [newBarcode, setNewBarcode] = useState('')
+  const [selectedBarcodeIdx, setSelectedBarcodeIdx] = useState<number>(0)
   const newBarcodeRef = useRef<HTMLInputElement>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
@@ -110,7 +111,13 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     newBarcodeRef.current?.focus()
   }
 
-  const removeBarcode = (idx: number) => setBarcodes(prev => prev.filter((_, i) => i !== idx))
+  const removeBarcode = (idx: number) => {
+    setBarcodes(prev => {
+      const next = prev.filter((_, i) => i !== idx)
+      setSelectedBarcodeIdx(Math.min(idx, next.length - 1))
+      return next
+    })
+  }
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(f => ({ ...f, [field]: e.target.value }))
@@ -285,22 +292,24 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-[var(--text2)]">Códigos de barras (EAN)</label>
             {barcodes.length > 0 && (
-              <div className="flex flex-wrap gap-1 mb-1">
-                {barcodes.map((b, i) => (
-                  <span
-                    key={i}
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs mono bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)]"
-                  >
-                    {b}
-                    <button
-                      type="button"
-                      onClick={() => removeBarcode(i)}
-                      className="text-[var(--text3)] hover:text-[var(--danger)] transition-colors"
-                    >
-                      <X size={10} />
-                    </button>
-                  </span>
-                ))}
+              <div className="flex gap-1 mb-1">
+                <select
+                  value={selectedBarcodeIdx}
+                  onChange={e => setSelectedBarcodeIdx(Number(e.target.value))}
+                  className="flex-1 min-w-0 px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors mono"
+                >
+                  {barcodes.map((b, i) => (
+                    <option key={i} value={i}>{b}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => removeBarcode(selectedBarcodeIdx)}
+                  className="flex-shrink-0 px-2 py-2 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--danger,#ef4444)] hover:bg-[var(--surface2)] transition-colors"
+                  title="Eliminar código seleccionado"
+                >
+                  <X size={14} />
+                </button>
               </div>
             )}
             <div className="flex gap-1">
