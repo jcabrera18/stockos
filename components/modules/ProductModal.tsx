@@ -1,12 +1,12 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
-import { Plus } from 'lucide-react'
+import { Plus, X } from 'lucide-react'
 import type { Product, Category, Supplier } from '@/types'
 import type { PriceList } from '@/app/price-lists/page'
 import { SupplierModal } from '@/components/modules/SupplierModal'
@@ -30,7 +30,6 @@ const UNITS = [
 
 const emptyForm = {
   name: '',
-  barcode: '',
   sku: '',
   description: '',
   category_id: '',
@@ -43,6 +42,9 @@ const emptyForm = {
 
 export function ProductModal({ open, onClose, onSaved, product }: ProductModalProps) {
   const [form, setForm] = useState(emptyForm)
+  const [barcodes, setBarcodes] = useState<string[]>([])
+  const [newBarcode, setNewBarcode] = useState('')
+  const newBarcodeRef = useRef<HTMLInputElement>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([])
@@ -74,7 +76,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     if (product) {
       setForm({
         name: product.name,
-        barcode: product.barcode ?? '',
         sku: product.sku ?? '',
         description: product.description ?? '',
         category_id: product.category_id ?? '',
@@ -84,11 +85,32 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         unit: product.unit,
         price_mode: product.price_mode ?? 'fixed',
       })
+      // Cargar barcodes completos desde el servidor
+      api.get<Product>(`/api/products/${product.id}`)
+        .then(full => {
+          setBarcodes((full.product_barcodes ?? []).map(b => b.barcode))
+        })
+        .catch(() => {
+          setBarcodes(product.barcode ? [product.barcode] : [])
+        })
     } else {
       setForm(emptyForm)
+      setBarcodes([])
     }
+    setNewBarcode('')
     setErrors({})
   }, [product, open])
+
+  const addBarcode = () => {
+    const val = newBarcode.trim()
+    if (!val) return
+    if (barcodes.includes(val)) { toast.error('Ese código ya está cargado'); return }
+    setBarcodes(prev => [...prev, val])
+    setNewBarcode('')
+    newBarcodeRef.current?.focus()
+  }
+
+  const removeBarcode = (idx: number) => setBarcodes(prev => prev.filter((_, i) => i !== idx))
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm(f => ({ ...f, [field]: e.target.value }))
@@ -116,7 +138,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
 
       const payload = {
         name: form.name.trim(),
-        barcode: form.barcode.trim() || null,
+        barcodes,
         sku: form.sku.trim() || null,
         description: form.description.trim() || null,
         category_id: form.category_id || null,
@@ -257,14 +279,51 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
           />
         </div>
 
-        {/* Fila 2: Código de barras + SKU */}
+        {/* Fila 2: Códigos de barras + SKU */}
         <div className="grid grid-cols-2 gap-3">
-          <Input
-            label="Código de barras (EAN)"
-            value={form.barcode}
-            onChange={set('barcode')}
-            placeholder="7790895000152"
-          />
+          {/* Múltiples códigos de barras */}
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-[var(--text2)]">Códigos de barras (EAN)</label>
+            {barcodes.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-1">
+                {barcodes.map((b, i) => (
+                  <span
+                    key={i}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs mono bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)]"
+                  >
+                    {b}
+                    <button
+                      type="button"
+                      onClick={() => removeBarcode(i)}
+                      className="text-[var(--text3)] hover:text-[var(--danger)] transition-colors"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-1">
+              <input
+                ref={newBarcodeRef}
+                type="text"
+                value={newBarcode}
+                onChange={e => setNewBarcode(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addBarcode() } }}
+                placeholder="7790895000152"
+                className="flex-1 min-w-0 px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] transition-colors mono"
+              />
+              <button
+                type="button"
+                onClick={addBarcode}
+                className="flex-shrink-0 px-2 py-2 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors"
+                title="Agregar código"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+            <p className="text-xs text-[var(--text3)]">Presioná Enter o + para agregar cada código</p>
+          </div>
           <Input
             label="SKU interno"
             value={form.sku}

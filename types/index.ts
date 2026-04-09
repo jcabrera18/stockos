@@ -64,6 +64,7 @@ export interface Product {
   // joins
   categories?: { id: string; name: string }
   suppliers?: { id: string; name: string }
+  product_barcodes?: { barcode: string }[]
 }
 
 export interface StockSummary extends Product {
