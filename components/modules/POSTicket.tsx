@@ -83,31 +83,40 @@ export function POSTicket({
   const handlePrint = () => {
     const content = printRef.current
     if (!content) return
-    const win = window.open('', '_blank', 'width=350,height=800')
-    if (!win) return
-    win.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8">
-        <title>Ticket</title>
-        <style>
-          @page { size: 80mm auto; margin: 3mm 2mm; }
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body {
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 11px;
-            color: #000;
-            background: #fff;
-          }
-        </style>
-      </head>
-      <body>${content.innerHTML}</body>
-      </html>
-    `)
-    win.document.close()
-    win.focus()
-    setTimeout(() => { win.print(); win.close() }, 400)
+
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:80mm;height:0;border:0;'
+    document.body.appendChild(iframe)
+
+    const doc = iframe.contentDocument ?? iframe.contentWindow?.document
+    if (!doc) { document.body.removeChild(iframe); return }
+
+    doc.open()
+    doc.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Ticket</title>
+  <style>
+    @page { size: 80mm auto; margin: 2mm 0; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 80mm; background: #fff; }
+    body {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 11px;
+      color: #000;
+    }
+  </style>
+</head>
+<body>${content.innerHTML}</body>
+</html>`)
+    doc.close()
+
+    iframe.onload = () => {
+      iframe.contentWindow?.focus()
+      iframe.contentWindow?.print()
+      setTimeout(() => document.body.removeChild(iframe), 1000)
+    }
   }
 
   const handleShareWhatsApp = async () => {
@@ -201,9 +210,8 @@ export function POSTicket({
               fontSize: '11px',
               color: '#000',
               background: '#fff',
-              width: '100%',
-              maxWidth: '302px',
-              padding: '14px 12px',
+              width: '302px',
+              padding: '12px 10px',
               boxShadow: '0 1px 6px rgba(0,0,0,0.15)',
             }}
           >

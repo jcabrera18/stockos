@@ -614,7 +614,7 @@ export default function WarehousesPage() {
                     </thead>
                     <tbody className="divide-y divide-[var(--border)]">
                       {stockData.map(item => (
-                        <tr key={item.id} className="hover:bg-[var(--surface2)] transition-colors group">
+                        <tr key={item.id} onClick={() => { setAdjustItem(item); setAdjustModal(true) }} className="hover:bg-[var(--surface2)] transition-colors group cursor-pointer">
                           <td className="px-4 py-3">
                             <p className="font-medium text-[var(--text)]">{item.product_name ?? item.name}</p>
                             {item.barcode && <p className="text-xs mono text-[var(--text3)]">{item.barcode}</p>}
