@@ -156,7 +156,8 @@ export function TransferModal({ open, onClose, onSaved, warehouses }: TransferMo
         {/* Lista de ítems */}
         {items.length > 0 && (
           <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[340px]">
               <thead>
                 <tr className="border-b border-[var(--border)]">
                   <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)]">Producto</th>
@@ -187,6 +188,7 @@ export function TransferModal({ open, onClose, onSaved, warehouses }: TransferMo
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
 

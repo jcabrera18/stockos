@@ -13,10 +13,11 @@ interface UserProfile {
   email?:       string
   full_name?:   string
   business?: {
-    name:    string
-    cuit:    string | null
-    address: string | null
-    phone:   string | null
+    name:                   string
+    cuit:                   string | null
+    address:                string | null
+    phone:                  string | null
+    shipping_price_default: number
   } | null
 }
 

@@ -6,7 +6,7 @@ import { formatCurrency } from '@/lib/utils'
 import type { Product } from '@/types'
 import type { CustomerSummary } from '@/app/customers/page'
 import type { PriceList } from '@/app/price-lists/page'
-import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle, RefreshCw, Truck } from 'lucide-react'
 import { toast } from 'sonner'
 import { POSTicket } from '@/components/modules/POSTicket'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
@@ -32,6 +32,7 @@ interface CompletedSale {
   total: number
   subtotal: number
   discount: number
+  shipping_amount: number
   payment_method: string
   installments: number
   items: CartItem[]
@@ -104,6 +105,9 @@ export default function POSPage() {
   const [warehouses, setWarehouses] = useState<{ id: string; name: string; is_default: boolean }[]>([])
   const [selectedWarehouse, setSelectedWarehouse] = useState<{ id: string; name: string } | null>(null)
 
+  const [shippingEnabled, setShippingEnabled] = useState(false)
+  const [shippingAmount, setShippingAmount] = useState(0)
+
   const [cajaWarning, setCajaWarning] = useState(false)
   const [invoiceModal, setInvoiceModal] = useState(false)
   const [mobileView, setMobileView] = useState<'search' | 'cart'>('search')
@@ -116,6 +120,13 @@ export default function POSPage() {
 
   const { workstation, setWorkstation, loaded } = useWorkstation()
   const { user } = useAuth()
+
+  // Inicializar monto de envío desde config del negocio
+  useEffect(() => {
+    if (user?.business?.shipping_price_default) {
+      setShippingAmount(user.business.shipping_price_default)
+    }
+  }, [user?.business?.shipping_price_default])
 
   // Cache de promociones activas — se cargan al montar el POS
   const [promotions, setPromotions] = useState<Promotion[]>([])
@@ -435,7 +446,8 @@ export default function POSPage() {
   const removeItem = (id: string) => setCart(prev => prev.filter(i => i.product.id !== id))
 
   const subtotal = cart.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
-  const total = Math.max(0, subtotal - saleDiscount)
+  const shipping = shippingEnabled ? shippingAmount : 0
+  const total = Math.max(0, subtotal - saleDiscount) + shipping
   const hasMissingCustomPrice = cart.some(i => i.product.price_mode === 'custom' && i.unit_price === 0)
 
   const handleConfirm = async () => {
@@ -445,6 +457,7 @@ export default function POSPage() {
       const payload = {
         items: cart.map(i => ({ product_id: i.product.id, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount, subtotal: i.unit_price * i.quantity - i.discount })),
         discount: saleDiscount,
+        shipping_amount: shipping,
         payment_method: paymentMethod,
         installments: paymentMethod === 'credito' ? installments : 1,
         price_list_id: selectedList?.id ?? null,
@@ -493,9 +506,9 @@ console.log('workstation:', workstation)
         invoiceId = inv.id
       } catch { /* no bloquear la venta si falla el ticket */ }
 
-      setCompletedSale({ ...sale, items: cart, invoice_id: invoiceId })
+      setCompletedSale({ ...sale, items: cart, invoice_id: invoiceId, shipping_amount: shipping })
       localStorage.removeItem(POS_CART_KEY)
-      setCart([]); setSaleDiscount(0); setSelectedCustomer(null); setCustomerQuery('')
+      setCart([]); setSaleDiscount(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
       setStep('ticket')
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al procesar la venta')
@@ -504,7 +517,7 @@ console.log('workstation:', workstation)
 
   const handleNewSale = () => {
     localStorage.removeItem(POS_CART_KEY)
-    setCart([]); setSaleDiscount(0); setPaymentMethod('efectivo'); setInstallments(1)
+    setCart([]); setSaleDiscount(0); setShippingEnabled(false); setPaymentMethod('efectivo'); setInstallments(1)
     setCompletedSale(null); setSelectedCustomer(null); setCustomerQuery('')
     setStep('cart')
     setTimeout(() => searchRef.current?.focus(), 100)
@@ -728,7 +741,7 @@ console.log('workstation:', workstation)
       </div>
 
       {/* Panel derecho — carrito */}
-      <div className={`sm:w-[440px] flex-shrink-0 flex flex-col bg-[var(--surface)] pb-14 sm:pb-0 ${mobileView === 'search' ? 'hidden sm:flex' : 'flex flex-1'}`}>
+      <div className={`sm:w-[440px] flex-shrink-0 flex flex-col min-h-0 bg-[var(--surface)] pb-14 sm:pb-0 ${mobileView === 'search' ? 'hidden sm:flex' : 'flex flex-1'}`}>
 
         {/* Cliente */}
         <div className="px-3 py-3 border-b border-[var(--border)]">
@@ -900,10 +913,43 @@ console.log('workstation:', workstation)
                   className="w-24 text-sm mono text-right bg-[var(--surface2)] border border-[var(--border)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--accent)]" />
               </div>
             </div>
-            {saleDiscount > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-[var(--text3)]">Subtotal</span>
-                <span className="mono text-[var(--text2)]">{formatCurrency(subtotal)}</span>
+            {/* Envío */}
+            <div className="flex items-center justify-between gap-3">
+              <button
+                onClick={() => setShippingEnabled(v => !v)}
+                className={`flex items-center gap-1.5 text-sm font-medium transition-colors ${shippingEnabled ? 'text-[var(--accent)]' : 'text-[var(--text3)]'}`}
+              >
+                <Truck size={14} />
+                Envío
+              </button>
+              {shippingEnabled && (
+                <div className="flex items-center gap-1">
+                  <span className="text-sm text-[var(--text3)]">$</span>
+                  <input type="number" min="0" step="0.01" value={shippingAmount || ''} placeholder="0"
+                    onChange={e => setShippingAmount(Math.max(0, Number(e.target.value) || 0))}
+                    onFocus={e => e.target.select()}
+                    className="w-24 text-sm mono text-right bg-[var(--surface2)] border border-[var(--accent)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--accent)]" />
+                </div>
+              )}
+            </div>
+            {(saleDiscount > 0 || shippingEnabled) && (
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-[var(--text3)]">Subtotal productos</span>
+                  <span className="mono text-[var(--text2)]">{formatCurrency(subtotal)}</span>
+                </div>
+                {saleDiscount > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-[var(--text3)]">Descuento</span>
+                    <span className="mono text-[var(--text2)]">-{formatCurrency(saleDiscount)}</span>
+                  </div>
+                )}
+                {shippingEnabled && (
+                  <div className="flex justify-between">
+                    <span className="text-[var(--text3)]">Envío</span>
+                    <span className="mono text-[var(--text2)]">+{formatCurrency(shippingAmount)}</span>
+                  </div>
+                )}
               </div>
             )}
             <div className="flex justify-between items-center py-2 border-t border-[var(--border)]">

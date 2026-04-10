@@ -24,6 +24,7 @@ interface SaleDetail {
   total: number
   subtotal: number
   discount: number
+  shipping_amount?: number
   payment_method: string
   installments: number
   notes?: string
@@ -198,12 +199,17 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
         ${itemsHtml}
         ${sep}
         <div style="line-height:1.6;">
-          ${sale.discount > 0 ? `
+          ${(sale.discount > 0 || (sale.shipping_amount ?? 0) > 0) ? `
           <div style="display:flex;justify-content:space-between;">
             <span>Subtotal</span><span>${formatCurrency(itemsSubtotal)}</span>
-          </div>
+          </div>` : ''}
+          ${sale.discount > 0 ? `
           <div style="display:flex;justify-content:space-between;">
             <span>Descuento</span><span>-${formatCurrency(sale.discount)}</span>
+          </div>` : ''}
+          ${(sale.shipping_amount ?? 0) > 0 ? `
+          <div style="display:flex;justify-content:space-between;">
+            <span>Envío</span><span>+${formatCurrency(sale.shipping_amount!)}</span>
           </div>` : ''}
           <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;margin-top:2px;">
             <span>TOTAL</span><span>${formatCurrency(sale.total)}</span>
@@ -396,7 +402,8 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
 
           {/* Ítems */}
           <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[400px]">
               <thead>
                 <tr className="border-b border-[var(--border)]">
                   <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)]">Producto</th>
@@ -436,12 +443,19 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
                     <td className="px-3 py-2 text-right mono text-[var(--danger)]">− {formatCurrency(sale.discount)}</td>
                   </tr>
                 )}
+                {(sale.shipping_amount ?? 0) > 0 && (
+                  <tr className="border-t border-[var(--border)]">
+                    <td colSpan={3} className="px-3 py-2 text-sm text-[var(--text3)]">Envío</td>
+                    <td className="px-3 py-2 text-right mono text-[var(--text2)]">+ {formatCurrency(sale.shipping_amount!)}</td>
+                  </tr>
+                )}
                 <tr className="border-t-2 border-[var(--border)]">
                   <td colSpan={3} className="px-3 py-2.5 text-sm font-semibold text-[var(--text)]">Total</td>
                   <td className="px-3 py-2.5 text-right mono font-bold text-[var(--accent)]">{formatCurrency(sale.total)}</td>
                 </tr>
               </tfoot>
             </table>
+            </div>
           </div>
 
           {/* Notas */}

@@ -335,7 +335,8 @@ export function BulkPriceModal({ open, onClose, onApplied }: BulkPriceModalProps
 
           {/* Tabla de cambios */}
           <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden max-h-72 overflow-y-auto">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[520px]">
               <thead className="sticky top-0 bg-[var(--surface2)] z-10">
                 <tr className="border-b border-[var(--border)]">
                   <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)]">Producto</th>
@@ -374,6 +375,7 @@ export function BulkPriceModal({ open, onClose, onApplied }: BulkPriceModalProps
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
 
           <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-2 border-t border-[var(--border)]">

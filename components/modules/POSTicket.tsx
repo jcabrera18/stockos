@@ -21,6 +21,7 @@ interface TicketSale {
   total: number
   subtotal: number
   discount: number
+  shipping_amount?: number
   payment_method: string
   installments: number
   items: CartItem[]
@@ -285,17 +286,23 @@ export function POSTicket({
 
             {/* ── Totales ── */}
             <div style={{ lineHeight: '1.6' }}>
+              {(sale.discount > 0 || (sale.shipping_amount ?? 0) > 0) && (
+                <div style={row}>
+                  <span>Subtotal</span>
+                  <span>{formatCurrency(itemsSubtotal)}</span>
+                </div>
+              )}
               {sale.discount > 0 && (
-                <>
-                  <div style={row}>
-                    <span>Subtotal</span>
-                    <span>{formatCurrency(itemsSubtotal)}</span>
-                  </div>
-                  <div style={row}>
-                    <span>Descuento</span>
-                    <span>-{formatCurrency(sale.discount)}</span>
-                  </div>
-                </>
+                <div style={row}>
+                  <span>Descuento</span>
+                  <span>-{formatCurrency(sale.discount)}</span>
+                </div>
+              )}
+              {(sale.shipping_amount ?? 0) > 0 && (
+                <div style={row}>
+                  <span>Envío</span>
+                  <span>+{formatCurrency(sale.shipping_amount!)}</span>
+                </div>
               )}
               <div style={{ ...row, fontWeight: 'bold', fontSize: '14px', marginTop: '2px' }}>
                 <span>TOTAL</span>
