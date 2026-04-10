@@ -184,6 +184,7 @@ export default function OrdersPage() {
     orders: { id: string; customer_name: string; status: string; quantity: number }[]
   }
   const [pickingModal, setPickingModal] = useState(false)
+  const [byClientModal, setByClientModal] = useState(false)
   const [pickingItems, setPickingItems] = useState<PickingItem[]>([])
   const [loadingPicking, setLoadingPicking] = useState(false)
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
@@ -206,6 +207,125 @@ export default function OrdersPage() {
     setPickingWarehouseId(wid)
     setPickingModal(true)
     fetchPickingList(wid)
+  }
+
+  const openByClientList = () => {
+    const defWh = warehouses.find(w => w.is_default)
+    const wid = defWh?.id ?? warehouses[0]?.id ?? ''
+    setPickingWarehouseId(wid)
+    setByClientModal(true)
+    fetchPickingList(wid)
+  }
+
+  const printPickingList = () => {
+    const win = window.open('', '_blank', 'width=820,height=1000')
+    if (!win) return
+    const date = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const totalOrders = new Set(pickingItems.flatMap(i => i.orders.map(o => o.id))).size
+    const rows = pickingItems.map((item, idx) =>
+      `<tr>
+        <td class="num">${idx + 1}</td>
+        <td>
+          <strong>${item.name}</strong>
+          ${item.barcode ? `<br><span class="small">${item.barcode}</span>` : ''}
+        </td>
+        <td class="orders">${item.orders.map(o => `<span>${o.customer_name} <span class="qty">×${o.quantity}</span></span>`).join('')}</td>
+        <td class="total">${item.total_qty} <span class="unit">${item.unit}</span></td>
+      </tr>`
+    ).join('')
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+      <title>Lista de carga</title>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0 }
+        body { font-family: Arial, sans-serif; padding: 24px 28px; color: #111; font-size: 12px }
+        @page { size: A4 portrait; margin: 15mm }
+        h1 { font-size: 20px; font-weight: 700; margin-bottom: 3px }
+        .meta { font-size: 11px; color: #666; margin-bottom: 18px }
+        table { width: 100%; border-collapse: collapse }
+        th { background: #f0f0f0; text-align: left; padding: 7px 10px; font-size: 10px; text-transform: uppercase; color: #444; border-bottom: 2px solid #ccc; letter-spacing: .4px }
+        td { padding: 7px 10px; border-bottom: 1px solid #eee; vertical-align: top }
+        tr:nth-child(even) td { background: #fafafa }
+        .num { color: #bbb; width: 28px; font-size: 11px }
+        .orders { font-size: 10px; color: #555; display: flex; flex-direction: column; gap: 2px }
+        .orders span { display: block }
+        .qty { color: #1a56db; font-weight: 600 }
+        .total { text-align: right; font-size: 18px; font-weight: 700; color: #1a56db; white-space: nowrap; width: 70px }
+        .unit { font-size: 10px; color: #888; font-weight: 400 }
+        .small { font-size: 10px; color: #aaa }
+        .footer { margin-top: 20px; font-size: 10px; color: #bbb; text-align: right; border-top: 1px solid #eee; padding-top: 8px }
+        @media print { .footer { position: fixed; bottom: 10mm; width: 100% } }
+      </style>
+    </head><body>
+      <h1>Lista de carga</h1>
+      <p class="meta">${date} &nbsp;·&nbsp; ${pickingItems.length} productos &nbsp;·&nbsp; ${totalOrders} pedidos confirmados</p>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Producto</th>
+            <th>Pedidos</th>
+            <th style="text-align:right">Total</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <div class="footer">Impreso el ${date} &nbsp;·&nbsp; StockOS</div>
+    </body></html>`)
+    win.document.close()
+    setTimeout(() => win.print(), 300)
+  }
+
+  const printByClient = () => {
+    const byCustomer: Record<string, { name: string; items: { product: string; barcode?: string; unit: string; qty: number }[] }> = {}
+    pickingItems.forEach(item => {
+      item.orders.forEach(o => {
+        if (!byCustomer[o.customer_name]) byCustomer[o.customer_name] = { name: o.customer_name, items: [] }
+        byCustomer[o.customer_name].items.push({ product: item.name, barcode: item.barcode, unit: item.unit, qty: o.quantity })
+      })
+    })
+    const win = window.open('', '_blank', 'width=820,height=1000')
+    if (!win) return
+    const date = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const sections = Object.values(byCustomer).map(customer =>
+      `<div class="customer">
+        <h2>${customer.name}</h2>
+        <table>
+          <thead><tr><th>Producto</th><th style="text-align:right">Cantidad</th></tr></thead>
+          <tbody>${customer.items.map(i =>
+            `<tr>
+              <td>${i.product}${i.barcode ? `<br><span class="small">${i.barcode}</span>` : ''}</td>
+              <td class="qty">${i.qty} <span class="unit">${i.unit}</span></td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`
+    ).join('')
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+      <title>Pedidos por cliente</title>
+      <style>
+        * { box-sizing: border-box; margin: 0; padding: 0 }
+        body { font-family: Arial, sans-serif; padding: 24px 28px; color: #111; font-size: 12px }
+        @page { size: A4 portrait; margin: 15mm }
+        h1 { font-size: 20px; font-weight: 700; margin-bottom: 3px }
+        .meta { font-size: 11px; color: #666; margin-bottom: 18px }
+        .customer { margin-bottom: 22px; page-break-inside: avoid }
+        h2 { font-size: 14px; font-weight: 700; color: #1a56db; border-bottom: 2px solid #1a56db; padding-bottom: 4px; margin-bottom: 6px }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 4px }
+        th { background: #f0f0f0; text-align: left; padding: 5px 8px; font-size: 10px; text-transform: uppercase; color: #444; border-bottom: 1px solid #ccc }
+        td { padding: 5px 8px; border-bottom: 1px solid #eee; vertical-align: top }
+        .qty { text-align: right; font-size: 15px; font-weight: 700; color: #1a56db; width: 80px }
+        .unit { font-size: 10px; color: #888; font-weight: 400 }
+        .small { font-size: 10px; color: #aaa }
+        .footer { margin-top: 20px; font-size: 10px; color: #bbb; text-align: right; border-top: 1px solid #eee; padding-top: 8px }
+      </style>
+    </head><body>
+      <h1>Pedidos por cliente</h1>
+      <p class="meta">${date} &nbsp;·&nbsp; ${Object.keys(byCustomer).length} clientes &nbsp;·&nbsp; pedidos confirmados</p>
+      ${sections}
+      <div class="footer">Impreso el ${date} &nbsp;·&nbsp; StockOS</div>
+    </body></html>`)
+    win.document.close()
+    setTimeout(() => win.print(), 300)
   }
 
   const printOrder = (d: OrderDetail) => {
@@ -577,6 +697,9 @@ export default function OrdersPage() {
           <>
             <Button variant="secondary" onClick={openPickingList}>
               <ClipboardList size={15} /> <span className="hidden sm:inline">Lista de carga</span>
+            </Button>
+            <Button variant="secondary" onClick={openByClientList}>
+              <FileText size={15} /> <span className="hidden sm:inline">Por cliente</span>
             </Button>
             <Button onClick={() => setNewOrderModal(true)}>
               <Plus size={15} /> Nuevo pedido
@@ -1315,10 +1438,10 @@ export default function OrdersPage() {
                   )}
                 </div>
                 <button
-                  onClick={() => window.print()}
+                  onClick={printPickingList}
                   className="flex items-center gap-1.5 text-xs text-[var(--text3)] hover:text-[var(--text)] transition-colors"
                 >
-                  <Printer size={13} /> Imprimir
+                  <Printer size={13} /> Imprimir A4
                 </button>
               </div>
 
@@ -1388,6 +1511,94 @@ export default function OrdersPage() {
                   ✓ Todo cargado al camión
                 </p>
               )}
+              <div className="pb-6" />
+            </div>
+          )
+        })()}
+      </Modal>
+
+      {/* ── Modal: Por cliente ── */}
+      <Modal
+        open={byClientModal}
+        onClose={() => setByClientModal(false)}
+        title="Pedidos por cliente"
+        size="lg"
+      >
+        {/* Selector de depósito */}
+        {warehouses.length > 1 && (
+          <div className="flex gap-2 flex-wrap items-center mb-4">
+            <span className="text-xs text-[var(--text3)]">Depósito:</span>
+            {warehouses.map(w => (
+              <button key={w.id}
+                onClick={() => { setPickingWarehouseId(w.id); fetchPickingList(w.id) }}
+                className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${pickingWarehouseId === w.id
+                  ? 'bg-[var(--accent)] text-white'
+                  : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                }`}>
+                {w.name}
+              </button>
+            ))}
+          </div>
+        )}
+        {loadingPicking ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-6 h-6 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : pickingItems.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-2 text-[var(--text3)]">
+            <FileText size={32} className="opacity-40" />
+            <p className="text-sm">No hay pedidos confirmados pendientes</p>
+          </div>
+        ) : (() => {
+          // Agrupar por cliente
+          const byCustomer: Record<string, { name: string; items: { product: string; barcode?: string; unit: string; qty: number }[] }> = {}
+          pickingItems.forEach(item => {
+            item.orders.forEach(o => {
+              if (!byCustomer[o.customer_name]) byCustomer[o.customer_name] = { name: o.customer_name, items: [] }
+              byCustomer[o.customer_name].items.push({ product: item.name, barcode: item.barcode, unit: item.unit, qty: o.quantity })
+            })
+          })
+          const customers = Object.values(byCustomer)
+          return (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-[var(--text3)]">
+                  <span className="font-semibold text-[var(--text)] mono">{customers.length}</span> clientes ·{' '}
+                  <span className="font-semibold text-[var(--text)] mono">
+                    {new Set(pickingItems.flatMap(i => i.orders.map(o => o.id))).size}
+                  </span>{' '}pedidos confirmados
+                </p>
+                <button
+                  onClick={printByClient}
+                  className="flex items-center gap-1.5 text-xs text-[var(--text3)] hover:text-[var(--text)] transition-colors"
+                >
+                  <Printer size={13} /> Imprimir A4
+                </button>
+              </div>
+              <div className="space-y-3">
+                {customers.map(customer => (
+                  <div key={customer.name} className="border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
+                    <div className="px-4 py-2.5 bg-[var(--surface2)] border-b border-[var(--border)]">
+                      <p className="font-semibold text-sm text-[var(--text)]">{customer.name}</p>
+                      <p className="text-xs text-[var(--text3)]">{customer.items.length} producto{customer.items.length !== 1 ? 's' : ''}</p>
+                    </div>
+                    <div className="divide-y divide-[var(--border)]">
+                      {customer.items.map((item, idx) => (
+                        <div key={idx} className="px-4 py-2.5 flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-[var(--text)] truncate">{item.product}</p>
+                            {item.barcode && <p className="text-xs mono text-[var(--text3)]">{item.barcode}</p>}
+                          </div>
+                          <div className="flex-shrink-0 text-right">
+                            <p className="text-xl font-bold mono text-[var(--accent)]">{item.qty}</p>
+                            <p className="text-xs text-[var(--text3)]">{item.unit}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
               <div className="pb-6" />
             </div>
           )

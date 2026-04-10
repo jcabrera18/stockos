@@ -164,17 +164,34 @@ export default function DashboardPage() {
   const [loading,    setLoading]    = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
+  // ── Tipos para respuestas consolidadas ──
+  type DashboardAllResponse = {
+    stats:               DashboardStats
+    recent_sales:        Sale[]
+    low_stock:           typeof lowStock
+    orders_by_day:       OrdersByDay[]
+    sales_by_hour:       SalesByHour[]
+    sales_last_30:       SalesLast30[]
+    payment_methods:     PaymentMethod[]
+    top_products:        TopProduct[]
+    week_comparison:     WeekComparison
+    month_comparison:    MonthComparison
+    margin:              MarginData
+    accounts_receivable: AccountsReceivable
+  }
+  type AnalysisResponse = {
+    sales_by_category:  SalesByCategory[]
+    top_products_chart: TopProductChart[]
+  }
+
   // ── Fetch análisis por período ──
   const fetchAnalysis = useCallback(async (period: AnalysisPeriod) => {
     setAnalysisLoading(true)
     try {
       const { from, to } = getAnalysisDates(period)
-      const [cats, top] = await Promise.all([
-        api.get<SalesByCategory[]>('/api/dashboard/sales-by-category', { from, to }),
-        api.get<TopProductChart[]>('/api/dashboard/top-products-chart', { from, to }),
-      ])
-      setSalesByCategory(cats)
-      setTopProductsChart(top)
+      const res = await api.get<AnalysisResponse>('/api/dashboard/analysis', { from, to })
+      setSalesByCategory(res.sales_by_category)
+      setTopProductsChart(res.top_products_chart)
     } catch (err) { console.error(err) }
     finally { setAnalysisLoading(false) }
   }, [])
@@ -184,24 +201,16 @@ export default function DashboardPage() {
     if (!silent) setLoading(true)
     else setRefreshing(true)
     try {
-      const [s, sales, stock, ordersDay, byHour, last30, payments, top, week, month, mar, acc] = await Promise.all([
-        api.get<DashboardStats>('/api/dashboard/stats', { today_from: getPeriodDates('today').from }),
-        api.get<Sale[]>('/api/dashboard/recent-sales'),
-        api.get<typeof lowStock>('/api/dashboard/low-stock'),
-        api.get<OrdersByDay[]>('/api/dashboard/orders-by-day'),
-        api.get<SalesByHour[]>('/api/dashboard/sales-by-hour'),
-        api.get<SalesLast30[]>('/api/dashboard/sales-last-30'),
-        api.get<PaymentMethod[]>('/api/dashboard/payment-methods'),
-        api.get<TopProduct[]>('/api/dashboard/top-products'),
-        api.get<WeekComparison>('/api/dashboard/week-comparison', { week_from: getLocalWeekStart() }),
-        api.get<MonthComparison>('/api/dashboard/month-comparison', { month_from: getLocalMonthStart() }),
-        api.get<MarginData>('/api/dashboard/margin'),
-        api.get<AccountsReceivable>('/api/dashboard/accounts-receivable'),
-      ])
-      setStats(s); setRecentSales(sales); setLowStock(stock)
-      setOrdersByDay(ordersDay); setSalesByHour(byHour); setSalesLast30(last30)
-      setPaymentMethods(payments); setTopProducts(top)
-      setWeekComp(week); setMonthComp(month); setMargin(mar); setAccounts(acc)
+      const res = await api.get<DashboardAllResponse>('/api/dashboard/all', {
+        today_from: getPeriodDates('today').from,
+        week_from:  getLocalWeekStart(),
+        month_from: getLocalMonthStart(),
+      })
+      setStats(res.stats);           setRecentSales(res.recent_sales);   setLowStock(res.low_stock)
+      setOrdersByDay(res.orders_by_day); setSalesByHour(res.sales_by_hour); setSalesLast30(res.sales_last_30)
+      setPaymentMethods(res.payment_methods); setTopProducts(res.top_products)
+      setWeekComp(res.week_comparison); setMonthComp(res.month_comparison)
+      setMargin(res.margin); setAccounts(res.accounts_receivable)
       await fetchAnalysis(analysisPeriodRef.current)
     } catch (err) { console.error(err) }
     finally { setLoading(false); setRefreshing(false) }
