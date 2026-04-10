@@ -273,8 +273,9 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
 
       <div class="section">
         <div class="label">Receptor</div>
-        <div style="font-size:14px;font-weight:600">${invoice.receptor_name ?? 'Consumidor Final'}</div>
-        ${invoice.receptor_cuit ? `<div class="mono" style="font-size:12px;color:#6a6a64">CUIT: ${invoice.receptor_cuit}</div>` : ''}
+        <div style="font-size:14px;font-weight:600">${invoice.receptor_name ?? customer?.full_name ?? 'Consumidor Final'}</div>
+        ${invoice.receptor_cuit ? `<div class="mono" style="font-size:12px;color:#6a6a64">CUIT: ${invoice.receptor_cuit}</div>` : customer?.full_name && !invoice.receptor_cuit ? '' : ''}
+        ${invoice.receptor_address ? `<div style="font-size:12px;color:#6a6a64">${invoice.receptor_address}</div>` : ''}
         <div style="font-size:12px;color:#6a6a64">Condición IVA: ${invoice.receptor_iva_condition}</div>
       </div>
 

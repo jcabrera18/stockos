@@ -205,12 +205,13 @@ function InvoicesPageInner() {
   }, [data])
 
   const openConvert = (invoice: Invoice) => {
+    const customer = invoice.customers as { full_name: string; document?: string } | undefined
     setConvertTarget(invoice)
     setConvertType('B')
-    setReceptorCuit('')
-    setReceptorName('')
-    setReceptorAddress('')
-    setReceptorIva('CF')
+    setReceptorName(invoice.receptor_name ?? customer?.full_name ?? '')
+    setReceptorCuit(invoice.receptor_cuit ?? customer?.document ?? '')
+    setReceptorAddress(invoice.receptor_address ?? '')
+    setReceptorIva(invoice.receptor_iva_condition ?? 'CF')
     setConvertModal(true)
   }
 
@@ -277,8 +278,9 @@ function InvoicesPageInner() {
 
       <div class="section">
         <div class="label">Receptor</div>
-        <div style="font-size:14px;font-weight:600">${invoice.receptor_name ?? 'Consumidor Final'}</div>
-        ${invoice.receptor_cuit ? `<div class="mono" style="font-size:12px;color:#6a6a64">CUIT: ${invoice.receptor_cuit}</div>` : ''}
+        <div style="font-size:14px;font-weight:600">${invoice.receptor_name ?? (invoice.customers as { full_name: string } | undefined)?.full_name ?? 'Consumidor Final'}</div>
+        ${invoice.receptor_cuit ? `<div class="mono" style="font-size:12px;color:#6a6a64">CUIT: ${invoice.receptor_cuit}</div>` : (invoice.customers as { document?: string } | undefined)?.document ? `<div class="mono" style="font-size:12px;color:#6a6a64">Doc: ${(invoice.customers as { document: string }).document}</div>` : ''}
+        ${invoice.receptor_address ? `<div style="font-size:12px;color:#6a6a64">${invoice.receptor_address}</div>` : ''}
         <div style="font-size:12px;color:#6a6a64">Condición IVA: ${invoice.receptor_iva_condition}</div>
       </div>
 
@@ -497,12 +499,21 @@ function InvoicesPageInner() {
               </div>
             </div>
 
-            {/* Receptor */}
+            {/* Receptor / Cliente */}
             <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3">
-              <p className="text-xs font-medium text-[var(--text3)] mb-2">Receptor</p>
-              <p className="text-sm font-medium text-[var(--text)]">
-                {selectedInvoice.receptor_name ?? 'Consumidor Final'}
+              <p className="text-xs font-medium text-[var(--text3)] mb-2">
+                {selectedInvoice.customer_id ? 'Cliente' : 'Receptor'}
               </p>
+              <p className="text-sm font-medium text-[var(--text)]">
+                {selectedInvoice.receptor_name
+                  ?? (selectedInvoice.customers as { full_name: string } | undefined)?.full_name
+                  ?? 'Consumidor Final'}
+              </p>
+              {(selectedInvoice.customers as { document?: string } | undefined)?.document && !selectedInvoice.receptor_cuit && (
+                <p className="text-xs text-[var(--text3)] mono mt-0.5">
+                  Doc: {(selectedInvoice.customers as { document: string }).document}
+                </p>
+              )}
               {selectedInvoice.receptor_cuit && (
                 <p className="text-xs text-[var(--text3)] mono mt-0.5">CUIT: {selectedInvoice.receptor_cuit}</p>
               )}

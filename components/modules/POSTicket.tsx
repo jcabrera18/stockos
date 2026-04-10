@@ -47,6 +47,7 @@ interface InvoiceInfo {
 
 interface POSTicketProps {
   sale: TicketSale
+  invoiceId?: string
   onNewSale: () => void
   onClose: () => void
   customerPhone?: string
@@ -58,7 +59,7 @@ interface POSTicketProps {
 }
 
 export function POSTicket({
-  sale, onNewSale, onClose,
+  sale, invoiceId, onNewSale, onClose,
   customerPhone, customerName,
   business, branchName, registerName, sellerName,
 }: POSTicketProps) {
@@ -73,10 +74,14 @@ export function POSTicket({
 
   useEffect(() => {
     if (!sale.id) return
-    api.get<InvoiceInfo>(`/api/invoices/sale/${sale.id}`)
+    // Si ya tenemos el invoice_id del POS, fetcheamos directo por ID
+    const url = invoiceId
+      ? `/api/invoices/${invoiceId}`
+      : `/api/invoices/sale/${sale.id}`
+    api.get<InvoiceInfo>(url)
       .then((inv) => { if (inv) setInvoice(inv) })
       .catch(() => {})
-  }, [sale.id])
+  }, [sale.id, invoiceId])
 
   const isInvoiced = !!(invoice && invoice.afip_status === 'authorized' && invoice.cae)
 
@@ -361,8 +366,9 @@ export function POSTicket({
             </button>
             <button
               onClick={() => {
-                if (invoice?.id) {
-                  router.push(`/invoices?facturar=${invoice.id}`)
+                const id = invoiceId ?? invoice?.id
+                if (id) {
+                  router.push(`/invoices?facturar=${id}`)
                 } else {
                   router.push(`/invoices?sale_id=${sale.id}`)
                 }

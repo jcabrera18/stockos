@@ -234,9 +234,8 @@ export default function ProductsPage() {
     setMinPriceInput(''); setMaxPriceInput('')
   }
 
-  function getCategoryPath(categoryId: string | undefined, categories: Category[]): string {
+  function getCategoryPath(categoryId: string | undefined, map: Map<string, Category>): string {
     if (!categoryId) return '—'
-    const map = new Map(categories.map(c => [c.id, c]))
     const path: string[] = []
     let current = map.get(categoryId)
     while (current) {
@@ -487,7 +486,7 @@ export default function ProductsPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
-                        {getCategoryPath(product.category_id, allCategories)}
+                        {getCategoryPath(product.category_id, categoryMap)}
                       </td>
                       <td className="px-4 py-3 text-right mono text-[var(--text2)] hidden sm:table-cell">
                         {formatCurrency(product.cost_price)}

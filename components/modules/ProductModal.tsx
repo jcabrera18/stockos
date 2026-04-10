@@ -28,6 +28,14 @@ const UNITS = [
   { value: 'pack', label: 'Pack' },
 ]
 
+// Cache a nivel módulo: persiste entre aperturas del modal en la misma sesión
+const _refCache: {
+  categories: Category[] | null
+  suppliers:  Supplier[] | null
+  priceLists: import('@/app/price-lists/page').PriceList[] | null
+  brands:     { id: string; name: string }[] | null
+} = { categories: null, suppliers: null, priceLists: null, brands: null }
+
 const emptyForm = {
   name: '',
   sku: '',
@@ -63,13 +71,22 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
 
   const isEdit = !!product
 
-  // Cargar categorías y proveedores
+  // Cargar datos de referencia con cache de sesión (evita refetch en cada apertura)
   useEffect(() => {
     if (!open) return
-    api.get<Category[]>('/api/products/categories').then(setCategories).catch(() => { })
-    api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => { })
-    api.get<PriceList[]>('/api/price-lists').then(setPriceLists).catch(() => { })
-    api.get<{ id: string; name: string }[]>('/api/brands').then(setBrands).catch(() => { })
+    const load = async () => {
+      const [cats, sups, lists, brnds] = await Promise.all([
+        _refCache.categories ?? api.get<Category[]>('/api/products/categories'),
+        _refCache.suppliers  ?? api.get<Supplier[]>('/api/purchases/suppliers'),
+        _refCache.priceLists ?? api.get<PriceList[]>('/api/price-lists'),
+        _refCache.brands     ?? api.get<{ id: string; name: string }[]>('/api/brands'),
+      ])
+      _refCache.categories = cats; setCategories(cats)
+      _refCache.suppliers  = sups; setSuppliers(sups)
+      _refCache.priceLists = lists; setPriceLists(lists)
+      _refCache.brands     = brnds; setBrands(brnds)
+    }
+    load().catch(() => {})
   }, [open])
 
   // Pre-cargar datos al editar

@@ -442,11 +442,12 @@ export default function DashboardPage() {
                   </ResponsiveContainer>
                 </div>
                 <div className="flex-1 min-w-0 space-y-2">
-                  {paymentMethods
+                  {(() => {
+                    const pmTotal = paymentMethods.reduce((a, p) => a + p.total, 0)
+                    return [...paymentMethods]
                     .sort((a, b) => b.total - a.total)
                     .map((pm, i) => {
-                      const total = paymentMethods.reduce((a, p) => a + p.total, 0)
-                      const pct = total > 0 ? Math.round(pm.total / total * 100) : 0
+                      const pct = pmTotal > 0 ? Math.round(pm.total / pmTotal * 100) : 0
                       return (
                         <div key={pm.method}>
                           <div className="flex justify-between text-xs mb-0.5">
@@ -461,7 +462,8 @@ export default function DashboardPage() {
                           </div>
                         </div>
                       )
-                    })}
+                    })
+                  })()}
                 </div>
               </div>
             )}

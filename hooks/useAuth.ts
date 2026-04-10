@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { api } from '@/lib/api'
 
+
 interface UserProfile {
   id:           string
   business_id:  string
@@ -26,19 +27,14 @@ export function useAuth() {
 
   const loadProfile = useCallback(async () => {
     try {
-      const { data: { user: authUser } } = await supabase.auth.getUser()
-      if (authUser) {
-        const profile = await api.get<UserProfile>('/api/auth/me')
-        setUser(profile)
-      } else {
-        setUser(null)
-      }
+      const profile = await api.get<UserProfile>('/api/auth/me')
+      setUser(profile)
     } catch {
       setUser(null)
     } finally {
       setLoading(false)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     loadProfile()

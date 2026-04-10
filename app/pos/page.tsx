@@ -6,13 +6,14 @@ import { formatCurrency } from '@/lib/utils'
 import type { Product } from '@/types'
 import type { CustomerSummary } from '@/app/customers/page'
 import type { PriceList } from '@/app/price-lists/page'
-import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle } from 'lucide-react'
+import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { POSTicket } from '@/components/modules/POSTicket'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
 import { useWorkstation } from '@/hooks/useWorkstation'
 import { useAuth } from '@/hooks/useAuth'
 import { Button } from '@/components/ui/Button'
+import { evaluatePromo, type Promotion } from '@/lib/promoUtils'
 import { Modal } from '@/components/ui/Modal'
 
 interface CartItem {
@@ -35,6 +36,7 @@ interface CompletedSale {
   installments: number
   items: CartItem[]
   created_at: string
+  invoice_id?: string
 }
 
 const PAYMENT_METHODS = [
@@ -46,39 +48,20 @@ const PAYMENT_METHODS = [
   { value: 'cuenta_corriente', label: 'Cta. Cte.', icon: '📒' },
 ]
 
-async function getPriceForQuantity(productId: string, quantity: number): Promise<{
-  price: number
-  list_name: string
-  margin_pct: number
+interface PricingResult {
+  price:       number
+  list_name:   string
+  margin_pct:  number
   rule_source: string
-}> {
-  return api.get('/api/products/price', { product_id: productId, quantity })
 }
 
-async function checkPromo(product: Product, quantity: number, unitPrice: number): Promise<{
-  discount: number
-  promo_label: string
-  promotion_id: string | null
-}> {
-  try {
-    const res = await api.post<{
-      promo_applied: boolean
-      discount: number
-      label: string | null
-      promotion_id: string | null
-    }>('/api/promotions/check', {
-      product_id:  product.id,
-      brand_id:    (product as Product & { brand_id?: string }).brand_id ?? null,
-      category_id: product.category_id ?? null,
-      supplier_id: product.supplier_id ?? null,
-      quantity,
-      unit_price:  unitPrice,
-    })
-    if (res.promo_applied) {
-      return { discount: res.discount, promo_label: res.label ?? '', promotion_id: res.promotion_id }
-    }
-  } catch { }
-  return { discount: 0, promo_label: '', promotion_id: null }
+interface ScanResult {
+  product: Product
+  pricing: PricingResult
+}
+
+async function fetchPrice(productId: string, quantity: number): Promise<PricingResult> {
+  return api.get('/api/products/price', { product_id: productId, quantity })
 }
 
 const POS_CART_KEY = 'stockos_pos_cart'
@@ -134,6 +117,15 @@ export default function POSPage() {
   const { workstation, setWorkstation, loaded } = useWorkstation()
   const { user } = useAuth()
 
+  // Cache de promociones activas — se cargan al montar el POS
+  const [promotions, setPromotions] = useState<Promotion[]>([])
+  const [promosCached, setPromosCached] = useState(false)
+  const promotionsRef = useRef<Promotion[]>([])
+  useEffect(() => { promotionsRef.current = promotions }, [promotions])
+
+  // Mapa barcode → product_id para re-escaneos sin llamada al servidor
+  const barcodeMapRef = useRef<Map<string, string>>(new Map())
+
   const cartRef = useRef(cart)
   useEffect(() => { cartRef.current = cart }, [cart])
 
@@ -163,13 +155,16 @@ export default function POSPage() {
     } catch { }
   }, [])
 
-  // Persistir carrito en localStorage cada vez que cambia
+  // Persistir carrito en localStorage con debounce (evita writes síncronos por cada item)
   useEffect(() => {
-    if (cart.length > 0) {
-      localStorage.setItem(POS_CART_KEY, JSON.stringify({ cart, saleDiscount, selectedCustomer }))
-    } else {
-      localStorage.removeItem(POS_CART_KEY)
-    }
+    const t = setTimeout(() => {
+      if (cart.length > 0) {
+        localStorage.setItem(POS_CART_KEY, JSON.stringify({ cart, saleDiscount, selectedCustomer }))
+      } else {
+        localStorage.removeItem(POS_CART_KEY)
+      }
+    }, 300)
+    return () => clearTimeout(t)
   }, [cart, saleDiscount, selectedCustomer])
 
   useEffect(() => { searchRef.current?.focus() }, [])
@@ -207,29 +202,96 @@ export default function POSPage() {
       .catch(() => { })
   }, [workstation?.register_id])
 
+  // Cargar promociones activas — se cachean para evaluación local
+  const loadPromotions = useCallback(async (showFeedback = false) => {
+    try {
+      const data = await api.get<Promotion[]>('/api/promotions')
+      const active = data.filter(p => p.is_active)
+      setPromotions(active)
+      promotionsRef.current = active
+      setPromosCached(true)
+      if (showFeedback) toast.success('Promociones actualizadas')
+    } catch { /* no bloquea el POS */ }
+  }, [])
+
+  useEffect(() => { loadPromotions() }, [loadPromotions])
+
   useEffect(() => {
     if (!query.trim()) { setResults([]); return }
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    // Barcodes (solo dígitos): sin debounce — el scanner ya envía Enter inmediatamente
-    // Búsqueda por texto: 300ms para no disparar en cada tecla
-    const isBarcode = /^\d{8,14}$/.test(query.trim())
+
+    const trimmed    = query.trim()
+    const isBarcode  = /^\d{8,14}$/.test(trimmed)
+
     debounceRef.current = setTimeout(async () => {
+      if (isBarcode) {
+        // ── Re-escaneo optimista ──────────────────────────────────────────
+        // Si el barcode ya está en el mapa local → el producto está en el carrito.
+        // Incrementamos cantidad al instante sin ninguna llamada al servidor.
+        const knownProductId = barcodeMapRef.current.get(trimmed)
+        if (knownProductId) {
+          const existingItem = cartRef.current.find(i => i.product.id === knownProductId)
+          if (existingItem) {
+            const qty    = pendingQtyRef.current
+            const newQty = existingItem.quantity + qty
+            setCart(prev => prev.map(i => i.product.id === knownProductId ? { ...i, quantity: newQty } : i))
+            setPendingQty(1); pendingQtyRef.current = 1
+            setQuery(''); setResults([])
+            setTimeout(() => searchRef.current?.focus(), 50)
+            // Precio + promo en background
+            if (existingItem.product.price_mode !== 'custom') {
+              fetchPrice(knownProductId, newQty).then(pricing => {
+                const promo = evaluatePromo(
+                  existingItem.product as Parameters<typeof evaluatePromo>[0],
+                  newQty, pricing.price, promotionsRef.current,
+                )
+                setCart(prev => prev.map(i =>
+                  i.product.id === knownProductId
+                    ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
+                    : i,
+                ))
+              }).catch(() => {})
+            }
+            return
+          }
+        }
+
+        // ── Nuevo producto — endpoint unificado ───────────────────────────
+        // 1 HTTP call en lugar de barcode + price + promotions/check
+        setSearching(true)
+        try {
+          const result = await api.post<ScanResult>('/api/pos/scan', {
+            barcode:      trimmed,
+            warehouse_id: selectedWarehouse?.id ?? null,
+            quantity:     pendingQtyRef.current,
+          })
+          await addToCart(result.product, pendingQtyRef.current, result.pricing)
+          setQuery(''); setResults([])
+        } catch {
+          // Producto no encontrado — mostramos búsqueda de texto como fallback
+          const res = await api.get<{ data: Product[] }>('/api/products', {
+            search: trimmed, limit: 8,
+            ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}),
+          }).catch(() => ({ data: [] as Product[] }))
+          setResults(res.data)
+          setActiveResultIndex(res.data.length > 0 ? 0 : -1)
+        } finally { setSearching(false) }
+        return
+      }
+
+      // ── Búsqueda por texto ────────────────────────────────────────────
       setSearching(true)
       try {
-        if (isBarcode) {
-          try {
-            const p = await api.get<Product>(`/api/products/barcode/${query.trim()}`, selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : undefined)
-            addToCart(p)
-            setQuery(''); setResults([])
-            return
-          } catch { }
-        }
-        const res = await api.get<{ data: Product[] }>('/api/products', { search: query.trim(), limit: 8, ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}) })
+        const res = await api.get<{ data: Product[] }>('/api/products', {
+          search: trimmed, limit: 8,
+          ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}),
+        })
         setResults(res.data)
         setActiveResultIndex(res.data.length > 0 ? 0 : -1)
       } catch { setResults([]); setActiveResultIndex(-1) }
       finally { setSearching(false) }
     }, isBarcode ? 0 : 300)
+
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -250,12 +312,12 @@ export default function POSPage() {
     if (workstation === null && loaded) setSelectingWorkstation(true)
   }, [workstation, loaded])
 
-  const addToCart = useCallback(async (product: Product, qty?: number) => {
+  const addToCart = useCallback(async (product: Product, qty?: number, prefetchedPricing?: PricingResult) => {
     if (isAddingRef.current) return
     isAddingRef.current = true
 
-    const quantity = qty ?? pendingQtyRef.current
-    const isCustomPrice = product.price_mode === 'custom'
+    const quantity       = qty ?? pendingQtyRef.current
+    const isCustomPrice  = product.price_mode === 'custom'
     const stockAvailable = product.stock_current ?? 0
 
     if (!isCustomPrice && stockAvailable <= 0) {
@@ -265,7 +327,7 @@ export default function POSPage() {
     }
 
     const existing = cartRef.current.find(i => i.product.id === product.id)
-    const newQty = existing ? existing.quantity + quantity : quantity
+    const newQty   = existing ? existing.quantity + quantity : quantity
 
     if (!isCustomPrice && newQty > stockAvailable) {
       toast.error(`Stock máximo: ${stockAvailable}`)
@@ -273,60 +335,95 @@ export default function POSPage() {
       return
     }
 
-    // Agregar al carrito inmediatamente con precio base — el cajero puede escanear el siguiente ya
+    // Registrar barcodes en el mapa local para re-escaneos sin llamada al servidor
+    if (product.barcode) barcodeMapRef.current.set(product.barcode, product.id)
+    ;(product as Product & { product_barcodes?: { barcode: string }[] }).product_barcodes
+      ?.forEach(b => barcodeMapRef.current.set(b.barcode, product.id))
+
+    const pricing = prefetchedPricing
+    const initialPrice = isCustomPrice ? 0 : (pricing?.price ?? product.sell_price)
+
     if (existing) {
       setCart(prev => prev.map(i => i.product.id === product.id ? { ...i, quantity: newQty } : i))
     } else {
-      // Precio libre arranca en 0 para que el cajero lo ingrese manualmente
-      const initialPrice = isCustomPrice ? 0 : product.sell_price
-      setCart(prev => [...prev, { product, quantity, unit_price: initialPrice, discount: 0, applied_list: undefined, applied_margin: undefined, promo_label: undefined, promotion_id: null }])
+      setCart(prev => [...prev, {
+        product, quantity, unit_price: initialPrice, discount: 0,
+        applied_list:   pricing?.list_name,
+        applied_margin: pricing?.margin_pct,
+        promo_label: undefined, promotion_id: null,
+      }])
     }
 
     setPendingQty(1); pendingQtyRef.current = 1
     setResults([]); setQuery('')
 
     if (isCustomPrice && !existing) {
-      // Auto-focalizar el input de precio para que el cajero lo ingrese de inmediato
       setCustomPriceFocusId(product.id)
     } else {
       setTimeout(() => searchRef.current?.focus(), 50)
     }
 
-    // Liberar lock antes de las llamadas de precio para no bloquear el siguiente escaneo
     isAddingRef.current = false
-
-    // Precio libre: el cajero ingresa el precio manualmente, no hay fetch de lista
     if (isCustomPrice) return
 
-    // Actualizar precio y promo en background (paralelo, no bloquea)
+    // Actualizar precio (si no vino pre-cargado) y promo en background — no bloquea
     try {
-      const [pricing, promo] = await Promise.all([
-        getPriceForQuantity(product.id, newQty),
-        checkPromo(product, newQty, product.sell_price),
-      ])
+      const resolvedPricing = pricing ?? await fetchPrice(product.id, newQty)
+      const promo = evaluatePromo(
+        product as Parameters<typeof evaluatePromo>[0],
+        newQty,
+        resolvedPricing.price,
+        promotionsRef.current,
+      )
       setCart(prev => prev.map(i =>
         i.product.id === product.id
-          ? { ...i, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
-          : i
+          ? {
+              ...i,
+              unit_price:     resolvedPricing.price,
+              applied_list:   resolvedPricing.list_name,
+              applied_margin: resolvedPricing.margin_pct,
+              discount:       promo.discount,
+              promo_label:    promo.promo_label,
+              promotion_id:   promo.promotion_id,
+            }
+          : i,
       ))
-    } catch { /* precio base ya está en el carrito, no es crítico */ }
-  }, [])
+    } catch { /* precio base ya está, no es crítico */ }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const updateQty = async (id: string, delta: number) => {
-    const item = cart.find(i => i.product.id === id)
+  const updateQty = (id: string, delta: number) => {
+    const item = cartRef.current.find(i => i.product.id === id)
     if (!item) return
     const newQty = Math.max(1, item.quantity + delta)
-    if (item.product.price_mode === 'custom') {
-      setCart(prev => prev.map(i => i.product.id === id ? { ...i, quantity: newQty } : i))
-      return
-    }
-    const pricing = await getPriceForQuantity(id, newQty)
-    const promo = await checkPromo(item.product, newQty, pricing.price)
-    setCart(prev => prev.map(i =>
-      i.product.id === id
-        ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
-        : i
-    ))
+
+    // Actualización optimista inmediata — el cajero ve el cambio al instante
+    setCart(prev => prev.map(i => i.product.id === id ? { ...i, quantity: newQty } : i))
+
+    if (item.product.price_mode === 'custom') return
+
+    // Recalcular precio + promo en background
+    fetchPrice(id, newQty).then(pricing => {
+      const promo = evaluatePromo(
+        item.product as Parameters<typeof evaluatePromo>[0],
+        newQty,
+        pricing.price,
+        promotionsRef.current,
+      )
+      setCart(prev => prev.map(i =>
+        i.product.id === id
+          ? {
+              ...i,
+              quantity:       newQty,
+              unit_price:     pricing.price,
+              applied_list:   pricing.list_name,
+              applied_margin: pricing.margin_pct,
+              discount:       promo.discount,
+              promo_label:    promo.promo_label,
+              promotion_id:   promo.promotion_id,
+            }
+          : i,
+      ))
+    }).catch(() => { /* precio anterior queda, no es crítico */ })
   }
 
   const updateItemDiscount = (id: string, v: string) =>
@@ -354,6 +451,7 @@ export default function POSPage() {
         warehouse_id: selectedWarehouse?.id ?? null,
         branch_id: workstation?.branch_id ?? null,
         register_id: workstation?.register_id ?? null,
+        customer_id: selectedCustomer?.id ?? null,
       }
       console.log('payload warehouse_id:', selectedWarehouse?.id)
 console.log('workstation:', workstation)
@@ -385,7 +483,19 @@ console.log('workstation:', workstation)
         sale = await api.post<CompletedSale>('/api/sales', payload)
         toast.success('Venta registrada')
       }
-      setCompletedSale({ ...sale, items: cart })
+      // Crear Ticket X automáticamente
+      let invoiceId: string | undefined
+      try {
+        const inv = await api.post<{ id: string }>('/api/invoices', {
+          sale_id: sale.id,
+          customer_id: selectedCustomer?.id ?? null,
+        })
+        invoiceId = inv.id
+      } catch { /* no bloquear la venta si falla el ticket */ }
+
+      setCompletedSale({ ...sale, items: cart, invoice_id: invoiceId })
+      localStorage.removeItem(POS_CART_KEY)
+      setCart([]); setSaleDiscount(0); setSelectedCustomer(null); setCustomerQuery('')
       setStep('ticket')
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al procesar la venta')
@@ -404,6 +514,7 @@ console.log('workstation:', workstation)
     return (
       <POSTicket
         sale={completedSale}
+        invoiceId={completedSale.invoice_id}
         onNewSale={handleNewSale}
         onClose={() => router.push('/sales')}
         customerPhone={selectedCustomer?.phone}
@@ -434,23 +545,35 @@ console.log('workstation:', workstation)
             <Zap size={13} className="text-white" />
           </div>
           <span className="text-sm font-bold text-[var(--text)]">StockOS POS</span>
-          {workstation && (
-            <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-[var(--text3)] hidden sm:block">
-                {workstation.branch_name} · {workstation.register_name}
-              </span>
+          <div className="ml-auto flex items-center gap-2">
+            {/* Botón actualizar promos — para cuando el admin crea una promo con la caja abierta */}
+            {promosCached && (
               <button
-                onClick={() => {
-                  setTempBranchId(workstation.branch_id)
-                  setTempRegisterId(workstation.register_id)
-                  setSelectingWorkstation(true)
-                }}
-                className="text-xs text-[var(--text3)] hover:text-[var(--accent)] underline transition-colors"
+                onClick={() => loadPromotions(true)}
+                title="Actualizar promociones"
+                className="p-1.5 rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors"
               >
-                Cambiar
+                <RefreshCw size={13} />
               </button>
-            </div>
-          )}
+            )}
+            {workstation && (
+              <>
+                <span className="text-xs text-[var(--text3)] hidden sm:block">
+                  {workstation.branch_name} · {workstation.register_name}
+                </span>
+                <button
+                  onClick={() => {
+                    setTempBranchId(workstation.branch_id)
+                    setTempRegisterId(workstation.register_id)
+                    setSelectingWorkstation(true)
+                  }}
+                  className="text-xs text-[var(--text3)] hover:text-[var(--accent)] underline transition-colors"
+                >
+                  Cambiar
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* Banner caja cerrada */}
@@ -534,7 +657,15 @@ console.log('workstation:', workstation)
                     if (query.trim()) {
                       setSearching(true)
                       try {
-                        if (/^\d{8,14}$/.test(query.trim())) { const p = await api.get<Product>(`/api/products/barcode/${query.trim()}`, selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : undefined); addToCart(p, pendingQtyRef.current); return }
+                        if (/^\d{8,14}$/.test(query.trim())) {
+                          const result = await api.post<ScanResult>('/api/pos/scan', {
+                            barcode: query.trim(),
+                            warehouse_id: selectedWarehouse?.id ?? null,
+                            quantity: pendingQtyRef.current,
+                          })
+                          await addToCart(result.product, pendingQtyRef.current, result.pricing)
+                          return
+                        }
                         const res = await api.get<{ data: Product[] }>('/api/products', { search: query.trim(), limit: 8, ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}) })
                         setResults(res.data)
                         if (res.data.length === 1) addToCart(res.data[0], pendingQtyRef.current)
