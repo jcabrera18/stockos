@@ -5,8 +5,9 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
-import { Plus, X } from 'lucide-react'
+import { Plus, X, ChevronRight } from 'lucide-react'
 import type { Product, Category, Supplier } from '@/types'
 import type { PriceList } from '@/app/price-lists/page'
 import { SupplierModal } from '@/components/modules/SupplierModal'
@@ -15,7 +16,7 @@ interface ProductModalProps {
   open: boolean
   onClose: () => void
   onSaved: () => void
-  product?: Product | null   // null = crear, Product = editar
+  product?: Product | null
 }
 
 const UNITS = [
@@ -28,7 +29,6 @@ const UNITS = [
   { value: 'pack', label: 'Pack' },
 ]
 
-// Cache a nivel módulo: persiste entre aperturas del modal en la misma sesión
 const _refCache: {
   categories: Category[] | null
   suppliers:  Supplier[] | null
@@ -47,6 +47,100 @@ const emptyForm = {
   unit: 'unidad',
   price_mode: 'fixed' as 'fixed' | 'custom',
 }
+
+// ─── Componente reutilizable de árbol de categorías ─────────────────────────
+// Navega nivel a nivel con breadcrumb chips + un solo dropdown por nivel.
+// Funciona para cualquier profundidad.
+function CategoryTreePicker({
+  categoryMap,
+  childrenMap,
+  value,
+  onChange,
+  rootLabel = '— Sin categoría —',
+  selectClass,
+}: {
+  categoryMap: Map<string, Category>
+  childrenMap: Map<string | null, Category[]>
+  value: string
+  onChange: (id: string) => void
+  rootLabel?: string
+  selectClass: string
+}) {
+  // Reconstruir path desde la raíz hasta el valor actual
+  const path: string[] = []
+  if (value) {
+    let cur: string | undefined = value
+    while (cur) {
+      path.unshift(cur)
+      cur = categoryMap.get(cur)?.parent_id ?? undefined
+    }
+  }
+
+  // Hijos del nodo actualmente seleccionado (o raíz si no hay selección)
+  const children = childrenMap.get(value || null) ?? []
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      {/* Breadcrumb de la selección actual */}
+      {path.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1 py-0.5">
+          {path.map((id, i) => {
+            const cat = categoryMap.get(id)
+            const isLast = i === path.length - 1
+            return (
+              <span key={id} className="flex items-center gap-1">
+                {i > 0 && <ChevronRight size={11} className="text-[var(--text3)] flex-shrink-0" />}
+                <button
+                  type="button"
+                  onClick={() => onChange(id)}
+                  className={cn(
+                    'text-xs px-2 py-0.5 rounded-full border transition-colors',
+                    isLast
+                      ? 'bg-[var(--accent)] text-white border-[var(--accent)]'
+                      : 'bg-[var(--surface2)] border-[var(--border)] text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)]'
+                  )}
+                >
+                  {cat?.name}
+                </button>
+              </span>
+            )
+          })}
+          <button
+            type="button"
+            onClick={() => {
+              // Sube un nivel: va al padre del nodo actual (o vacío si es raíz)
+              const parentId = categoryMap.get(value)?.parent_id ?? ''
+              onChange(parentId)
+            }}
+            className="p-0.5 text-[var(--text3)] hover:text-[var(--danger,#ef4444)] transition-colors"
+            title="Subir un nivel"
+          >
+            <X size={11} />
+          </button>
+        </div>
+      )}
+
+      {/* Dropdown: raíz si no hay selección; hijos del nodo actual si los hay */}
+      {children.length > 0 || !value ? (
+        <select
+          value=""
+          onChange={e => { if (e.target.value) onChange(e.target.value) }}
+          className={selectClass}
+        >
+          <option value="">
+            {value ? 'Subcategoría (opcional)...' : rootLabel}
+          </option>
+          {children.map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+        </select>
+      ) : (
+        <p className="text-xs text-[var(--text3)] italic pl-1">Sin subcategorías</p>
+      )}
+    </div>
+  )
+}
+// ────────────────────────────────────────────────────────────────────────────
 
 export function ProductModal({ open, onClose, onSaved, product }: ProductModalProps) {
   const [form, setForm] = useState(emptyForm)
@@ -71,7 +165,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
 
   const isEdit = !!product
 
-  // Cargar datos de referencia con cache de sesión (evita refetch en cada apertura)
   useEffect(() => {
     if (!open) return
     const load = async () => {
@@ -89,7 +182,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     load().catch(() => {})
   }, [open])
 
-  // Pre-cargar datos al editar
   useEffect(() => {
     if (product) {
       setForm({
@@ -103,14 +195,9 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         unit: product.unit,
         price_mode: product.price_mode ?? 'fixed',
       })
-      // Cargar barcodes completos desde el servidor
       api.get<Product>(`/api/products/${product.id}`)
-        .then(full => {
-          setBarcodes((full.product_barcodes ?? []).map(b => b.barcode))
-        })
-        .catch(() => {
-          setBarcodes(product.barcode ? [product.barcode] : [])
-        })
+        .then(full => { setBarcodes((full.product_barcodes ?? []).map(b => b.barcode)) })
+        .catch(() => { setBarcodes(product.barcode ? [product.barcode] : []) })
     } else {
       setForm(emptyForm)
       setBarcodes([])
@@ -201,7 +288,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     const prevIds = new Set(suppliers.map(s => s.id))
     const updated = await api.get<Supplier[]>('/api/purchases/suppliers').catch(() => suppliers)
     setSuppliers(updated)
-    // auto-select el recién creado
     const newOne = updated.find(s => !prevIds.has(s.id))
     if (newOne) setForm(f => ({ ...f, supplier_id: newOne.id }))
     setSupplierSubModal(false)
@@ -213,6 +299,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     try {
       const created = await api.post<{ id: string; name: string }>('/api/brands', { name: newBrandName.trim() })
       const updated = await api.get<{ id: string; name: string }[]>('/api/brands').catch(() => brands)
+      _refCache.brands = updated
       setBrands(updated)
       setForm(f => ({ ...f, brand_id: created.id }))
       setNewBrandName('')
@@ -234,7 +321,10 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         parent_id: newCatParent || null,
       })
       const updated = await api.get<Category[]>('/api/products/categories').catch(() => categories)
+      // Actualizar cache para que próximas aperturas tengan la nueva categoría
+      _refCache.categories = updated
       setCategories(updated)
+      // Auto-seleccionar la recién creada en el producto
       setForm(f => ({ ...f, category_id: created.id }))
       setNewCatName('')
       setNewCatParent('')
@@ -247,31 +337,14 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     }
   }
 
-  // Cascada de categorías derivada de form.category_id
+  // Mapas para el árbol de categorías
   const categoryMap = new Map(categories.map(c => [c.id, c]))
-
-  // childrenMap: parent_id (null para raíz) → hijos
   const childrenMap = new Map<string | null, Category[]>()
   categories.forEach(c => {
     const key = c.parent_id ?? null
     if (!childrenMap.has(key)) childrenMap.set(key, [])
     childrenMap.get(key)!.push(c)
   })
-
-  // Reconstruir el path desde la raíz hasta la categoría seleccionada
-  const categoryPath: string[] = []
-  if (form.category_id) {
-    let cur: string | undefined = form.category_id
-    while (cur) {
-      categoryPath.unshift(cur)
-      cur = categoryMap.get(cur)?.parent_id ?? undefined
-    }
-  }
-
-  // Cantidad de dropdowns: longitud del path + 1 si el último nodo tiene hijos, mínimo 1
-  const lastSelected = categoryPath[categoryPath.length - 1] ?? null
-  const hasMoreChildren = (childrenMap.get(lastSelected) ?? []).length > 0
-  const numDropdowns = Math.max(1, categoryPath.length + (hasMoreChildren ? 1 : 0))
 
   const selectClass = 'w-full px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
 
@@ -305,7 +378,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
 
         {/* Fila 2: Códigos de barras + SKU */}
         <div className="grid grid-cols-2 gap-3">
-          {/* Múltiples códigos de barras */}
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-[var(--text2)]">Códigos de barras (EAN)</label>
             {barcodes.length > 0 && (
@@ -358,43 +430,38 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
           />
         </div>
 
-        {/* Fila 3: Categoría en cascada */}
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-[var(--text2)]">Categoría</label>
-            <button
-              type="button"
-              onClick={() => { setNewCatName(''); setNewCatParent(''); setCategorySubModal(true) }}
-              title="Crear categoría"
-              className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
-            >
-              <Plus size={12} /> Nueva
-            </button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {Array.from({ length: numDropdowns }).map((_, i) => {
-              const parentId = i === 0 ? null : (categoryPath[i - 1] ?? null)
-              const options = childrenMap.get(parentId) ?? []
-              const selectedValue = categoryPath[i] ?? ''
-              return (
-                <select
-                  key={i}
-                  value={selectedValue}
-                  disabled={options.length === 0}
-                  onChange={e => {
-                    const val = e.target.value
-                    setForm(f => ({ ...f, category_id: val || categoryPath[i - 1] || '' }))
-                    setErrors(er => ({ ...er, category_id: '' }))
-                  }}
-                  className={`${selectClass} flex-1 min-w-[110px]`}
-                >
-                  <option value="">{i === 0 ? 'Sin categoría' : 'General'}</option>
-                  {options.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              )
-            })}
-          </div>
-        </div>
+        {/* Fila 3: Categoría — árbol navegable */}
+        {(() => {
+          // Solo mostrar "+ Nueva" cuando no hay selección o la seleccionada es hoja (sin hijos).
+          // Si tiene hijos, el dropdown ya los trae para seleccionar.
+          const selectedHasChildren = form.category_id
+            ? (childrenMap.get(form.category_id) ?? []).length > 0
+            : false
+          return (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-[var(--text2)]">Categoría</label>
+                {!selectedHasChildren && (
+                  <button
+                    type="button"
+                    onClick={() => { setNewCatName(''); setNewCatParent(form.category_id); setCategorySubModal(true) }}
+                    title="Crear categoría"
+                    className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+                  >
+                    <Plus size={12} /> Nueva
+                  </button>
+                )}
+              </div>
+              <CategoryTreePicker
+                categoryMap={categoryMap}
+                childrenMap={childrenMap}
+                value={form.category_id}
+                onChange={id => { setForm(f => ({ ...f, category_id: id })); setErrors(er => ({ ...er, category_id: '' })) }}
+                selectClass={selectClass}
+              />
+            </div>
+          )
+        })()}
 
         {/* Fila 4: Precio + Proveedor + Marca */}
         <div className="grid grid-cols-3 gap-3">
@@ -408,7 +475,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
             placeholder="0.00"
             error={errors.cost_price}
           />
-          {/* Proveedor con botón + */}
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-[var(--text2)]">Proveedor</label>
@@ -428,7 +494,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
               placeholder="Sin proveedor"
             />
           </div>
-          {/* Marca con botón + */}
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium text-[var(--text2)]">Marca</label>
@@ -468,7 +533,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         </label>
 
         {/* Precios por lista */}
-        {form.price_mode === 'fixed' && form.cost_price && Number(form.cost_price) > 0 && categories.length >= 0 && (
+        {form.price_mode === 'fixed' && form.cost_price && Number(form.cost_price) > 0 && (
           <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
             <p className="text-xs font-medium text-[var(--text3)] mb-1">Precio según lista</p>
             {priceLists.slice(0, 3).map(list => {
@@ -503,8 +568,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
           />
         </div>
 
-        {/* Acciones */}
-        {/* Footer sticky dentro del scroll */}
+        {/* Footer sticky */}
         <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
@@ -539,18 +603,17 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
               placeholder="Ej: Bebidas, Lácteos..."
               autoFocus
             />
+            {/* Selector de padre con árbol navegable */}
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium text-[var(--text2)]">Categoría padre</label>
-              <select
+              <CategoryTreePicker
+                categoryMap={categoryMap}
+                childrenMap={childrenMap}
                 value={newCatParent}
-                onChange={e => setNewCatParent(e.target.value)}
-                className="w-full px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors"
-              >
-                <option value="">Sin padre (categoría principal)</option>
-                {categories.map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+                onChange={setNewCatParent}
+                rootLabel="Sin padre (categoría principal)"
+                selectClass={selectClass}
+              />
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="secondary" onClick={() => setCategorySubModal(false)} disabled={savingCat}>Cancelar</Button>

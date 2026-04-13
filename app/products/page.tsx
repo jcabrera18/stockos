@@ -114,8 +114,26 @@ export default function ProductsPage() {
   const minPriceRef     = useRef(minPrice)
   const maxPriceRef     = useRef(maxPrice)
 
-  // Debounces
+  // Detección de barcode: numérico de 8-14 dígitos
+  const isBarcode = (v: string) => /^\d{8,14}$/.test(v.trim())
+
+  // Debounce: skip para barcodes (búsqueda directa)
   useEffect(() => {
+    if (isBarcode(search)) {
+      // Lookup directo sin debounce
+      const trimmed = search.trim()
+      api.get<Product>(`/api/products/barcode/${trimmed}`)
+        .then(product => {
+          setEditProduct(product)
+          setProductModal(true)
+          setSearch('')
+        })
+        .catch(() => {
+          // No encontrado — hacer búsqueda normal en tabla
+          setDebouncedSearch(trimmed)
+        })
+      return
+    }
     const t = setTimeout(() => setDebouncedSearch(search), search ? 300 : 0)
     return () => clearTimeout(t)
   }, [search])
@@ -242,7 +260,7 @@ export default function ProductsPage() {
       path.unshift(current.name)
       current = current.parent_id ? map.get(current.parent_id) : undefined
     }
-    return path.join(' › ')
+    return path.length ? path.join(' › ') : '—'
   }
 
   const handleEdit = async (item: StockSummary) => {
@@ -544,7 +562,11 @@ export default function ProductsPage() {
       <ProductModal
         open={productModal}
         onClose={() => { setProductModal(false); setEditProduct(null) }}
-        onSaved={fetchProducts}
+        onSaved={() => {
+          fetchProducts()
+          // Refetch categorías por si se creó una nueva desde el sub-modal
+          api.get<Category[]>('/api/products/categories').then(setAllCategories).catch(() => {})
+        }}
         product={editProduct}
       />
 
