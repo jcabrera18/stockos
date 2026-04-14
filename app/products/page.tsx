@@ -47,13 +47,14 @@ const STOCK_STATUS_OPTIONS = [
 
 const SORT_OPTIONS = [
   { value: 'name',          label: 'Nombre' },
+  { value: 'sku',           label: 'SKU' },
   { value: 'sell_price',    label: 'Precio venta' },
   { value: 'cost_price',    label: 'Precio costo' },
 ]
 
 const selectClass = 'px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed'
 
-type SortField = 'name' | 'sell_price' | 'cost_price' | 'stock_current'
+type SortField = 'name' | 'sell_price' | 'cost_price' | 'stock_current' | 'sku'
 type SortDir   = 'asc' | 'desc'
 
 function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortField; sortDir: SortDir }) {
@@ -466,6 +467,15 @@ export default function ProductsPage() {
                         <SortIcon field="name" sortBy={sortBy} sortDir={sortDir} />
                       </div>
                     </th>
+                    <th
+                      onClick={() => handleSort('sku')}
+                      className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group hidden lg:table-cell"
+                    >
+                      <div className="flex items-center gap-1">
+                        SKU
+                        <SortIcon field="sku" sortBy={sortBy} sortDir={sortDir} />
+                      </div>
+                    </th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Categoría</th>
                     <th
                       onClick={() => handleSort('cost_price')}
@@ -500,6 +510,12 @@ export default function ProductsPage() {
                         {product.barcode && (
                           <p className="text-xs mono text-[var(--text3)]">{product.barcode}</p>
                         )}
+                      </td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        {product.sku
+                          ? <span className="mono text-xs text-[var(--text2)]">{product.sku}</span>
+                          : <span className="text-xs text-[var(--text3)]">—</span>
+                        }
                       </td>
                       <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
                         {getCategoryPath(product.category_id, categoryMap)}
