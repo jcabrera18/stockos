@@ -115,7 +115,7 @@ export default function ProductsPage() {
 
   // Detección de barcode: numérico de 8-14 dígitos
   const isBarcode = (v: string) => /^\d{8,14}$/.test(v.trim())
-  const fetchProductsRef = useRef<() => Promise<void>>()
+  const fetchProductsRef = useRef<(() => Promise<void>) | undefined>(undefined)
 
   // Debounce: skip para barcodes (búsqueda directa)
   useEffect(() => {
