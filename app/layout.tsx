@@ -7,6 +7,9 @@ import { AppShellWrapper } from '@/components/layout/AppShellWrapper'
 export const metadata: Metadata = {
   title: 'StockOS',
   description: 'Gestión de supermercados y retail para LATAM',
+  icons: {
+    icon: '/icon.svg',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
