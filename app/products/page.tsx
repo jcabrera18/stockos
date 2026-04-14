@@ -8,7 +8,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { TableSkeleton } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { ProductModal } from '@/components/modules/ProductModal'
+import { useProductModal } from '@/contexts/ProductModalContext'
 import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
 import { api } from '@/lib/api'
 import { formatCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
@@ -62,6 +62,7 @@ function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortFi
 }
 
 export default function ProductsPage() {
+  const { openProductModal } = useProductModal()
   const [data, setData] = useState<StockSummary[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
   const [search, setSearch] = useState('')
@@ -74,8 +75,6 @@ export default function ProductsPage() {
   const [showFilters, setShowFilters] = useState(false)
 
   // Modales
-  const [productModal, setProductModal] = useState(false)
-  const [editProduct, setEditProduct] = useState<Product | null>(null)
   const [adjustModal, setAdjustModal] = useState(false)
   const [adjustProduct, setAdjustProduct] = useState<Product | null>(null)
   const [deleteModal, setDeleteModal] = useState(false)
@@ -116,6 +115,7 @@ export default function ProductsPage() {
 
   // Detección de barcode: numérico de 8-14 dígitos
   const isBarcode = (v: string) => /^\d{8,14}$/.test(v.trim())
+  const fetchProductsRef = useRef<() => Promise<void>>()
 
   // Debounce: skip para barcodes (búsqueda directa)
   useEffect(() => {
@@ -124,8 +124,7 @@ export default function ProductsPage() {
       const trimmed = search.trim()
       api.get<Product>(`/api/products/barcode/${trimmed}`)
         .then(product => {
-          setEditProduct(product)
-          setProductModal(true)
+          openProductModal(product, () => fetchProductsRef.current?.())
           setSearch('')
         })
         .catch(() => {
@@ -179,6 +178,7 @@ export default function ProductsPage() {
       setLoading(false)
     }
   }, [])
+  useEffect(() => { fetchProductsRef.current = fetchProducts }, [fetchProducts])
 
   // Re-fetch cuando cambian filtros (reset a página 1)
   useEffect(() => {
@@ -266,8 +266,7 @@ export default function ProductsPage() {
   const handleEdit = async (item: StockSummary) => {
     try {
       const product = await api.get<Product>(`/api/products/${item.id}`)
-      setEditProduct(product)
-      setProductModal(true)
+      openProductModal(product, () => fetchProductsRef.current?.())
     } catch {
       toast.error('Error al cargar el producto')
     }
@@ -295,8 +294,7 @@ export default function ProductsPage() {
   }
 
   const openCreate = () => {
-    setEditProduct(null)
-    setProductModal(true)
+    openProductModal(null, () => fetchProductsRef.current?.())
   }
 
   return (
@@ -558,17 +556,6 @@ export default function ProductsPage() {
           </div>
         )}
       </div>
-
-      <ProductModal
-        open={productModal}
-        onClose={() => { setProductModal(false); setEditProduct(null) }}
-        onSaved={() => {
-          fetchProducts()
-          // Refetch categorías por si se creó una nueva desde el sub-modal
-          api.get<Category[]>('/api/products/categories').then(setAllCategories).catch(() => {})
-        }}
-        product={editProduct}
-      />
 
       <AdjustStockModal
         open={adjustModal}

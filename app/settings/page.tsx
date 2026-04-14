@@ -5,12 +5,21 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
+import { Select } from '@/components/ui/Select'
 import { useAuth } from '@/hooks/useAuth'
 import { useTheme } from '@/hooks/useTheme'
 import { getRoleLabel } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
-import { Sun, Moon, Shield, Truck } from 'lucide-react'
+import { Sun, Moon, Shield, Truck, UserPlus } from 'lucide-react'
+
+const ROLE_OPTIONS = [
+  { value: 'cashier', label: 'Cajero' },
+  { value: 'stocker', label: 'Repositor' },
+  { value: 'seller',  label: 'Vendedor' },
+]
+
+interface Branch { id: string; name: string }
 
 export default function SettingsPage() {
   const { user, signOut } = useAuth()
@@ -20,12 +29,31 @@ export default function SettingsPage() {
   const [shippingDefault, setShippingDefault] = useState('')
   const [savingShipping, setSavingShipping] = useState(false)
 
+  // Create user form
+  const [branches, setBranches] = useState<Branch[]>([])
+  const [newUser, setNewUser] = useState({
+    full_name: '',
+    email: '',
+    password: '',
+    role: 'cashier',
+    branch_id: '',
+  })
+  const [creating, setCreating] = useState(false)
+
   useEffect(() => {
     if (user?.email) setName(user.email)
     if (user?.business?.shipping_price_default !== undefined) {
       setShippingDefault(String(user.business.shipping_price_default))
     }
   }, [user])
+
+  useEffect(() => {
+    if (['owner', 'admin'].includes(role)) {
+      api.get<Branch[]>('/api/branches').then(res => {
+        setBranches(res ?? [])
+      }).catch(() => {})
+    }
+  }, [role])
 
   const handleSaveShipping = async () => {
     setSavingShipping(true)
@@ -38,6 +66,30 @@ export default function SettingsPage() {
       toast.error('Error al guardar')
     } finally {
       setSavingShipping(false)
+    }
+  }
+
+  const handleCreateUser = async () => {
+    if (!newUser.full_name || !newUser.email || !newUser.password) {
+      toast.error('Completá todos los campos obligatorios')
+      return
+    }
+    setCreating(true)
+    try {
+      await api.post('/api/auth/register', {
+        full_name:   newUser.full_name,
+        email:       newUser.email,
+        password:    newUser.password,
+        role:        newUser.role,
+        business_id: user?.business_id,
+        branch_id:   newUser.branch_id || null,
+      })
+      toast.success('Usuario creado correctamente')
+      setNewUser({ full_name: '', email: '', password: '', role: 'cashier', branch_id: '' })
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al crear usuario')
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -117,6 +169,55 @@ export default function SettingsPage() {
                   </Button>
                 </div>
               </div>
+            </div>
+          </Card>
+        )}
+
+        {/* Gestión de usuarios */}
+        {['owner', 'admin'].includes(role) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <UserPlus size={15} className="text-[var(--accent)]" />
+                Crear usuario
+              </CardTitle>
+            </CardHeader>
+            <div className="space-y-3">
+              <Input
+                placeholder="Nombre completo *"
+                value={newUser.full_name}
+                onChange={e => setNewUser(u => ({ ...u, full_name: e.target.value }))}
+              />
+              <Input
+                type="email"
+                placeholder="Email *"
+                value={newUser.email}
+                onChange={e => setNewUser(u => ({ ...u, email: e.target.value }))}
+              />
+              <Input
+                type="password"
+                placeholder="Contraseña * (mín. 6 caracteres)"
+                value={newUser.password}
+                onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))}
+              />
+              <Select
+                options={ROLE_OPTIONS}
+                value={newUser.role}
+                onChange={e => setNewUser(u => ({ ...u, role: e.target.value }))}
+              />
+              {branches.length > 0 && (
+                <Select
+                  options={[
+                    { value: '', label: 'Sin sucursal asignada' },
+                    ...branches.map(b => ({ value: b.id, label: b.name })),
+                  ]}
+                  value={newUser.branch_id}
+                  onChange={e => setNewUser(u => ({ ...u, branch_id: e.target.value }))}
+                />
+              )}
+              <Button onClick={handleCreateUser} disabled={creating} className="w-full">
+                {creating ? 'Creando...' : 'Crear usuario'}
+              </Button>
             </div>
           </Card>
         )}
