@@ -5,6 +5,8 @@ import { Sidebar } from './Sidebar'
 import { BottomNav } from './BottomNav'
 import { ShoppingCart } from 'lucide-react'
 import { AuthProvider } from '@/contexts/AuthContext'
+import { ProductModalProvider, useProductModal } from '@/contexts/ProductModalContext'
+import { ProductModal } from '@/components/modules/ProductModal'
 
 // Rutas que manejan su propio layout full-screen (no necesitan shell)
 const NO_SHELL = ['/login', '/pos']
@@ -60,6 +62,18 @@ function POSBadge() {
   )
 }
 
+function GlobalProductModal() {
+  const { open, product, onSaved, closeProductModal } = useProductModal()
+  return (
+    <ProductModal
+      open={open}
+      onClose={closeProductModal}
+      onSaved={onSaved}
+      product={product}
+    />
+  )
+}
+
 export function AppShellWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const hasShell = !NO_SHELL.some(r => pathname === r || pathname.startsWith(r + '/'))
@@ -68,14 +82,17 @@ export function AppShellWrapper({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthProvider>
-      <div className="flex h-screen bg-[var(--bg)] overflow-hidden">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
-          {children}
-        </main>
-        <BottomNav />
-        <POSBadge />
-      </div>
+      <ProductModalProvider>
+        <div className="flex h-screen bg-[var(--bg)] overflow-hidden">
+          <Sidebar />
+          <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
+            {children}
+          </main>
+          <BottomNav />
+          <POSBadge />
+          <GlobalProductModal />
+        </div>
+      </ProductModalProvider>
     </AuthProvider>
   )
 }

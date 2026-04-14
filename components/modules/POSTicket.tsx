@@ -74,15 +74,11 @@ export function POSTicket({
   )
 
   useEffect(() => {
-    if (!sale.id) return
-    // Si ya tenemos el invoice_id del POS, fetcheamos directo por ID
-    const url = invoiceId
-      ? `/api/invoices/${invoiceId}`
-      : `/api/invoices/sale/${sale.id}`
-    api.get<InvoiceInfo>(url)
+    if (!invoiceId) return
+    api.get<InvoiceInfo>(`/api/invoices/${invoiceId}`)
       .then((inv) => { if (inv) setInvoice(inv) })
       .catch(() => {})
-  }, [sale.id, invoiceId])
+  }, [invoiceId])
 
   const isInvoiced = !!(invoice && invoice.afip_status === 'authorized' && invoice.cae)
 

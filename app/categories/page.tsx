@@ -11,7 +11,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { api } from '@/lib/api'
 import type { Category } from '@/types'
-import { Plus, Pencil, Trash2, Tag, ChevronRight } from 'lucide-react'
+import { Plus, Pencil, Trash2, Tag, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface CategoryWithChildren extends Category {
@@ -49,6 +49,9 @@ export default function CategoriesPage() {
   const [formError, setFormError] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // Búsqueda
+  const [search, setSearch] = useState('')
+
   // Modal eliminar
   const [deleteModal, setDeleteModal] = useState(false)
   const [deleteCat, setDeleteCat] = useState<Category | null>(null)
@@ -65,10 +68,13 @@ export default function CategoriesPage() {
 
   useEffect(() => { fetchCategories() }, [fetchCategories])
 
+  const [formParentLocked, setFormParentLocked] = useState(false)
+
   const openCreate = (parentId?: string) => {
     setEditCat(null)
     setFormName('')
     setFormParent(parentId ?? '')
+    setFormParentLocked(!!parentId)
     setFormError('')
     setModal(true)
   }
@@ -77,6 +83,7 @@ export default function CategoriesPage() {
     setEditCat(cat)
     setFormName(cat.name)
     setFormParent(cat.parent_id ?? '')
+    setFormParentLocked(false)
     setFormError('')
     setModal(true)
   }
@@ -123,6 +130,39 @@ export default function CategoriesPage() {
   }
 
   const tree = buildTree(categories)
+
+  // Mapa id → ruta de nombres (para breadcrumb en búsqueda)
+  const pathMap = (() => {
+    const map = new Map<string, string[]>()
+    const build = (cats: CategoryWithChildren[], ancestors: string[]) => {
+      cats.forEach(cat => {
+        map.set(cat.id, [...ancestors, cat.name])
+        build(cat.children, [...ancestors, cat.name])
+      })
+    }
+    build(tree, [])
+    return map
+  })()
+
+  // Resultados de búsqueda: lista plana de categorías que coinciden
+  const searchResults = search.trim()
+    ? categories.filter(c => c.name.toLowerCase().includes(search.trim().toLowerCase()))
+    : []
+
+  // Resaltar texto coincidente
+  const highlight = (text: string, query: string) => {
+    const idx = text.toLowerCase().indexOf(query.toLowerCase())
+    if (idx === -1) return <span>{text}</span>
+    return (
+      <span>
+        {text.slice(0, idx)}
+        <mark className="bg-[var(--accent-subtle)] text-[var(--accent)] rounded px-0.5 font-semibold not-italic">
+          {text.slice(idx, idx + query.length)}
+        </mark>
+        {text.slice(idx + query.length)}
+      </span>
+    )
+  }
 
   function flattenTree(cats: CategoryWithChildren[], depth = 0): { value: string; label: string }[] {
     return cats.flatMap(cat => [
@@ -217,7 +257,29 @@ export default function CategoriesPage() {
         }
       />
 
-      <div className="p-5">
+      <div className="p-5 space-y-4">
+        {/* Buscador */}
+        {!loading && categories.length > 0 && (
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)] pointer-events-none" />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar categoría..."
+              className="w-full pl-9 pr-9 py-2 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent transition-all"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text3)] hover:text-[var(--text)] transition-colors"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+        )}
+
         {loading ? <PageLoader /> : categories.length === 0 ? (
           <EmptyState
             icon={Tag}
@@ -225,7 +287,89 @@ export default function CategoriesPage() {
             description="Creá categorías para organizar tus productos."
             action={<Button onClick={() => openCreate()}><Plus size={15} /> Nueva categoría</Button>}
           />
+        ) : search.trim() ? (
+          /* Vista de búsqueda — lista plana con breadcrumb */
+          searchResults.length === 0 ? (
+            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] py-12 text-center">
+              <Search size={28} className="mx-auto mb-3 text-[var(--text3)]" />
+              <p className="text-sm text-[var(--text2)]">Sin resultados para <strong>"{search}"</strong></p>
+            </div>
+          ) : (
+            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
+              <div className="px-4 py-2 border-b border-[var(--border)] bg-[var(--surface2)]">
+                <p className="text-xs text-[var(--text3)]">
+                  {searchResults.length} resultado{searchResults.length !== 1 ? 's' : ''} para <strong>"{search}"</strong>
+                </p>
+              </div>
+              {searchResults.map((cat, i) => {
+                const path = pathMap.get(cat.id) ?? [cat.name]
+                const breadcrumb = path.slice(0, -1) // ancestros sin el nombre actual
+                const isLast = i === searchResults.length - 1
+                return (
+                  <div
+                    key={cat.id}
+                    className={`flex items-center justify-between px-4 py-3 hover:bg-[var(--surface2)] transition-colors group ${!isLast ? 'border-b border-[var(--border)]' : ''}`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Tag size={13} className="flex-shrink-0 text-[var(--accent)]" />
+                      <div className="min-w-0">
+                        {/* Breadcrumb de ruta */}
+                        {breadcrumb.length > 0 && (
+                          <p className="text-xs text-[var(--text3)] truncate mb-0.5 flex items-center gap-1">
+                            {breadcrumb.map((seg, si) => (
+                              <span key={si} className="flex items-center gap-1">
+                                {si > 0 && <span className="text-[var(--border)]">›</span>}
+                                {seg}
+                              </span>
+                            ))}
+                            <span className="text-[var(--border)]">›</span>
+                          </p>
+                        )}
+                        <span className="text-sm font-medium text-[var(--text)]">
+                          {highlight(cat.name, search.trim())}
+                        </span>
+                      </div>
+                      {breadcrumb.length === 0 && (
+                        <span className="text-xs text-[var(--text3)] bg-[var(--surface2)] px-1.5 py-0.5 rounded flex-shrink-0">
+                          nivel 1
+                        </span>
+                      )}
+                      {breadcrumb.length > 0 && (
+                        <span className="text-xs text-[var(--text3)] bg-[var(--surface2)] px-1.5 py-0.5 rounded flex-shrink-0">
+                          nivel {breadcrumb.length + 1}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                      <button
+                        onClick={() => openCreate(cat.id)}
+                        title="Agregar subcategoría"
+                        className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
+                      >
+                        <Plus size={13} />
+                      </button>
+                      <button
+                        onClick={() => openEdit(cat)}
+                        title="Editar"
+                        className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                      <button
+                        onClick={() => { setDeleteCat(cat); setDeleteModal(true) }}
+                        title="Eliminar"
+                        className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )
         ) : (
+          /* Vista de árbol normal */
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
             {tree.map(cat => renderCategory(cat))}
           </div>
@@ -236,7 +380,7 @@ export default function CategoriesPage() {
       <Modal
         open={modal}
         onClose={() => setModal(false)}
-        title={editCat ? 'Editar categoría' : 'Nueva categoría'}
+        title={editCat ? 'Editar categoría' : formParentLocked ? 'Nueva subcategoría' : 'Nueva categoría'}
         size="sm"
       >
         <div className="space-y-4">
@@ -248,15 +392,28 @@ export default function CategoriesPage() {
             error={formError}
             autoFocus
           />
-          <Select
-            label="Categoría padre"
-            options={parentOptions}
-            value={formParent}
-            onChange={e => setFormParent(e.target.value)}
-            placeholder="Sin categoría padre (raíz)"
-          />
+          {(!editCat && !formParentLocked) ? null : formParentLocked ? (
+            <div>
+              <p className="text-xs font-medium text-[var(--text2)] mb-1">Categoría padre</p>
+              <p className="text-sm text-[var(--text)] bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius)] px-3 py-2">
+                {parentOptions.find(o => o.value === formParent)?.label ?? '—'}
+              </p>
+            </div>
+          ) : (
+            <Select
+              label="Categoría padre"
+              options={parentOptions}
+              value={formParent}
+              onChange={e => setFormParent(e.target.value)}
+              placeholder="Sin categoría padre (raíz)"
+            />
+          )}
           <p className="text-xs text-[var(--text3)]">
-            Dejá vacío para crear una categoría principal, o elegí una padre para crear una subcategoría.
+            {formParentLocked
+              ? 'Esta subcategoría se creará dentro de la categoría seleccionada.'
+              : editCat
+              ? 'Podés cambiar la categoría padre o dejarla sin padre (raíz).'
+              : 'Esta categoría se creará como categoría principal (nivel 1). Para agregar subcategorías, hacé click en el ícono + de la categoría correspondiente.'}
           </p>
           <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
             <div className="flex justify-end gap-2">
