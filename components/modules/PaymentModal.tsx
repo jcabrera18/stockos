@@ -87,7 +87,7 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
         method,
         description: description.trim() || 'Pago de cuenta corriente',
         balanceBefore: Number(customer.current_balance),
-        balanceAfter: Math.max(0, Number(customer.current_balance) - amountNum),
+        balanceAfter: Number(customer.current_balance) - amountNum,
         paidAt: new Date().toISOString(),
       })
       setStep('receipt')
@@ -149,8 +149,8 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
           <span class="mono" style="color:#16a34a">− ${formatCurrency(receipt.amount)}</span>
         </div>
         <div class="balance-row">
-          <span>${receipt.balanceAfter === 0 ? '✓ Saldo cancelado' : 'Saldo restante'}</span>
-          <span class="mono" style="color:${receipt.balanceAfter === 0 ? '#15803d' : '#dc2626'}">${formatCurrency(receipt.balanceAfter)}</span>
+          <span>${receipt.balanceAfter === 0 ? '✓ Saldo cancelado' : receipt.balanceAfter < 0 ? 'Saldo a favor' : 'Saldo restante'}</span>
+          <span class="mono" style="color:${receipt.balanceAfter <= 0 ? '#15803d' : '#dc2626'}">${formatCurrency(receipt.balanceAfter)}</span>
         </div>
       </div>
 
@@ -164,7 +164,9 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
   if (!customer) return null
 
   const amountNum = Number(amount) || 0
-  const balanceAfter = Math.max(0, Number(customer.current_balance) - amountNum)
+  const currentBalance = Number(customer.current_balance)
+  const hasCredit = currentBalance < 0
+  const balanceAfter = currentBalance - amountNum
 
   return (
     <Modal open={open} onClose={onClose} title={step === 'receipt' ? 'Recibo de pago' : 'Registrar pago'} size="sm">
@@ -176,7 +178,7 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
             <p className="text-sm font-semibold text-[var(--text)]">{customer.full_name}</p>
             <div className="flex justify-between items-center mt-1">
               <span className="text-xs text-[var(--text3)]">Saldo actual</span>
-              <span className="text-lg font-bold mono text-[var(--danger)]">
+              <span className={`text-lg font-bold mono ${hasCredit ? 'text-[var(--accent)]' : 'text-[var(--danger)]'}`}>
                 {formatCurrency(customer.current_balance)}
               </span>
             </div>
@@ -188,14 +190,16 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
             )}
           </div>
 
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input type="checkbox" checked={payAll}
-              onChange={e => setPayAll(e.target.checked)}
-              className="w-4 h-4 accent-[var(--accent)]" />
-            <span className="text-sm text-[var(--text2)]">
-              Pagar saldo completo ({formatCurrency(customer.current_balance)})
-            </span>
-          </label>
+          {!hasCredit && (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={payAll}
+                onChange={e => setPayAll(e.target.checked)}
+                className="w-4 h-4 accent-[var(--accent)]" />
+              <span className="text-sm text-[var(--text2)]">
+                Pagar saldo completo ({formatCurrency(customer.current_balance)})
+              </span>
+            </label>
+          )}
 
           <Input label="Monto *" type="number" min="0.01" step="0.01"
             value={amount} onChange={e => { setAmount(e.target.value); setPayAll(false) }}
@@ -219,8 +223,10 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
                 <span className="mono">− {formatCurrency(amountNum)}</span>
               </div>
               <div className="flex justify-between text-sm font-bold pt-1 border-t border-[var(--border)]">
-                <span className="text-[var(--text)]">Saldo restante</span>
-                <span className={`mono ${balanceAfter > 0 ? 'text-[var(--warning)]' : 'text-[var(--accent)]'}`}>
+                <span className="text-[var(--text)]">
+                  {balanceAfter === 0 ? '✓ Saldo cancelado' : balanceAfter < 0 ? 'Saldo a favor' : 'Saldo restante'}
+                </span>
+                <span className={`mono ${balanceAfter < 0 ? 'text-[var(--accent)]' : balanceAfter === 0 ? 'text-[var(--accent)]' : 'text-[var(--warning)]'}`}>
                   {formatCurrency(balanceAfter)}
                 </span>
               </div>
@@ -286,9 +292,9 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
             </div>
             <div className="flex justify-between text-sm font-bold pt-2 border-t border-[var(--border)]">
               <span className="text-[var(--text)]">
-                {receipt.balanceAfter === 0 ? '✓ Saldo cancelado' : 'Saldo restante'}
+                {receipt.balanceAfter === 0 ? '✓ Saldo cancelado' : receipt.balanceAfter < 0 ? 'Saldo a favor' : 'Saldo restante'}
               </span>
-              <span className={`mono ${receipt.balanceAfter === 0 ? 'text-[var(--accent)]' : 'text-[var(--danger)]'}`}>
+              <span className={`mono ${receipt.balanceAfter <= 0 ? 'text-[var(--accent)]' : 'text-[var(--danger)]'}`}>
                 {formatCurrency(receipt.balanceAfter)}
               </span>
             </div>

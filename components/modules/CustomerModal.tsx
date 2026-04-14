@@ -14,7 +14,7 @@ interface CustomerModalProps {
   customer?: CustomerSummary | null
 }
 
-const empty = { full_name: '', document: '', phone: '', email: '', address: '', credit_limit: '', notes: '' }
+const empty = { customer_code: '', full_name: '', document: '', phone: '', email: '', address: '', credit_limit: '', notes: '' }
 
 export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModalProps) {
   const [form, setForm] = useState(empty)
@@ -25,6 +25,7 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
   useEffect(() => {
     if (customer) {
       setForm({
+        customer_code: customer.customer_code ?? '',
         full_name: customer.full_name,
         document: customer.document ?? '',
         phone: customer.phone ?? '',
@@ -49,6 +50,7 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
     setSaving(true)
     try {
       const payload = {
+        customer_code: form.customer_code.trim() || null,
         full_name: form.full_name.trim(),
         document: form.document.trim() || null,
         phone: form.phone.trim() || null,
@@ -74,8 +76,12 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
   return (
     <Modal open={open} onClose={onClose} title={isEdit ? 'Editar cliente' : 'Nuevo cliente'} size="md">
       <div className="space-y-4">
-        <Input label="Nombre y apellido *" value={form.full_name} onChange={set('full_name')}
-          placeholder="Ej: Juan García" error={errors.full_name} />
+        <div className="grid grid-cols-2 gap-3">
+          <Input label="Nombre y apellido *" value={form.full_name} onChange={set('full_name')}
+            placeholder="Ej: Juan García" error={errors.full_name} />
+          <Input label="SKU / Código" value={form.customer_code} onChange={set('customer_code')}
+            placeholder="Ej: CLI-001" hint="Identificador único opcional" />
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <Input label="CUIT / DNI" value={form.document} onChange={set('document')} placeholder="20-12345678-9" />
           <Input label="Teléfono" value={form.phone} onChange={set('phone')} placeholder="+54 11 1234-5678" />

@@ -17,6 +17,9 @@ interface UserProfile {
     address:                string | null
     phone:                  string | null
     shipping_price_default: number
+    iva_condition:          string
+    afip_punto_venta:       number | null
+    afip_environment:       string
   } | null
 }
 

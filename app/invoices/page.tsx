@@ -39,8 +39,9 @@ interface Invoice {
   net_amount: number
   iva_amount: number
   total_amount: number
-  cae?: string
-  cae_expiry?: string
+  afip_cae?: string
+  afip_cae_vto?: string
+  afip_numero?: number
   afip_status: 'pending' | 'authorized' | 'rejected' | 'not_requested'
   afip_error?: string
   afip_requested: boolean
@@ -156,6 +157,7 @@ function InvoicesPageInner() {
   const [receptorAddress, setReceptorAddress] = useState('')
   const [receptorIva, setReceptorIva] = useState('CF')
   const [converting, setConverting] = useState(false)
+  const [authorizing, setAuthorizing] = useState(false)
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true)
@@ -204,6 +206,20 @@ function InvoicesPageInner() {
     }
   }, [data])
 
+  const handleAuthorize = async (invoice: Invoice) => {
+    setAuthorizing(true)
+    try {
+      const updated = await api.post<Invoice>(`/api/invoices/${invoice.id}/authorize`, {})
+      toast.success(`CAE obtenido: ${updated.afip_cae}`)
+      setSelectedInvoice(updated)
+      fetchInvoices()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al autorizar en AFIP')
+    } finally {
+      setAuthorizing(false)
+    }
+  }
+
   const openConvert = (invoice: Invoice) => {
     const customer = invoice.customers as { full_name: string; document?: string } | undefined
     setConvertTarget(invoice)
@@ -223,7 +239,7 @@ function InvoicesPageInner() {
     }
     setConverting(true)
     try {
-      const updated = await api.post<Invoice>('/api/invoices/convert', {
+      const converted = await api.post<Invoice>('/api/invoices/convert', {
         invoice_id: convertTarget.id,
         invoice_type: convertType,
         receptor_cuit: receptorCuit || null,
@@ -231,12 +247,20 @@ function InvoicesPageInner() {
         receptor_address: receptorAddress || null,
         receptor_iva_condition: receptorIva,
       })
-      toast.success(`Ticket X convertido a Factura ${convertType}`)
       setConvertModal(false)
-      // Abrir el detalle de la factura generada
-      setSelectedInvoice(updated)
-      setDetailModal(true)
 
+      // Autorizar en AFIP automáticamente
+      toast.loading('Autorizando en AFIP...', { id: 'afip-auth' })
+      try {
+        const authorized = await api.post<Invoice>(`/api/invoices/${converted.id}/authorize`, {})
+        toast.success(`Factura ${convertType} autorizada — CAE: ${authorized.afip_cae}`, { id: 'afip-auth' })
+        setSelectedInvoice(authorized)
+      } catch (afipErr: unknown) {
+        toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar en AFIP', { id: 'afip-auth' })
+        setSelectedInvoice(converted)
+      }
+
+      setDetailModal(true)
       fetchInvoices()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al convertir')
@@ -313,11 +337,11 @@ function InvoicesPageInner() {
         </tfoot>
       </table>
 
-      ${invoice.cae ? `<hr class="divider">
+      ${invoice.afip_cae ? `<hr class="divider">
       <div class="section">
         <div class="label">AFIP</div>
-        <div class="mono" style="font-size:12px">CAE: ${invoice.cae}</div>
-        ${invoice.cae_expiry ? `<div style="font-size:12px;color:#6a6a64">Vto. CAE: ${invoice.cae_expiry}</div>` : ''}
+        <div class="mono" style="font-size:12px">CAE: ${invoice.afip_cae}</div>
+        ${invoice.afip_cae_vto ? `<div style="font-size:12px;color:#6a6a64">Vto. CAE: ${invoice.afip_cae_vto}</div>` : ''}
       </div>` : ''}
 
       ${invoice.notes ? `<hr class="divider"><div style="font-size:12px;color:#6a6a64;font-style:italic">${invoice.notes}</div>` : ''}
@@ -573,28 +597,35 @@ function InvoicesPageInner() {
             </div>
 
             {/* AFIP status */}
-            <div className={`flex items-center gap-2 px-3 py-2.5 rounded-[var(--radius-md)] ${selectedInvoice.afip_status === 'authorized' ? 'bg-[var(--accent-subtle)]' :
+            <div className={`flex items-start gap-2 px-3 py-2.5 rounded-[var(--radius-md)] ${selectedInvoice.afip_status === 'authorized' ? 'bg-[var(--accent-subtle)]' :
               selectedInvoice.afip_status === 'rejected' ? 'bg-[var(--danger-subtle)]' :
                 'bg-[var(--surface2)]'
               }`}>
-              {selectedInvoice.afip_status === 'authorized' && <CheckCircle size={14} className="text-[var(--accent)]" />}
-              {selectedInvoice.afip_status === 'rejected' && <XCircle size={14} className="text-[var(--danger)]" />}
-              {selectedInvoice.afip_status === 'pending' && <Clock size={14} className="text-[var(--warning)]" />}
-              <div>
+              {selectedInvoice.afip_status === 'authorized' && <CheckCircle size={14} className="text-[var(--accent)] mt-0.5 shrink-0" />}
+              {selectedInvoice.afip_status === 'rejected' && <XCircle size={14} className="text-[var(--danger)] mt-0.5 shrink-0" />}
+              {selectedInvoice.afip_status === 'pending' && <Clock size={14} className="text-[var(--warning)] mt-0.5 shrink-0" />}
+              <div className="flex-1 min-w-0">
                 <p className="text-xs font-medium text-[var(--text)]">
                   {AFIP_LABELS[selectedInvoice.afip_status]}
                 </p>
-                {selectedInvoice.cae && (
-                  <p className="text-xs text-[var(--text3)] mono">CAE: {selectedInvoice.cae}</p>
+                {selectedInvoice.afip_cae && (
+                  <p className="text-xs text-[var(--text3)] mono break-all">CAE: {selectedInvoice.afip_cae}</p>
                 )}
-                {selectedInvoice.cae_expiry && (
-                  <p className="text-xs text-[var(--text3)]">Vence: {selectedInvoice.cae_expiry}</p>
+                {selectedInvoice.afip_cae_vto && (
+                  <p className="text-xs text-[var(--text3)]">Vence: {selectedInvoice.afip_cae_vto}</p>
                 )}
                 {selectedInvoice.afip_error && (
-                  <p className="text-xs text-[var(--danger)]">{selectedInvoice.afip_error}</p>
+                  <p className="text-xs text-[var(--danger)] break-words">{selectedInvoice.afip_error}</p>
                 )}
               </div>
             </div>
+
+            {/* Botón autorizar en AFIP si está pendiente */}
+            {selectedInvoice.afip_status === 'pending' && (
+              <Button onClick={() => handleAuthorize(selectedInvoice)} disabled={authorizing} className="w-full">
+                {authorizing ? 'Autorizando en AFIP...' : 'Autorizar en AFIP'}
+              </Button>
+            )}
 
             {/* Botón facturar si es X */}
             {selectedInvoice.invoice_type === 'X' && (

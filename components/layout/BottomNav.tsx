@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Package, Building2, Zap, ShoppingCart,
   BarChart3, CreditCard, Menu, X, Settings, LogOut, Sun, Moon,
   Tag, Users, PercentCircle, Warehouse, ClipboardList, Award,
-  Percent, Receipt, Truck
+  Percent, Receipt, Truck, Wallet
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState, useEffect } from 'react'
@@ -36,7 +36,8 @@ export function BottomNav() {
       items: [
         { href: '/orders', label: 'Pedidos', icon: ClipboardList, roles: ['owner', 'admin', 'cashier', 'stocker', 'seller'] },
         { href: '/invoices', label: 'Comprobantes', icon: Receipt, roles: ['owner', 'admin', 'cashier'] },
-        { href: '/customers', label: 'Cuentas ctes.', icon: Users, roles: ['owner', 'admin', 'cashier'] },
+        { href: '/customers', label: 'Clientes', icon: Users, roles: ['owner', 'admin', 'cashier'] },
+        { href: '/accounts', label: 'Cuentas ctes.', icon: Wallet, roles: ['owner', 'admin', 'cashier'] },
         { href: '/purchases', label: 'Compras', icon: Truck, roles: ['owner', 'admin', 'stocker'] },
         { href: '/warehouses', label: 'Depósitos', icon: Warehouse, roles: ['owner', 'admin', 'stocker'] },
         { href: '/pos', label: 'POS', icon: Zap, roles: ['owner', 'admin', 'cashier'] },
