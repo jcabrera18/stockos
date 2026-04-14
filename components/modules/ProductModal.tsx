@@ -163,7 +163,11 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const [newCatParent, setNewCatParent] = useState('')
   const [savingCat, setSavingCat] = useState(false)
 
+  const [minimized, setMinimized] = useState(false)
   const isEdit = !!product
+
+  // Restaurar al abrir
+  useEffect(() => { if (open) setMinimized(false) }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -354,6 +358,10 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
       onClose={onClose}
       title={isEdit ? 'Editar producto' : 'Nuevo producto'}
       size="lg"
+      minimizable
+      minimized={minimized}
+      onMinimize={() => setMinimized(true)}
+      onRestore={() => setMinimized(false)}
     >
       <div className="space-y-5">
 
@@ -432,25 +440,18 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
 
         {/* Fila 3: Categoría — árbol navegable */}
         {(() => {
-          // Solo mostrar "+ Nueva" cuando no hay selección o la seleccionada es hoja (sin hijos).
-          // Si tiene hijos, el dropdown ya los trae para seleccionar.
-          const selectedHasChildren = form.category_id
-            ? (childrenMap.get(form.category_id) ?? []).length > 0
-            : false
           return (
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium text-[var(--text2)]">Categoría</label>
-                {!selectedHasChildren && (
-                  <button
-                    type="button"
-                    onClick={() => { setNewCatName(''); setNewCatParent(form.category_id); setCategorySubModal(true) }}
-                    title="Crear categoría"
-                    className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
-                  >
-                    <Plus size={12} /> Nueva
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={() => { setNewCatName(''); setNewCatParent(form.category_id); setCategorySubModal(true) }}
+                  title="Crear categoría"
+                  className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+                >
+                  <Plus size={12} /> Nueva
+                </button>
               </div>
               <CategoryTreePicker
                 categoryMap={categoryMap}

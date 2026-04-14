@@ -496,20 +496,20 @@ console.log('workstation:', workstation)
         sale = await api.post<CompletedSale>('/api/sales', payload)
         toast.success('Venta registrada')
       }
-      // Crear Ticket X automáticamente
-      let invoiceId: string | undefined
-      try {
-        const inv = await api.post<{ id: string }>('/api/invoices', {
-          sale_id: sale.id,
-          customer_id: selectedCustomer?.id ?? null,
-        })
-        invoiceId = inv.id
-      } catch { /* no bloquear la venta si falla el ticket */ }
-
-      setCompletedSale({ ...sale, items: cart, invoice_id: invoiceId, shipping_amount: shipping })
+      // Mostrar ticket inmediatamente, sin esperar la creación del comprobante
+      const saleId = sale.id
+      const customerId = selectedCustomer?.id ?? null
+      setCompletedSale({ ...sale, items: cart, shipping_amount: shipping })
       localStorage.removeItem(POS_CART_KEY)
       setCart([]); setSaleDiscount(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
       setStep('ticket')
+
+      // Crear Ticket X en segundo plano
+      api.post<{ id: string }>('/api/invoices', { sale_id: saleId, customer_id: customerId })
+        .then(inv => {
+          setCompletedSale(prev => prev?.id === saleId ? { ...prev, invoice_id: inv.id } : prev)
+        })
+        .catch(() => { /* no bloquear la venta si falla el ticket */ })
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al procesar la venta')
     } finally { setProcessing(false) }
