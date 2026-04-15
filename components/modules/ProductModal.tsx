@@ -62,6 +62,8 @@ const emptyForm = {
   supplier_id: '',
   brand_id: '',
   cost_price: '',
+  sell_price: '',
+  use_fixed_sell_price: false,
   unit: 'unidad',
   price_mode: 'fixed' as 'fixed' | 'custom',
 }
@@ -235,6 +237,8 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         supplier_id: product.supplier_id ?? '',
         brand_id: (product as Product & { brand_id?: string }).brand_id ?? '',
         cost_price: String(product.cost_price),
+        sell_price: product.use_fixed_sell_price ? String(product.sell_price) : '',
+        use_fixed_sell_price: product.use_fixed_sell_price ?? false,
         unit: product.unit,
         price_mode: product.price_mode ?? 'fixed',
       })
@@ -285,10 +289,15 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     setSaving(true)
     try {
       const costPrice = Number(form.cost_price) || 0
-      const defaultList = priceLists.find(l => l.is_default) ?? priceLists[0]
-      const sellPrice = defaultList
-        ? Math.round(costPrice * (1 + defaultList.margin_pct / 100) * 100) / 100
-        : costPrice
+      let sellPrice: number
+      if (form.use_fixed_sell_price && Number(form.sell_price) > 0) {
+        sellPrice = Number(form.sell_price)
+      } else {
+        const defaultList = priceLists.find(l => l.is_default) ?? priceLists[0]
+        sellPrice = defaultList
+          ? Math.round(costPrice * (1 + defaultList.margin_pct / 100) * 100) / 100
+          : costPrice
+      }
 
       const payload = {
         name: form.name.trim(),
@@ -300,6 +309,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         brand_id: form.brand_id || null,
         cost_price: costPrice,
         sell_price: sellPrice,
+        use_fixed_sell_price: form.use_fixed_sell_price,
         stock_current: form.price_mode === 'custom' ? 999999 : 0,
         stock_min: 0,
         stock_max: form.price_mode === 'custom' ? 999999 : 9999,
@@ -555,6 +565,63 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
           </div>
         </div>
 
+        {/* Precio de venta fijo */}
+        {form.price_mode === 'fixed' && (
+          <div className="space-y-2">
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <div className="relative flex-shrink-0">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={form.use_fixed_sell_price}
+                  onChange={e => setForm(f => ({ ...f, use_fixed_sell_price: e.target.checked, sell_price: e.target.checked ? f.sell_price : '' }))}
+                />
+                <div className="w-9 h-5 rounded-full bg-[var(--border)] peer-checked:bg-[var(--accent)] transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[var(--text)]">Precio de venta fijo</p>
+                <p className="text-xs text-[var(--text3)]">Sobreescribe el precio de la lista. Ideal cuando no usás márgenes.</p>
+              </div>
+            </label>
+
+            {form.use_fixed_sell_price ? (
+              <Input
+                label="Precio de venta"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.sell_price}
+                onChange={set('sell_price')}
+                placeholder="0.00"
+                error={errors.sell_price}
+              />
+            ) : (
+              form.cost_price && Number(form.cost_price) > 0 && (
+                <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
+                  <p className="text-xs font-medium text-[var(--text3)] mb-1">Precio según lista</p>
+                  {priceLists.slice(0, 3).map(list => {
+                    const price = Math.round(Number(form.cost_price) * (1 + list.margin_pct / 100) * 100) / 100
+                    const gain = price - Number(form.cost_price)
+                    return (
+                      <div key={list.id} className="flex items-center justify-between text-sm">
+                        <span className="text-[var(--text2)]">{list.name}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-[var(--text3)]">
+                            +{list.margin_pct}% · ganancia ${gain.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                          </span>
+                          <span className="font-semibold mono text-[var(--accent)]">
+                            ${price.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            )}
+          </div>
+        )}
+
         {/* Precio libre toggle */}
         <label className="flex items-center gap-3 cursor-pointer select-none">
           <div className="relative flex-shrink-0">
@@ -562,7 +629,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
               type="checkbox"
               className="sr-only peer"
               checked={form.price_mode === 'custom'}
-              onChange={e => setForm(f => ({ ...f, price_mode: e.target.checked ? 'custom' : 'fixed' }))}
+              onChange={e => setForm(f => ({ ...f, price_mode: e.target.checked ? 'custom' : 'fixed', use_fixed_sell_price: e.target.checked ? false : f.use_fixed_sell_price }))}
             />
             <div className="w-9 h-5 rounded-full bg-[var(--border)] peer-checked:bg-[var(--accent)] transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4" />
           </div>
@@ -571,30 +638,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
             <p className="text-xs text-[var(--text3)]">El cajero ingresa el precio en cada venta (ej: verdura, carne por peso)</p>
           </div>
         </label>
-
-        {/* Precios por lista */}
-        {form.price_mode === 'fixed' && form.cost_price && Number(form.cost_price) > 0 && (
-          <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
-            <p className="text-xs font-medium text-[var(--text3)] mb-1">Precio según lista</p>
-            {priceLists.slice(0, 3).map(list => {
-              const price = Math.round(Number(form.cost_price) * (1 + list.margin_pct / 100) * 100) / 100
-              const gain = price - Number(form.cost_price)
-              return (
-                <div key={list.id} className="flex items-center justify-between text-sm">
-                  <span className="text-[var(--text2)]">{list.name}</span>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-[var(--text3)]">
-                      +{list.margin_pct}% · ganancia ${gain.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                    </span>
-                    <span className="font-semibold mono text-[var(--accent)]">
-                      ${price.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
 
         {/* Descripción */}
         <div className="flex flex-col gap-1">

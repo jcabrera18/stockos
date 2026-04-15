@@ -7,6 +7,7 @@ import { api } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { Printer } from 'lucide-react'
 import type { Category } from '@/types'
+import type { PriceList } from '@/app/price-lists/page'
 
 interface Supplier { id: string; name: string }
 interface Brand { id: string; name: string }
@@ -17,6 +18,9 @@ interface ProductRow {
   sku?: string
   barcode?: string
   sell_price: number
+  cost_price: number
+  use_fixed_sell_price: boolean
+  category_id: string | null
   category_name: string | null
   stock_current: number
 }
@@ -35,6 +39,17 @@ function buildCategoryTree(cats: Category[]): CategoryWithChildren[] {
   return roots
 }
 
+function getAllDescendantIds(tree: CategoryWithChildren[], rootId: string): Set<string> {
+  const result = new Set<string>()
+  function collect(node: CategoryWithChildren) {
+    result.add(node.id)
+    node.children.forEach(collect)
+  }
+  const root = tree.find(c => c.id === rootId)
+  if (root) collect(root)
+  return result
+}
+
 const selectClass = 'w-full px-3 py-2 pr-9 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] appearance-none'
 
 interface Props {
@@ -46,12 +61,14 @@ export function PrintPriceListModal({ open, onClose }: Props) {
   const [categories, setCategories] = useState<Category[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [brands, setBrands] = useState<Brand[]>([])
+  const [priceLists, setPriceLists] = useState<PriceList[]>([])
 
   const [categoryId, setCategoryId] = useState('')
   const [supplierId, setSupplierId] = useState('')
   const [brandId, setBrandId] = useState('')
   const [showStock, setShowStock] = useState(false)
   const [showBarcode, setShowBarcode] = useState(false)
+  const [selectedLists, setSelectedLists] = useState<string[]>([])
 
   const [loading, setLoading] = useState(false)
   const [products, setProducts] = useState<ProductRow[]>([])
@@ -61,6 +78,7 @@ export function PrintPriceListModal({ open, onClose }: Props) {
     if (!open) {
       setCategoryId(''); setSupplierId(''); setBrandId('')
       setShowStock(false); setShowBarcode(false)
+      setSelectedLists([])
       setProducts([]); setFetched(false)
       return
     }
@@ -68,33 +86,16 @@ export function PrintPriceListModal({ open, onClose }: Props) {
       api.get<Category[]>('/api/products/categories'),
       api.get<Supplier[]>('/api/purchases/suppliers'),
       api.get<Brand[]>('/api/brands'),
-    ]).then(([cats, sups, brnds]) => {
-      setCategories(cats); setSuppliers(sups); setBrands(brnds)
-    }).catch(() => { })
+      api.get<PriceList[]>('/api/price-lists'),
+    ]).then(([cats, sups, brnds, lists]) => {
+      setCategories(cats)
+      setSuppliers(sups)
+      setBrands(brnds)
+      setPriceLists(lists.filter(l => l.is_active))
+    }).catch(() => {})
   }, [open])
 
-  // Cascada de categorías
-  const categoryMap = new Map(categories.map(c => [c.id, c]))
   const l1Tree = buildCategoryTree(categories)
-  let catL1 = '', catL2 = '', catL3 = ''
-  if (categoryId) {
-    const cat = categoryMap.get(categoryId)
-    if (cat) {
-      if (!cat.parent_id) { catL1 = categoryId }
-      else {
-        const parent = categoryMap.get(cat.parent_id)
-        if (parent) {
-          if (!parent.parent_id) { catL1 = parent.id; catL2 = categoryId }
-          else {
-            const gp = categoryMap.get(parent.parent_id)
-            if (gp) { catL1 = gp.id; catL2 = parent.id; catL3 = categoryId }
-          }
-        }
-      }
-    }
-  }
-  const l2Options = catL1 ? (l1Tree.find(c => c.id === catL1)?.children ?? []) : []
-  const l3Options = catL2 ? (l2Options.find(c => c.id === catL2)?.children ?? []) : []
 
   const resetFetched = () => setFetched(false)
 
@@ -102,17 +103,34 @@ export function PrintPriceListModal({ open, onClose }: Props) {
     setLoading(true)
     try {
       const params: Record<string, string | number> = { limit: 500, page: 1 }
-      if (categoryId) params.category_id = categoryId
       if (supplierId) params.supplier_id = supplierId
       if (brandId) params.brand_id = brandId
+
       const res = await api.get<{ data: ProductRow[] }>('/api/products', params)
-      setProducts(res.data)
+      let filtered = res.data
+
+      if (categoryId) {
+        const descendantIds = getAllDescendantIds(l1Tree, categoryId)
+        filtered = res.data.filter(p => p.category_id && descendantIds.has(p.category_id))
+      }
+
+      setProducts(filtered)
       setFetched(true)
     } catch { } finally { setLoading(false) }
   }
 
+  const toggleList = (id: string) =>
+    setSelectedLists(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+
+  const getListPrice = (product: ProductRow, list: PriceList): number => {
+    if (product.use_fixed_sell_price) return product.sell_price
+    return product.cost_price * (1 + list.margin_pct / 100)
+  }
+
   const handlePrint = () => {
     if (!products.length) return
+
+    const selectedListObjects = priceLists.filter(l => selectedLists.includes(l.id))
 
     const groups = new Map<string, ProductRow[]>()
     products.forEach(p => {
@@ -127,7 +145,7 @@ export function PrintPriceListModal({ open, onClose }: Props) {
       brandId && brands.find(b => b.id === brandId)?.name,
     ].filter(Boolean).join(' · ') || 'Todos los productos'
 
-    const colCount = 1 + (showBarcode ? 1 : 0) + (showStock ? 1 : 0) + 1
+    const colCount = 1 + (showBarcode ? 1 : 0) + (showStock ? 1 : 0) + 1 + selectedListObjects.length
 
     const rows = [...groups.entries()].map(([cat, prods]) => `
       <tr class="cat-row">
@@ -139,6 +157,7 @@ export function PrintPriceListModal({ open, onClose }: Props) {
           ${showBarcode ? `<td class="center mono small">${p.barcode ?? '—'}</td>` : ''}
           ${showStock ? `<td class="center mono">${p.stock_current}</td>` : ''}
           <td class="price">${formatCurrency(p.sell_price)}</td>
+          ${selectedListObjects.map(list => `<td class="price list-col">${formatCurrency(getListPrice(p, list))}</td>`).join('')}
         </tr>
       `).join('')}
     `).join('')
@@ -160,6 +179,7 @@ export function PrintPriceListModal({ open, onClose }: Props) {
         td.name { font-weight:500; }
         .sku { color:#8a8a84; font-size:10px; }
         td.price { text-align:right; font-family:'Courier New',monospace; font-weight:700; font-size:13px; white-space:nowrap; }
+        td.list-col { color:#2563eb; }
         td.center { text-align:center; }
         td.mono { font-family:'Courier New',monospace; }
         td.small { font-size:10px; color:#6a6a64; }
@@ -176,6 +196,7 @@ export function PrintPriceListModal({ open, onClose }: Props) {
           ${showBarcode ? '<th class="center">Código de barras</th>' : ''}
           ${showStock ? '<th class="center">Stock</th>' : ''}
           <th class="right">Precio venta</th>
+          ${selectedListObjects.map(list => `<th class="right">${list.name}</th>`).join('')}
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -190,27 +211,13 @@ export function PrintPriceListModal({ open, onClose }: Props) {
     <Modal open={open} onClose={onClose} title="Imprimir lista de precios" size="sm">
       <div className="space-y-4">
 
-        {/* Categoría en cascada */}
+        {/* Categoría - solo nivel 1 */}
         <div className="flex flex-col gap-1">
           <label className="text-sm font-medium text-[var(--text2)]">Categoría</label>
-          <div className="flex gap-1">
-            <select value={catL1} onChange={e => { setCategoryId(e.target.value); resetFetched() }} className={selectClass}>
-              <option value="">Todas</option>
-              {l1Tree.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-            {l2Options.length > 0 && (
-              <select value={catL2} onChange={e => { setCategoryId(e.target.value || catL1); resetFetched() }} className={selectClass}>
-                <option value="">General</option>
-                {l2Options.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            )}
-            {l3Options.length > 0 && (
-              <select value={catL3} onChange={e => { setCategoryId(e.target.value || catL2); resetFetched() }} className={selectClass}>
-                <option value="">General</option>
-                {l3Options.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            )}
-          </div>
+          <select value={categoryId} onChange={e => { setCategoryId(e.target.value); resetFetched() }} className={selectClass}>
+            <option value="">Todas</option>
+            {l1Tree.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
         </div>
 
         <Select label="Proveedor"
@@ -223,19 +230,45 @@ export function PrintPriceListModal({ open, onClose }: Props) {
           value={brandId}
           onChange={e => { setBrandId(e.target.value); resetFetched() }} />
 
-        {/* Opciones */}
-        <div className="flex gap-5">
-          <label className="flex items-center gap-2 text-sm text-[var(--text2)] cursor-pointer">
-            <input type="checkbox" checked={showStock} onChange={e => setShowStock(e.target.checked)}
-              className="w-4 h-4 accent-[var(--accent)]" />
-            Mostrar stock
-          </label>
-          <label className="flex items-center gap-2 text-sm text-[var(--text2)] cursor-pointer">
-            <input type="checkbox" checked={showBarcode} onChange={e => setShowBarcode(e.target.checked)}
-              className="w-4 h-4 accent-[var(--accent)]" />
-            Código de barras
-          </label>
+        {/* Opciones de columnas */}
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-[var(--text2)]">Columnas</label>
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            <label className="flex items-center gap-2 text-sm text-[var(--text2)] cursor-pointer">
+              <input type="checkbox" checked={showStock} onChange={e => setShowStock(e.target.checked)}
+                className="w-4 h-4 accent-[var(--accent)]" />
+              Mostrar stock
+            </label>
+            <label className="flex items-center gap-2 text-sm text-[var(--text2)] cursor-pointer">
+              <input type="checkbox" checked={showBarcode} onChange={e => setShowBarcode(e.target.checked)}
+                className="w-4 h-4 accent-[var(--accent)]" />
+              Código de barras
+            </label>
+          </div>
         </div>
+
+        {/* Listas de precio adicionales */}
+        {priceLists.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-[var(--text2)]">Precios por lista</label>
+            <div className="flex flex-col gap-1.5">
+              {priceLists.map(list => (
+                <label key={list.id} className="flex items-center gap-2 text-sm text-[var(--text2)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedLists.includes(list.id)}
+                    onChange={() => toggleList(list.id)}
+                    className="w-4 h-4 accent-[var(--accent)]"
+                  />
+                  <span className="font-medium">{list.name}</span>
+                  {list.description && (
+                    <span className="text-xs text-[var(--text3)]">— {list.description}</span>
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
 
         {fetched && (
           <div className="px-3 py-2 bg-[var(--accent-subtle)] rounded-[var(--radius-md)] text-sm text-[var(--accent)] font-medium">

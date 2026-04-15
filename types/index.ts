@@ -58,6 +58,7 @@ export interface Product {
   stock_max: number
   unit: string
   price_mode: 'fixed' | 'custom'
+  use_fixed_sell_price: boolean
   is_active: boolean
   created_at: string
   updated_at: string

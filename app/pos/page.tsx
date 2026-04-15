@@ -368,17 +368,19 @@ export default function POSPage() {
             setQuery(''); setResults([])
             setTimeout(() => searchRef.current?.focus(), 50)
             if (existingItem.product.price_mode !== 'custom') {
-              fetchPrice(knownProductId, newQty).then(pricing => {
-                const promo = evaluatePromo(
-                  existingItem.product as Parameters<typeof evaluatePromo>[0],
-                  newQty, pricing.price, promotionsRef.current,
-                )
-                setCart(prev => prev.map(i =>
-                  i.product.id === knownProductId
-                    ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
-                    : i,
-                ))
-              }).catch(() => {})
+              if (existingItem.product.use_fixed_sell_price) {
+                const promo = evaluatePromo(existingItem.product as Parameters<typeof evaluatePromo>[0], newQty, existingItem.unit_price, promotionsRef.current)
+                setCart(prev => prev.map(i => i.product.id === knownProductId ? { ...i, quantity: newQty, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id } : i))
+              } else {
+                fetchPrice(knownProductId, newQty).then(pricing => {
+                  const promo = evaluatePromo(existingItem.product as Parameters<typeof evaluatePromo>[0], newQty, pricing.price, promotionsRef.current)
+                  setCart(prev => prev.map(i =>
+                    i.product.id === knownProductId
+                      ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
+                      : i,
+                  ))
+                }).catch(() => {})
+              }
             }
             return
           }
@@ -529,7 +531,11 @@ export default function POSPage() {
     if (isCustomPrice) return
 
     try {
-      const resolvedPricing = pricing ?? await fetchPrice(product.id, newQty)
+      const resolvedPricing = pricing ?? (
+        product.use_fixed_sell_price
+          ? { price: product.sell_price, list_name: 'Precio fijo', margin_pct: 0, rule_source: 'fixed' } as PricingResult
+          : await fetchPrice(product.id, newQty)
+      )
       const promo = evaluatePromo(
         product as Parameters<typeof evaluatePromo>[0],
         newQty,
@@ -558,6 +564,11 @@ export default function POSPage() {
     const newQty = Math.max(1, item.quantity + delta)
     setCart(prev => prev.map(i => i.product.id === id ? { ...i, quantity: newQty } : i))
     if (item.product.price_mode === 'custom') return
+    if (item.product.use_fixed_sell_price) {
+      const promo = evaluatePromo(item.product as Parameters<typeof evaluatePromo>[0], newQty, item.unit_price, promotionsRef.current)
+      setCart(prev => prev.map(i => i.product.id === id ? { ...i, quantity: newQty, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id } : i))
+      return
+    }
     fetchPrice(id, newQty).then(pricing => {
       const promo = evaluatePromo(
         item.product as Parameters<typeof evaluatePromo>[0],
