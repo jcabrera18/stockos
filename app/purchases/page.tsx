@@ -18,6 +18,29 @@ import { toast } from 'sonner'
 
 type Tab          = 'orders' | 'suppliers'
 type StatusFilter = 'all' | 'pending' | 'received' | 'cancelled'
+type CostDecision = 'keep' | 'new_price' | 'weighted' | 'highest'
+
+interface CostPreviewItem {
+  product_id:   string
+  product_name: string
+  quantity:     number
+  order_cost:   number
+  current_cost: number
+  weighted_avg: number
+  highest:      number
+  cost_changed: boolean
+}
+
+const COST_OPTIONS: {
+  key: CostDecision
+  label: string
+  getValue: (i: CostPreviewItem) => number
+}[] = [
+  { key: 'keep',      label: 'Mantener actual', getValue: i => i.current_cost  },
+  { key: 'new_price', label: 'Precio orden',    getValue: i => i.order_cost    },
+  { key: 'weighted',  label: 'Prom. pond.',     getValue: i => i.weighted_avg  },
+  { key: 'highest',   label: 'Mayor precio',    getValue: i => i.highest       },
+]
 
 const statusConfig: Record<string, { label: string; variant: 'warning' | 'success' | 'danger' | 'default' }> = {
   pending:   { label: 'Pendiente',  variant: 'warning' },
@@ -42,8 +65,12 @@ export default function PurchasesPage() {
   const [loadingDetail, setLoadingDetail] = useState(false)
 
   // Recibir mercadería
-  const [receiveModal, setReceiveModal] = useState(false)
-  const [receiving, setReceiving]       = useState(false)
+  const [receiveModal, setReceiveModal]       = useState(false)
+  const [receiving, setReceiving]             = useState(false)
+  const [previewLoading, setPreviewLoading]   = useState(false)
+  const [costPreviewModal, setCostPreviewModal] = useState(false)
+  const [previewItems, setPreviewItems]       = useState<CostPreviewItem[]>([])
+  const [costDecisions, setCostDecisions]     = useState<Record<string, CostDecision>>({})
 
   // Cancelar orden
   const [cancelModal, setCancelModal] = useState(false)
@@ -187,15 +214,37 @@ export default function PurchasesPage() {
   }
 
   // ── Recibir orden ──────────────────────────────────────
-  const handleReceive = async () => {
+  const handleReceiveClick = async () => {
+    if (!detailOrder) return
+    setPreviewLoading(true)
+    try {
+      const preview = await api.get<{ items: CostPreviewItem[] }>(
+        `/api/purchases/${detailOrder.id}/receive-preview`
+      )
+      const changed = preview.items.filter(i => i.cost_changed)
+      if (changed.length === 0) {
+        setReceiveModal(true)
+      } else {
+        setPreviewItems(preview.items)
+        const defaults: Record<string, CostDecision> = {}
+        changed.forEach(i => { defaults[i.product_id] = 'weighted' })
+        setCostDecisions(defaults)
+        setCostPreviewModal(true)
+      }
+    } catch {
+      toast.error('Error al cargar la previsualización')
+    } finally { setPreviewLoading(false) }
+  }
+
+  const handleReceive = async (decisions: Record<string, CostDecision> = {}) => {
     if (!detailOrder) return
     setReceiving(true)
     try {
-      await api.post(`/api/purchases/${detailOrder.id}/receive`, {})
+      await api.post(`/api/purchases/${detailOrder.id}/receive`, { cost_decisions: decisions })
       toast.success('Mercadería recibida — stock actualizado')
+      setCostPreviewModal(false)
       setReceiveModal(false)
       fetchOrders()
-      // Refrescar detalle
       const updated = await api.get<PurchaseOrder>(`/api/purchases/${detailOrder.id}`)
       setDetailOrder(updated)
     } catch (err: unknown) {
@@ -422,9 +471,9 @@ export default function PurchasesPage() {
       <ConfirmDialog
         open={receiveModal}
         onClose={() => setReceiveModal(false)}
-        onConfirm={handleReceive}
+        onConfirm={() => handleReceive({})}
         title="Recibir mercadería"
-        message="¿Confirmás la recepción de esta orden? El stock de los productos se actualizará en el depósito seleccionado y se recalculará el precio de costo promedio."
+        message="¿Confirmás la recepción de esta orden? El stock de los productos se actualizará en el depósito seleccionado."
         confirmLabel="Confirmar recepción"
         loading={receiving}
       />
@@ -556,16 +605,100 @@ export default function PurchasesPage() {
                         Cancelar orden
                       </button>
                       <button
-                        onClick={() => setReceiveModal(true)}
-                        className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:opacity-90 transition-opacity"
+                        onClick={handleReceiveClick}
+                        disabled={previewLoading}
+                        className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-70"
                       >
-                        Confirmar recepción
+                        {previewLoading
+                          ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Cargando...</>
+                          : 'Confirmar recepción'
+                        }
                       </button>
                     </>
                   )}
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal decisión de costos al recibir */}
+      {costPreviewModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
+          onClick={e => { if (e.target === e.currentTarget) setCostPreviewModal(false) }}
+        >
+          <div className="w-full max-w-lg bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="flex items-start justify-between px-5 py-4 border-b border-[var(--border)]">
+              <div>
+                <h2 className="text-base font-semibold text-[var(--text)]">Confirmar recepción</h2>
+                <p className="text-xs text-[var(--text3)] mt-0.5">
+                  {previewItems.filter(i => i.cost_changed).length} producto(s) con cambio de precio costo — elegí cómo actualizar cada uno
+                </p>
+              </div>
+              <button onClick={() => setCostPreviewModal(false)} className="p-1 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)]">✕</button>
+            </div>
+
+            <div className="p-5 overflow-y-auto flex-1 space-y-5">
+              {previewItems.filter(i => i.cost_changed).map(item => (
+                <div key={item.product_id}>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium text-[var(--text)]">{item.product_name}</p>
+                    <span className="text-xs text-[var(--text3)] mono">
+                      {formatCurrency(item.current_cost)} → {formatCurrency(item.order_cost)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {COST_OPTIONS.map(opt => {
+                      const val = opt.getValue(item)
+                      const selected = (costDecisions[item.product_id] ?? 'weighted') === opt.key
+                      return (
+                        <button
+                          key={opt.key}
+                          type="button"
+                          onClick={() => setCostDecisions(d => ({ ...d, [item.product_id]: opt.key }))}
+                          className={`flex flex-col items-start px-3 py-2 text-xs rounded-[var(--radius-md)] border transition-colors text-left ${
+                            selected
+                              ? 'bg-[var(--accent)] text-white border-[var(--accent)]'
+                              : 'bg-[var(--surface2)] text-[var(--text2)] border-[var(--border)] hover:border-[var(--accent)]'
+                          }`}
+                        >
+                          <span className="font-medium">{opt.label}</span>
+                          <span className={`mono font-bold ${selected ? 'text-white/90' : 'text-[var(--text)]'}`}>
+                            {formatCurrency(val)}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              {previewItems.filter(i => !i.cost_changed).length > 0 && (
+                <p className="text-xs text-[var(--text3)] pt-3 border-t border-[var(--border)]">
+                  {previewItems.filter(i => !i.cost_changed).length} producto(s) sin cambio de costo — se aplica promedio ponderado.
+                </p>
+              )}
+            </div>
+
+            <div className="px-5 py-4 border-t border-[var(--border)] flex justify-end gap-2">
+              <button
+                onClick={() => setCostPreviewModal(false)}
+                className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--surface2)] text-[var(--text2)] border border-[var(--border)] hover:opacity-80 transition-opacity"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleReceive(costDecisions)}
+                disabled={receiving}
+                className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-60"
+              >
+                {receiving && <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                Confirmar recepción
+              </button>
+            </div>
           </div>
         </div>
       )}

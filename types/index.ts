@@ -72,6 +72,7 @@ export interface StockSummary extends Product {
   supplier_name?: string
   stock_status: 'ok' | 'bajo' | 'critico' | 'sin_stock'
   stock_reserved: number
+  default_list_price?: number
 }
 
 export interface StockMovement {

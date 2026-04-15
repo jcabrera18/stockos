@@ -5,9 +5,9 @@ import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
-import { cn } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
-import { Plus, X, ChevronRight } from 'lucide-react'
+import { Plus, X, ChevronRight, ChevronDown } from 'lucide-react'
 import type { Product, Category, Supplier } from '@/types'
 import type { PriceList } from '@/app/price-lists/page'
 import { SupplierModal } from '@/components/modules/SupplierModal'
@@ -28,6 +28,24 @@ const UNITS = [
   { value: 'caja', label: 'Caja' },
   { value: 'pack', label: 'Pack' },
 ]
+
+interface CostHistoryEntry {
+  id:                string
+  supplier_id:       string | null
+  purchase_order_id: string | null
+  unit_cost:         number
+  applied_cost:      number
+  decision:          string
+  recorded_at:       string
+  suppliers?:        { name: string } | null
+}
+
+const DECISION_LABELS: Record<string, string> = {
+  keep:      'Mantener actual',
+  new_price: 'Precio orden',
+  weighted:  'Prom. pond.',
+  highest:   'Mayor precio',
+}
 
 const _refCache: {
   categories: Category[] | null
@@ -163,11 +181,32 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const [newCatParent, setNewCatParent] = useState('')
   const [savingCat, setSavingCat] = useState(false)
 
+  const [costHistoryOpen, setCostHistoryOpen]       = useState(false)
+  const [costHistory, setCostHistory]               = useState<CostHistoryEntry[]>([])
+  const [costHistoryLoading, setCostHistoryLoading] = useState(false)
+
   const [minimized, setMinimized] = useState(false)
   const isEdit = !!product
 
-  // Restaurar al abrir
-  useEffect(() => { if (open) setMinimized(false) }, [open])
+  // Restaurar al abrir / limpiar historial al cerrar
+  useEffect(() => {
+    if (open) { setMinimized(false) }
+    else { setCostHistoryOpen(false); setCostHistory([]) }
+  }, [open])
+
+  const handleCostHistoryToggle = async () => {
+    if (costHistoryOpen) { setCostHistoryOpen(false); return }
+    setCostHistoryOpen(true)
+    if (costHistory.length > 0 || costHistoryLoading) return
+    setCostHistoryLoading(true)
+    try {
+      const data = await api.get<CostHistoryEntry[]>(
+        `/api/purchases/product-cost-history/${product!.id}`
+      )
+      setCostHistory(data)
+    } catch { toast.error('Error al cargar historial de costos') }
+    finally { setCostHistoryLoading(false) }
+  }
 
   useEffect(() => {
     if (!open) return
@@ -568,6 +607,61 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
             className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] transition-colors resize-none"
           />
         </div>
+
+        {/* Historial de costos — solo en edición */}
+        {isEdit && (
+          <div className="border border-[var(--border)] rounded-[var(--radius-md)] overflow-hidden">
+            <button
+              type="button"
+              onClick={handleCostHistoryToggle}
+              className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-medium text-[var(--text2)] hover:bg-[var(--surface2)] transition-colors"
+            >
+              <span>Historial de costos por proveedor</span>
+              <ChevronDown size={14} className={cn('transition-transform', costHistoryOpen && 'rotate-180')} />
+            </button>
+
+            {costHistoryOpen && (
+              <div className="border-t border-[var(--border)]">
+                {costHistoryLoading ? (
+                  <div className="flex justify-center py-4">
+                    <div className="w-5 h-5 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
+                  </div>
+                ) : costHistory.length === 0 ? (
+                  <p className="text-xs text-[var(--text3)] text-center py-4">Sin historial de compras registrado</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-[var(--border)]">
+                          <th className="text-left px-3 py-2 text-[var(--text3)] font-medium">Fecha</th>
+                          <th className="text-left px-3 py-2 text-[var(--text3)] font-medium">Proveedor</th>
+                          <th className="text-right px-3 py-2 text-[var(--text3)] font-medium">P. orden</th>
+                          <th className="text-right px-3 py-2 text-[var(--text3)] font-medium">Aplicado</th>
+                          <th className="text-left px-3 py-2 text-[var(--text3)] font-medium">Criterio</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--border)]">
+                        {costHistory.map(h => (
+                          <tr key={h.id}>
+                            <td className="px-3 py-2 mono text-[var(--text2)]">
+                              {new Date(h.recorded_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' })}
+                            </td>
+                            <td className="px-3 py-2 text-[var(--text)]">
+                              {h.suppliers?.name ?? <span className="text-[var(--text3)]">—</span>}
+                            </td>
+                            <td className="px-3 py-2 text-right mono text-[var(--text2)]">{formatCurrency(h.unit_cost)}</td>
+                            <td className="px-3 py-2 text-right mono font-medium text-[var(--text)]">{formatCurrency(h.applied_cost)}</td>
+                            <td className="px-3 py-2 text-[var(--text3)]">{DECISION_LABELS[h.decision] ?? h.decision}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Footer sticky */}
         <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">

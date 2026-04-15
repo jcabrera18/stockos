@@ -524,7 +524,7 @@ export default function ProductsPage() {
                         {formatCurrency(product.cost_price)}
                       </td>
                       <td className="px-4 py-3 text-right mono font-medium text-[var(--text)]">
-                        {formatCurrency(product.sell_price)}
+                        {formatCurrency(product.default_list_price ?? product.sell_price)}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
