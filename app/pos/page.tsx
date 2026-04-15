@@ -25,6 +25,8 @@ interface CartItem {
   applied_margin?: number
   promo_label?: string
   promotion_id?: string | null
+  // UI no-bloqueante: el item se agrega al instante, se resuelve en background
+  status?: 'pending' | 'resolved' | 'error'
 }
 
 interface CompletedSale {
@@ -136,6 +138,8 @@ export default function POSPage() {
 
   // Mapa barcode → product_id para re-escaneos sin llamada al servidor
   const barcodeMapRef = useRef<Map<string, string>>(new Map())
+  // Mapa barcode → tempId para detectar scans duplicados mientras el item está pending
+  const pendingBarcodesRef = useRef<Map<string, string>>(new Map())
 
   const cartRef = useRef(cart)
   useEffect(() => { cartRef.current = cart }, [cart])
@@ -267,26 +271,65 @@ export default function POSPage() {
           }
         }
 
-        // ── Nuevo producto — endpoint unificado ───────────────────────────
-        // 1 HTTP call en lugar de barcode + price + promotions/check
-        setSearching(true)
-        try {
-          const result = await api.post<ScanResult>('/api/pos/scan', {
-            barcode:      trimmed,
-            warehouse_id: selectedWarehouse?.id ?? null,
-            quantity:     pendingQtyRef.current,
-          })
-          await addToCart(result.product, pendingQtyRef.current, result.pricing)
+        // ── Nuevo producto — optimistic: se agrega al instante, resuelve en background ──
+        // Si ya hay un pending para este barcode, solo incrementamos cantidad
+        const existingPendingId = pendingBarcodesRef.current.get(trimmed)
+        if (existingPendingId) {
+          const qty = pendingQtyRef.current
+          setCart(prev => prev.map(i => i.product.id === existingPendingId ? { ...i, quantity: i.quantity + qty } : i))
+          setPendingQty(1); pendingQtyRef.current = 1
           setQuery(''); setResults([])
-        } catch {
-          // Producto no encontrado — mostramos búsqueda de texto como fallback
-          const res = await api.get<{ data: Product[] }>('/api/products', {
-            search: trimmed, limit: 8,
-            ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}),
-          }).catch(() => ({ data: [] as Product[] }))
-          setResults(res.data)
-          setActiveResultIndex(res.data.length > 0 ? 0 : -1)
-        } finally { setSearching(false) }
+          setTimeout(() => searchRef.current?.focus(), 50)
+          return
+        }
+
+        const tempId  = `pending_${trimmed}_${Date.now()}`
+        const qty     = pendingQtyRef.current
+        const tempItem: CartItem = {
+          product: {
+            id: tempId, name: trimmed, barcode: trimmed,
+            sell_price: 0, cost_price: 0, stock_current: 999,
+            price_mode: 'fixed', unit: 'un', is_active: true,
+          } as Product,
+          quantity: qty, unit_price: 0, discount: 0, status: 'pending',
+        }
+
+        pendingBarcodesRef.current.set(trimmed, tempId)
+        setCart(prev => [...prev, tempItem])
+        setPendingQty(1); pendingQtyRef.current = 1
+        setQuery(''); setResults([])
+        setTimeout(() => searchRef.current?.focus(), 50)
+
+        api.post<ScanResult>('/api/pos/scan', {
+          barcode: trimmed, warehouse_id: selectedWarehouse?.id ?? null, quantity: qty,
+        }).then(result => {
+          barcodeMapRef.current.set(trimmed, result.product.id)
+          pendingBarcodesRef.current.delete(trimmed)
+          // Si el producto ya existe en el carrito (otro canal), fusionar
+          setCart(prev => {
+            const alreadyExists = prev.find(i => i.product.id === result.product.id)
+            if (alreadyExists) {
+              return prev
+                .filter(i => i.product.id !== tempId)
+                .map(i => i.product.id === result.product.id ? { ...i, quantity: i.quantity + qty } : i)
+            }
+            const promo = evaluatePromo(result.product as Parameters<typeof evaluatePromo>[0], qty, result.pricing.price, promotionsRef.current)
+            return prev.map(i => i.product.id === tempId ? {
+              ...i,
+              product: result.product,
+              unit_price: result.pricing.price,
+              applied_list: result.pricing.list_name,
+              applied_margin: result.pricing.margin_pct,
+              discount: promo.discount,
+              promo_label: promo.promo_label,
+              promotion_id: promo.promotion_id,
+              status: 'resolved',
+            } : i)
+          })
+        }).catch(() => {
+          pendingBarcodesRef.current.delete(trimmed)
+          setCart(prev => prev.map(i => i.product.id === tempId ? { ...i, status: 'error' } : i))
+        })
         return
       }
 
@@ -449,6 +492,7 @@ export default function POSPage() {
   const shipping = shippingEnabled ? shippingAmount : 0
   const total = Math.max(0, subtotal - saleDiscount) + shipping
   const hasMissingCustomPrice = cart.some(i => i.product.price_mode === 'custom' && i.unit_price === 0)
+  const hasPendingItems = cart.some(i => i.status === 'pending')
 
   const handleConfirm = async () => {
     if (cart.length === 0) return
@@ -668,18 +712,50 @@ console.log('workstation:', workstation)
                     if (activeResultIndex >= 0 && results[activeResultIndex]) { addToCart(results[activeResultIndex], pendingQtyRef.current); setActiveResultIndex(-1); return }
                     if (results.length === 1) { addToCart(results[0], pendingQtyRef.current); setActiveResultIndex(-1); return }
                     if (query.trim()) {
-                      setSearching(true)
-                      try {
-                        if (/^\d{8,14}$/.test(query.trim())) {
-                          const result = await api.post<ScanResult>('/api/pos/scan', {
-                            barcode: query.trim(),
-                            warehouse_id: selectedWarehouse?.id ?? null,
-                            quantity: pendingQtyRef.current,
-                          })
-                          await addToCart(result.product, pendingQtyRef.current, result.pricing)
+                      const trimmedQ = query.trim()
+                      if (/^\d{8,14}$/.test(trimmedQ)) {
+                        // Barcode via Enter — mismo flujo no-bloqueante que el debounce
+                        const knownId = barcodeMapRef.current.get(trimmedQ)
+                        if (knownId) {
+                          const existing = cartRef.current.find(i => i.product.id === knownId)
+                          if (existing) {
+                            const newQty = existing.quantity + pendingQtyRef.current
+                            setCart(prev => prev.map(i => i.product.id === knownId ? { ...i, quantity: newQty } : i))
+                            setPendingQty(1); pendingQtyRef.current = 1; setQuery('')
+                            return
+                          }
+                        }
+                        const existingPendingIdEnter = pendingBarcodesRef.current.get(trimmedQ)
+                        if (existingPendingIdEnter) {
+                          setCart(prev => prev.map(i => i.product.id === existingPendingIdEnter ? { ...i, quantity: i.quantity + pendingQtyRef.current } : i))
+                          setPendingQty(1); pendingQtyRef.current = 1; setQuery('')
                           return
                         }
-                        const res = await api.get<{ data: Product[] }>('/api/products', { search: query.trim(), limit: 8, ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}) })
+                        const tempIdEnter = `pending_${trimmedQ}_${Date.now()}`
+                        const qtyEnter = pendingQtyRef.current
+                        pendingBarcodesRef.current.set(trimmedQ, tempIdEnter)
+                        setCart(prev => [...prev, {
+                          product: { id: tempIdEnter, name: trimmedQ, barcode: trimmedQ, sell_price: 0, cost_price: 0, stock_current: 999, price_mode: 'fixed', unit: 'un', is_active: true } as Product,
+                          quantity: qtyEnter, unit_price: 0, discount: 0, status: 'pending',
+                        }])
+                        setPendingQty(1); pendingQtyRef.current = 1; setQuery('')
+                        api.post<ScanResult>('/api/pos/scan', { barcode: trimmedQ, warehouse_id: selectedWarehouse?.id ?? null, quantity: qtyEnter })
+                          .then(result => {
+                            barcodeMapRef.current.set(trimmedQ, result.product.id)
+                            pendingBarcodesRef.current.delete(trimmedQ)
+                            setCart(prev => {
+                              const alreadyExists = prev.find(i => i.product.id === result.product.id)
+                              if (alreadyExists) return prev.filter(i => i.product.id !== tempIdEnter).map(i => i.product.id === result.product.id ? { ...i, quantity: i.quantity + qtyEnter } : i)
+                              const promo = evaluatePromo(result.product as Parameters<typeof evaluatePromo>[0], qtyEnter, result.pricing.price, promotionsRef.current)
+                              return prev.map(i => i.product.id === tempIdEnter ? { ...i, product: result.product, unit_price: result.pricing.price, applied_list: result.pricing.list_name, applied_margin: result.pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id, status: 'resolved' } : i)
+                            })
+                          })
+                          .catch(() => { pendingBarcodesRef.current.delete(trimmedQ); setCart(prev => prev.map(i => i.product.id === tempIdEnter ? { ...i, status: 'error' } : i)) })
+                        return
+                      }
+                      setSearching(true)
+                      try {
+                        const res = await api.get<{ data: Product[] }>('/api/products', { search: trimmedQ, limit: 8, ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}) })
                         setResults(res.data)
                         if (res.data.length === 1) addToCart(res.data[0], pendingQtyRef.current)
                       } catch { setResults([]) } finally { setSearching(false) }
@@ -827,10 +903,17 @@ console.log('workstation:', workstation)
               <p className="text-xs">El carrito está vacío</p>
             </div>
           ) : cart.map(item => (
-            <div key={item.product.id} className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3.5 space-y-3">
+            <div key={item.product.id} className={`rounded-[var(--radius-md)] p-3.5 space-y-3 ${item.status === 'error' ? 'bg-[var(--danger-subtle,#fee2e2)] border border-[var(--danger)]' : item.status === 'pending' ? 'bg-[var(--surface2)] opacity-70' : 'bg-[var(--surface2)]'}`}>
               {/* Nombre + X */}
               <div className="flex items-start justify-between gap-2">
-                <p className="text-base font-semibold text-[var(--text)] leading-tight">{item.product.name}</p>
+                <div className="flex items-center gap-2 min-w-0">
+                  {item.status === 'pending' && (
+                    <span className="flex-shrink-0 w-3.5 h-3.5 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
+                  )}
+                  <p className={`text-base font-semibold leading-tight truncate ${item.status === 'error' ? 'text-[var(--danger)]' : 'text-[var(--text)]'}`}>
+                    {item.status === 'error' ? `No encontrado: ${item.product.name}` : item.product.name}
+                  </p>
+                </div>
                 <button onClick={() => removeItem(item.product.id)} className="p-1 text-[var(--text3)] hover:text-[var(--danger)] flex-shrink-0 transition-colors"><X size={15} /></button>
               </div>
 
@@ -961,7 +1044,10 @@ console.log('workstation:', workstation)
                 Ingresá el precio de los productos marcados como "precio libre"
               </p>
             )}
-            <button onClick={() => setStep('payment')} disabled={cart.length === 0 || hasMissingCustomPrice}
+            {hasPendingItems && (
+              <p className="text-xs text-[var(--text3)] text-center">Resolviendo productos...</p>
+            )}
+            <button onClick={() => setStep('payment')} disabled={cart.length === 0 || hasMissingCustomPrice || hasPendingItems}
               className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-[var(--radius-md)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed active:scale-95">
               Cobrar {cart.length > 0 ? formatCurrency(total) : ''}
             </button>
