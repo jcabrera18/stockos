@@ -9,16 +9,16 @@ import { toast } from 'sonner'
 import type { CustomerSummary } from '@/app/customers/page'
 
 interface QuickCustomerModalProps {
-  open:          boolean
-  onClose:       () => void
-  onCreated:     (customer: CustomerSummary) => void
-  initialName?:  string  // pre-carga el nombre que escribió el cajero
+  open: boolean
+  onClose: () => void
+  onCreated: (customer: CustomerSummary) => void
+  initialName?: string  // pre-carga el nombre que escribió el cajero
 }
 
 export function QuickCustomerModal({
   open, onClose, onCreated, initialName = ''
 }: QuickCustomerModalProps) {
-  const [form, setForm]     = useState({ full_name: initialName, document: '', phone: '', credit_limit: '' })
+  const [form, setForm] = useState({ full_name: initialName, document: '', phone: '', credit_limit: '' })
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
@@ -40,9 +40,9 @@ export function QuickCustomerModal({
     setSaving(true)
     try {
       const customer = await api.post<CustomerSummary>('/api/customers', {
-        full_name:    form.full_name.trim(),
-        document:     form.document.trim()  || null,
-        phone:        form.phone.trim()     || null,
+        full_name: form.full_name.trim(),
+        document: form.document.trim() || null,
+        phone: form.phone.trim() || null,
         credit_limit: Number(form.credit_limit) || 0,
       })
       toast.success(`Cliente "${customer.full_name}" creado`)
@@ -93,16 +93,18 @@ export function QuickCustomerModal({
           value={form.credit_limit}
           onChange={set('credit_limit')}
           placeholder="0 = sin límite"
-          hint="Podés modificarlo después desde Cuentas"
+          hint="Podés modificarlo después desde Clientes"
         />
 
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="secondary" onClick={onClose} disabled={saving}>
-            Cancelar
-          </Button>
-          <Button onClick={handleSave} loading={saving}>
-            Crear y seleccionar
-          </Button>
+        <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={onClose} disabled={saving}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSave} loading={saving}>
+              Crear y seleccionar
+            </Button>
+          </div>
         </div>
       </div>
     </Modal>

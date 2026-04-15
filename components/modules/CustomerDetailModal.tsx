@@ -8,7 +8,7 @@ import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import type { CustomerSummary } from '@/app/customers/page'
 import type { Pagination as PaginationType } from '@/types'
-import { CreditCard, TrendingUp, TrendingDown, SlidersHorizontal } from 'lucide-react'
+import { CreditCard, TrendingUp, TrendingDown, SlidersHorizontal, MapPin, Calendar } from 'lucide-react'
 
 interface Movement {
   id: string
@@ -93,7 +93,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
           <div className="flex flex-col gap-2">
             {customer.document && (
               <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)]">
-                <p className="text-xs text-[var(--text3)]">Documento</p>
+                <p className="text-xs text-[var(--text3)]">{customer.document_type ?? 'Documento'}</p>
                 <p className="text-sm mono font-medium text-[var(--text)]">{customer.document}</p>
               </div>
             )}
@@ -105,6 +105,41 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
             )}
           </div>
         </div>
+
+        {/* Datos de contacto / ubicación */}
+        {(customer.email || customer.address || customer.locality || customer.province || customer.birthdate) && (
+          <div className="grid grid-cols-2 gap-2">
+            {customer.email && (
+              <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] col-span-2">
+                <p className="text-xs text-[var(--text3)]">Email</p>
+                <p className="text-sm text-[var(--text)] truncate">{customer.email}</p>
+              </div>
+            )}
+            {(customer.locality || customer.province) && (
+              <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] flex items-start gap-2">
+                <MapPin size={13} className="text-[var(--text3)] mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-[var(--text3)]">Ubicación</p>
+                  <p className="text-sm text-[var(--text)]">
+                    {[customer.locality, customer.province, customer.country].filter(Boolean).join(', ')}
+                  </p>
+                  {customer.postal_code && <p className="text-xs text-[var(--text3)]">CP {customer.postal_code}</p>}
+                </div>
+              </div>
+            )}
+            {customer.birthdate && (
+              <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] flex items-start gap-2">
+                <Calendar size={13} className="text-[var(--text3)] mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-[var(--text3)]">Nacimiento</p>
+                  <p className="text-sm text-[var(--text)]">
+                    {new Date(customer.birthdate + 'T00:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Botón pagar */}
         <Button onClick={onPayment} className="w-full">

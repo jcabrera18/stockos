@@ -23,9 +23,16 @@ export interface CustomerSummary {
   business_id: string
   customer_code?: string
   full_name: string
+  document_type?: string
   document?: string
   phone?: string
   email?: string
+  address?: string
+  locality?: string
+  province?: string
+  postal_code?: string
+  country?: string
+  birthdate?: string
   credit_limit: number
   current_balance: number
   available_credit: number | null
