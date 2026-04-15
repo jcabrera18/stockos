@@ -250,7 +250,7 @@ export default function POSPage() {
   useEffect(() => { loadPromotions() }, [loadPromotions])
 
   // Keyboard handler (uses ref to avoid stale closures)
-  const kbHandlerRef = useRef<(e: KeyboardEvent) => void>()
+  const kbHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null)
   useEffect(() => {
     kbHandlerRef.current = (e: KeyboardEvent) => {
       const active = document.activeElement
