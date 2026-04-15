@@ -15,6 +15,8 @@ import type { Pagination as PaginationType } from '@/types'
 import { FileText, CheckCircle, Clock, XCircle, RefreshCw, Printer } from 'lucide-react'
 import { toast } from 'sonner'
 import { useRouter, useSearchParams } from 'next/navigation'
+import { useAuth } from '@/hooks/useAuth'
+import QRCode from 'qrcode'
 
 interface InvoiceItem {
   id: string
@@ -87,6 +89,42 @@ const PAYMENT_LABELS: Record<string, string> = {
 }
 
 type TypeFilter = '' | 'X' | 'A' | 'B' | 'C' | 'R'
+
+const IVA_LABELS: Record<string, string> = {
+  RI: 'Responsable Inscripto',
+  MO: 'Monotributista',
+  EX: 'Exento',
+  CF: 'Consumidor Final',
+  M: 'Monotributista',
+}
+
+function buildAfipQrUrl(invoice: Invoice, cuit: string, ptoVta: number): string {
+  const tipoCmpMap: Record<string, number> = {
+    A: 1, B: 6, C: 11, R: 91,
+    NCA: 3, NCB: 8, NCC: 13,
+    NDA: 2, NDB: 7, NDC: 12,
+  }
+  const cuitEmisor = Number(cuit.replace(/\D/g, ''))
+  const cuitReceptor = invoice.receptor_cuit
+    ? Number(invoice.receptor_cuit.replace(/\D/g, ''))
+    : 0
+  const payload = {
+    ver: 1,
+    fecha: invoice.fecha,
+    cuit: cuitEmisor,
+    ptoVta,
+    tipoCmp: tipoCmpMap[invoice.invoice_type] ?? 1,
+    nroCmp: invoice.numero,
+    importe: invoice.total_amount,
+    moneda: 'PES',
+    ctz: 1,
+    tipoDocRec: invoice.receptor_cuit ? 80 : 99,
+    nroDocRec: cuitReceptor,
+    tipoCodAut: 'E',
+    codAut: Number(invoice.afip_cae),
+  }
+  return `https://www.afip.gob.ar/fe/qr/?p=${btoa(JSON.stringify(payload))}`
+}
 
 function InvoicesPageInner() {
   const [data, setData] = useState<Invoice[]>([])
@@ -179,6 +217,7 @@ function InvoicesPageInner() {
   }, [])
 
   const router = useRouter()
+  const { user } = useAuth()
   const pendingFacturarRef = useRef<string | null>(null)
 
   // Fetch al cambiar filtros
@@ -211,7 +250,7 @@ function InvoicesPageInner() {
     try {
       const updated = await api.post<Invoice>(`/api/invoices/${invoice.id}/authorize`, {})
       toast.success(`CAE obtenido: ${updated.afip_cae}`)
-      setSelectedInvoice(updated)
+      setSelectedInvoice({ ...updated, invoice_items: updated.invoice_items ?? invoice.invoice_items })
       fetchInvoices()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al autorizar en AFIP')
@@ -254,7 +293,7 @@ function InvoicesPageInner() {
       try {
         const authorized = await api.post<Invoice>(`/api/invoices/${converted.id}/authorize`, {})
         toast.success(`Factura ${convertType} autorizada — CAE: ${authorized.afip_cae}`, { id: 'afip-auth' })
-        setSelectedInvoice(authorized)
+        setSelectedInvoice({ ...authorized, invoice_items: authorized.invoice_items ?? converted.invoice_items })
       } catch (afipErr: unknown) {
         toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar en AFIP', { id: 'afip-auth' })
         setSelectedInvoice(converted)
@@ -267,88 +306,365 @@ function InvoicesPageInner() {
     } finally { setConverting(false) }
   }
 
-  const handlePrintInvoice = (invoice: Invoice) => {
-    const win = window.open('', '_blank', 'width=520,height=800')
-    if (!win) return
-
+  // ── Ticket térmico 80mm ──────────────────────────────────────────────────
+  const handlePrintTicket = async (invoice: Invoice) => {
+    const biz = user?.business
+    const fmt = (n: number) =>
+      new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(n)
     const typeLabel = TYPE_LABELS[invoice.invoice_type] ?? invoice.invoice_type
     const numero = String(invoice.numero).padStart(8, '0')
     const isA = invoice.invoice_type === 'A'
+    const receptorName = invoice.receptor_name
+      ?? (invoice.customers as { full_name: string } | undefined)?.full_name
+      ?? 'Consumidor Final'
+    const ptoVenta = String(biz?.afip_punto_venta ?? 1).padStart(5, '0')
+    const branchObj = invoice.branches as { name: string } | undefined
+    const registerObj = invoice.registers as { name: string } | undefined
+    const userObj = invoice.users as { full_name: string } | undefined
+    const customersObj = invoice.customers as { document?: string } | undefined
 
-    win.document.write(`<!DOCTYPE html><html><head>
-      <meta charset="utf-8"><title>${typeLabel} #${numero}</title>
-      <style>
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:'Inter',Arial,sans-serif; background:#fff; color:#1a1a18; padding:32px; max-width:480px; margin:0 auto; }
-        .mono { font-family:'Courier New',monospace; }
-        h1 { font-size:22px; font-weight:700; margin-bottom:4px; }
-        .sub { font-size:12px; color:#6a6a64; margin-bottom:24px; }
-        .section { margin-bottom:20px; }
-        .label { font-size:10px; color:#8a8a84; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px; }
-        .divider { border:none; border-top:1px dashed #d4d4cc; margin:16px 0; }
-        table { width:100%; border-collapse:collapse; font-size:12px; }
-        th { text-align:left; padding:6px 0; font-size:10px; color:#8a8a84; text-transform:uppercase; letter-spacing:0.05em; border-bottom:1px solid #e5e5e2; }
-        td { padding:8px 0; border-bottom:1px solid #f5f5f4; vertical-align:top; }
-        td.right { text-align:right; font-family:'Courier New',monospace; }
-        .total-row td { font-size:15px; font-weight:700; border-bottom:none; padding-top:12px; }
-        @media print { body { padding:16px; } }
-      </style>
-    </head><body>
-      <div class="section">
-        <div class="label">Comprobante</div>
-        <h1>${typeLabel}</h1>
-        <div class="sub">N° ${numero} · ${invoice.fecha}</div>
+    let qrDataUrl = ''
+    if (invoice.afip_cae && biz?.cuit) {
+      try {
+        const url = buildAfipQrUrl(invoice, biz.cuit, biz.afip_punto_venta ?? 1)
+        qrDataUrl = await QRCode.toDataURL(url, { width: 120, margin: 1, errorCorrectionLevel: 'M' })
+      } catch { /* omitir QR si falla */ }
+    }
+
+    const sep = `<div style="border-top:1px dashed #999;margin:8px 0;"></div>`
+    const row = (left: string, right: string) =>
+      `<div style="display:flex;justify-content:space-between;">${left}${right}</div>`
+
+    const html = `
+      <div style="text-align:center;margin-bottom:2px;">
+        <div style="font-size:15px;font-weight:bold;letter-spacing:0.04em;">${biz?.name ?? ''}</div>
+        ${biz?.cuit ? `<div>CUIT: ${biz.cuit}</div>` : ''}
+        ${biz?.address ? `<div style="font-size:10px;">${biz.address}</div>` : ''}
+        ${biz?.phone ? `<div style="font-size:10px;">Tel: ${biz.phone}</div>` : ''}
+        ${biz?.iva_condition ? `<div style="font-size:10px;">Cond. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div>` : ''}
       </div>
-
-      <div class="section">
-        <div class="label">Receptor</div>
-        <div style="font-size:14px;font-weight:600">${invoice.receptor_name ?? (invoice.customers as { full_name: string } | undefined)?.full_name ?? 'Consumidor Final'}</div>
-        ${invoice.receptor_cuit ? `<div class="mono" style="font-size:12px;color:#6a6a64">CUIT: ${invoice.receptor_cuit}</div>` : (invoice.customers as { document?: string } | undefined)?.document ? `<div class="mono" style="font-size:12px;color:#6a6a64">Doc: ${(invoice.customers as { document: string }).document}</div>` : ''}
-        ${invoice.receptor_address ? `<div style="font-size:12px;color:#6a6a64">${invoice.receptor_address}</div>` : ''}
-        <div style="font-size:12px;color:#6a6a64">Condición IVA: ${invoice.receptor_iva_condition}</div>
+      ${sep}
+      <div style="text-align:center;font-weight:bold;font-size:13px;">${typeLabel.toUpperCase()}</div>
+      <div style="text-align:center;">N° ${ptoVenta}-${numero}</div>
+      <div style="text-align:center;">Fecha: ${invoice.fecha}</div>
+      ${branchObj?.name ? `<div style="text-align:center;font-size:10px;">Suc: ${branchObj.name}${registerObj?.name ? ` - ${registerObj.name}` : ''}</div>` : ''}
+      ${userObj?.full_name ? `<div style="text-align:center;font-size:10px;">Cajero: ${userObj.full_name}</div>` : ''}
+      ${sep}
+      <div><strong>Receptor:</strong> ${receptorName}</div>
+      ${invoice.receptor_cuit ? `<div style="font-size:10px;">CUIT: ${invoice.receptor_cuit}</div>` : customersObj?.document ? `<div style="font-size:10px;">Doc: ${customersObj.document}</div>` : ''}
+      ${invoice.receptor_address ? `<div style="font-size:10px;">${invoice.receptor_address}</div>` : ''}
+      <div style="font-size:10px;">Cond. IVA: ${IVA_LABELS[invoice.receptor_iva_condition] ?? invoice.receptor_iva_condition}</div>
+      ${sep}
+      ${row('<span style="font-weight:bold;font-size:10px;">DESCRIPCIÓN</span>', '<span style="font-weight:bold;font-size:10px;">IMPORTE</span>')}
+      <div style="margin-top:4px;">
+        ${invoice.invoice_items.map(item => `
+          <div style="margin-bottom:6px;">
+            ${row(
+              `<span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity} ${item.description}</span>`,
+              `<span style="flex-shrink:0;">${fmt(item.subtotal)}</span>`
+            )}
+            <div style="font-size:10px;color:#555;">  c/u ${fmt(item.unit_price)}</div>
+          </div>
+        `).join('')}
       </div>
+      ${sep}
+      ${isA ? `
+        ${row('<span>Neto gravado</span>', `<span>${fmt(invoice.net_amount)}</span>`)}
+        ${row('<span>IVA 21%</span>', `<span>${fmt(invoice.iva_amount)}</span>`)}
+      ` : ''}
+      <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;margin-top:2px;">
+        <span>TOTAL</span><span>${fmt(invoice.total_amount)}</span>
+      </div>
+      ${invoice.sales?.payment_method ? `<div style="margin-top:4px;font-size:11px;">Pago: ${PAYMENT_LABELS[invoice.sales.payment_method] ?? invoice.sales.payment_method}</div>` : ''}
+      ${invoice.notes ? `<div style="font-size:10px;color:#555;margin-top:4px;font-style:italic;">${invoice.notes}</div>` : ''}
+      ${sep}
+      ${invoice.afip_cae ? `
+        <div style="text-align:center;font-weight:bold;font-size:11px;">COMPROBANTE AUTORIZADO</div>
+        <div style="text-align:center;font-size:10px;">CAE: ${invoice.afip_cae}</div>
+        ${invoice.afip_cae_vto ? `<div style="text-align:center;font-size:10px;">Vto. CAE: ${invoice.afip_cae_vto}</div>` : ''}
+        ${qrDataUrl ? `
+          <div style="text-align:center;margin:6px 0;">
+            <img src="${qrDataUrl}" style="width:100px;height:100px;" />
+          </div>
+          <div style="text-align:center;font-size:9px;color:#555;">Verificar en afip.gob.ar/fe/qr</div>
+          <div style="text-align:center;margin:6px 0;">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 44" width="110" height="32">
+              <rect width="150" height="44" rx="5" fill="#1B3F7F"/>
+              <text x="10" y="30" font-family="Arial Black,Arial" font-size="20" font-weight="900" fill="#FFFFFF" letter-spacing="2">ARCA</text>
+              <text x="82" y="18" font-family="Arial" font-size="7.5" fill="#93C5FD">Agencia de Recaudación</text>
+              <text x="82" y="29" font-family="Arial" font-size="7.5" fill="#93C5FD">y Control Aduanero</text>
+            </svg>
+          </div>
+        ` : ''}
+      ` : `
+        <div style="text-align:center;font-weight:bold;padding:2px 0;letter-spacing:0.03em;">
+          *** NO VÁLIDO COMO FACTURA ***
+        </div>
+      `}
+      ${sep}
+      <div style="text-align:center;font-size:10px;line-height:1.6;">
+        <div>¡Gracias por su compra!</div>
+        <div style="color:#888;">Powered by StockOS</div>
+      </div>
+    `
 
-      <hr class="divider">
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:80mm;height:0;border:0;'
+    document.body.appendChild(iframe)
+    const doc = iframe.contentDocument ?? iframe.contentWindow?.document
+    if (!doc) { document.body.removeChild(iframe); return }
+    doc.open()
+    doc.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${typeLabel} ${ptoVenta}-${numero}</title>
+  <style>
+    @page { size: 80mm auto; margin: 2mm 0; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 80mm; background: #fff; }
+    body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; }
+  </style>
+</head>
+<body><div style="padding:12px 10px;">${html}</div></body>
+</html>`)
+    doc.close()
+    iframe.onload = () => {
+      iframe.contentWindow?.focus()
+      iframe.contentWindow?.print()
+      setTimeout(() => document.body.removeChild(iframe), 1000)
+    }
+  }
 
-      <table>
-        <thead><tr>
-          <th style="width:50%">Descripción</th>
-          <th class="right">Cant.</th>
-          <th class="right">P. Unit.</th>
-          <th class="right">Subtotal</th>
-        </tr></thead>
-        <tbody>
-          ${invoice.invoice_items.map(item => `<tr>
+  // ── Factura A4 moderna ───────────────────────────────────────────────────
+  const handlePrintFactura = async (invoice: Invoice) => {
+    if (!invoice.afip_cae) return
+    const biz = user?.business
+    const fmt = (n: number) =>
+      new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(n)
+    const typeLabel = TYPE_LABELS[invoice.invoice_type] ?? invoice.invoice_type
+    const letra = invoice.invoice_type.charAt(0)
+    const ptoVenta = String(biz?.afip_punto_venta ?? 1).padStart(5, '0')
+    const numero = String(invoice.numero).padStart(8, '0')
+    const isA = invoice.invoice_type === 'A'
+    const receptorName = invoice.receptor_name
+      ?? (invoice.customers as { full_name: string } | undefined)?.full_name
+      ?? 'Consumidor Final'
+    const branchObj = invoice.branches as { name: string } | undefined
+    const registerObj = invoice.registers as { name: string } | undefined
+    const userObj = invoice.users as { full_name: string } | undefined
+    const customersObj = invoice.customers as { document?: string } | undefined
+    const paymentLabel = invoice.sales?.payment_method
+      ? (PAYMENT_LABELS[invoice.sales.payment_method] ?? invoice.sales.payment_method)
+      : null
+
+    const typeColors: Record<string, string> = {
+      A: '#991B1B', B: '#1B3F7F', C: '#166534', R: '#374151',
+      NCA: '#991B1B', NCB: '#1B3F7F', NCC: '#166534',
+      NDA: '#7C2D12', NDB: '#1E3A8A', NDC: '#14532D',
+    }
+    const color = typeColors[invoice.invoice_type] ?? '#374151'
+
+    let qrDataUrl = ''
+    if (biz?.cuit) {
+      try {
+        const url = buildAfipQrUrl(invoice, biz.cuit, biz.afip_punto_venta ?? 1)
+        qrDataUrl = await QRCode.toDataURL(url, { width: 180, margin: 2, errorCorrectionLevel: 'M' })
+      } catch { /* omitir QR si falla */ }
+    }
+
+    const win = window.open('', '_blank', 'width=900,height=1200')
+    if (!win) return
+
+    win.document.write(`<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>${typeLabel} ${ptoVenta}-${numero}</title>
+  <style>
+    @page { size: A4; margin: 12mm 16mm; }
+    @media print { * { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111; background: #fff; }
+
+    .doc-header { display: flex; border: 2px solid #111; }
+    .doc-header-left { flex: 1; padding: 14px 16px; border-right: 1px solid #ccc; }
+    .doc-header-center { width: 96px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 8px; background: #f8f8f8; border-right: 1px solid #ccc; }
+    .doc-header-right { flex: 1; padding: 14px 16px; }
+
+    .letter-box { width: 68px; height: 68px; border: 3px solid ${color}; border-radius: 4px; display: flex; align-items: center; justify-content: center; }
+    .letter { font-size: 48px; font-weight: 900; color: ${color}; line-height: 1; font-family: Arial Black, Arial; }
+    .letter-sub { font-size: 8px; color: #666; text-align: center; margin-top: 5px; line-height: 1.4; }
+
+    .biz-name { font-size: 17px; font-weight: 700; margin-bottom: 4px; color: #111; }
+    .biz-detail { font-size: 10px; color: #444; line-height: 1.6; }
+
+    .inv-type-label { font-size: 14px; font-weight: 700; color: ${color}; margin-bottom: 6px; text-transform: uppercase; }
+    .inv-number { font-size: 13px; font-weight: 700; font-family: 'Courier New', monospace; }
+    .inv-meta { font-size: 11px; line-height: 1.7; color: #333; }
+    .inv-meta-gray { font-size: 10px; color: #777; }
+
+    .parties { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #ddd; border-top: none; }
+    .party { padding: 10px 16px; }
+    .party:first-child { border-right: 1px solid #ddd; }
+    .party-title { font-size: 9px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 6px; }
+    .party-name { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+    .party-detail { font-size: 10px; color: #444; line-height: 1.65; }
+
+    .items-section { margin-top: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    thead tr { background: ${color}; color: #fff; }
+    th { padding: 7px 9px; text-align: left; font-size: 10px; font-weight: 600; letter-spacing: 0.03em; }
+    th.r { text-align: right; }
+    td { padding: 7px 9px; border-bottom: 1px solid #eee; font-size: 11px; vertical-align: top; }
+    td.r { text-align: right; font-family: 'Courier New', monospace; white-space: nowrap; }
+    tr:nth-child(even) td { background: #fafafa; }
+
+    .totals-wrap { display: flex; justify-content: flex-end; margin-top: 14px; }
+    .totals-box { width: 290px; border: 1px solid #ddd; overflow: hidden; border-radius: 2px; }
+    .t-line { display: flex; justify-content: space-between; padding: 5px 12px; font-size: 11px; border-bottom: 1px solid #eee; }
+    .t-line.grand { background: ${color}; color: #fff; font-weight: 700; font-size: 14px; padding: 9px 12px; border-bottom: none; }
+    .t-line .mono { font-family: 'Courier New', monospace; }
+
+    .payment-note { text-align: right; font-size: 10px; color: #555; margin-top: 7px; }
+    .notes-box { margin-top: 10px; padding: 8px 12px; border: 1px solid #e5e5e5; border-radius: 2px; font-size: 11px; color: #555; font-style: italic; }
+
+    .afip-footer { margin-top: 24px; border: 2px solid #1B3F7F; border-radius: 5px; padding: 14px 16px; display: flex; align-items: center; gap: 20px; }
+    .afip-logo { flex-shrink: 0; }
+    .afip-data { flex: 1; }
+    .afip-data-title { font-size: 12px; font-weight: 700; color: #1B3F7F; margin-bottom: 5px; }
+    .afip-data-line { font-size: 10px; color: #333; line-height: 1.8; }
+    .afip-data-line .mono { font-family: 'Courier New', monospace; font-size: 11px; font-weight: 700; color: #111; }
+    .afip-qr { flex-shrink: 0; text-align: center; }
+    .afip-qr img { width: 100px; height: 100px; display: block; }
+    .afip-qr-label { font-size: 8px; color: #888; margin-top: 3px; }
+
+    .doc-footer { margin-top: 14px; text-align: center; font-size: 9px; color: #bbb; border-top: 1px solid #eee; padding-top: 8px; }
+  </style>
+</head>
+<body>
+
+  <!-- Encabezado -->
+  <div class="doc-header">
+    <div class="doc-header-left">
+      <div class="biz-name">${biz?.name ?? ''}</div>
+      <div class="biz-detail">
+        ${biz?.cuit ? `CUIT: ${biz.cuit}<br>` : ''}
+        ${biz?.address ? `${biz.address}<br>` : ''}
+        ${biz?.phone ? `Tel: ${biz.phone}<br>` : ''}
+        ${biz?.iva_condition ? `Cond. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}` : ''}
+      </div>
+    </div>
+    <div class="doc-header-center">
+      <div class="letter-box"><div class="letter">${letra}</div></div>
+      <div class="letter-sub">Cód. ${ptoVenta}</div>
+    </div>
+    <div class="doc-header-right">
+      <div class="inv-type-label">${typeLabel}</div>
+      <div class="inv-number">N° ${ptoVenta}-${numero}</div>
+      <div class="inv-meta" style="margin-top:5px;">
+        <div>Fecha: ${invoice.fecha}</div>
+        ${invoice.sale_id ? `<div class="inv-meta-gray">Ticket: #${invoice.sale_id.slice(-8).toUpperCase()}</div>` : ''}
+        ${branchObj?.name ? `<div class="inv-meta-gray">Suc: ${branchObj.name}${registerObj?.name ? ` · ${registerObj.name}` : ''}</div>` : ''}
+        ${userObj?.full_name ? `<div class="inv-meta-gray">Cajero: ${userObj.full_name}</div>` : ''}
+      </div>
+    </div>
+  </div>
+
+  <!-- Emisor / Receptor -->
+  <div class="parties">
+    <div class="party">
+      <div class="party-title">Emisor</div>
+      <div class="party-name">${biz?.name ?? ''}</div>
+      <div class="party-detail">
+        ${biz?.cuit ? `CUIT: ${biz.cuit}<br>` : ''}
+        ${biz?.address ? `${biz.address}<br>` : ''}
+        ${biz?.iva_condition ? `Cond. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}` : ''}
+      </div>
+    </div>
+    <div class="party">
+      <div class="party-title">Receptor</div>
+      <div class="party-name">${receptorName}</div>
+      <div class="party-detail">
+        ${invoice.receptor_cuit ? `CUIT: ${invoice.receptor_cuit}<br>` : customersObj?.document ? `Doc: ${customersObj.document}<br>` : ''}
+        ${invoice.receptor_address ? `${invoice.receptor_address}<br>` : ''}
+        Cond. IVA: ${IVA_LABELS[invoice.receptor_iva_condition] ?? invoice.receptor_iva_condition}
+      </div>
+    </div>
+  </div>
+
+  <!-- Items -->
+  <div class="items-section">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:44%">Descripción</th>
+          <th class="r" style="width:9%">Cant.</th>
+          <th class="r" style="width:18%">P. Unitario</th>
+          ${isA ? `<th class="r" style="width:9%">IVA%</th><th class="r" style="width:20%">Subtotal</th>` : `<th class="r" style="width:29%">Subtotal</th>`}
+        </tr>
+      </thead>
+      <tbody>
+        ${invoice.invoice_items.map(item => `
+          <tr>
             <td>${item.description}</td>
-            <td class="right">${item.quantity}</td>
-            <td class="right">${formatCurrency(item.unit_price)}</td>
-            <td class="right">${formatCurrency(item.subtotal)}</td>
-          </tr>`).join('')}
-        </tbody>
-        <tfoot>
-          ${isA ? `
-          <tr><td colspan="3" style="color:#6a6a64;font-size:12px">Neto gravado</td><td class="right" style="font-size:12px">${formatCurrency(invoice.net_amount)}</td></tr>
-          <tr><td colspan="3" style="color:#6a6a64;font-size:12px">IVA 21%</td><td class="right" style="font-size:12px">${formatCurrency(invoice.iva_amount)}</td></tr>
-          ` : ''}
-          <tr class="total-row">
-            <td colspan="3">Total</td>
-            <td class="right" style="color:#15803d">${formatCurrency(invoice.total_amount)}</td>
+            <td class="r">${item.quantity}</td>
+            <td class="r">${fmt(item.unit_price)}</td>
+            ${isA ? `<td class="r">${item.iva_rate ?? 21}%</td>` : ''}
+            <td class="r">${fmt(item.subtotal)}</td>
           </tr>
-        </tfoot>
-      </table>
+        `).join('')}
+      </tbody>
+    </table>
+  </div>
 
-      ${invoice.afip_cae ? `<hr class="divider">
-      <div class="section">
-        <div class="label">AFIP</div>
-        <div class="mono" style="font-size:12px">CAE: ${invoice.afip_cae}</div>
-        ${invoice.afip_cae_vto ? `<div style="font-size:12px;color:#6a6a64">Vto. CAE: ${invoice.afip_cae_vto}</div>` : ''}
-      </div>` : ''}
+  <!-- Totales -->
+  <div class="totals-wrap">
+    <div class="totals-box">
+      ${isA ? `
+        <div class="t-line"><span>Neto gravado</span><span class="mono">${fmt(invoice.net_amount)}</span></div>
+        <div class="t-line"><span>IVA 21%</span><span class="mono">${fmt(invoice.iva_amount)}</span></div>
+      ` : ''}
+      <div class="t-line grand"><span>TOTAL</span><span class="mono">${fmt(invoice.total_amount)}</span></div>
+    </div>
+  </div>
 
-      ${invoice.notes ? `<hr class="divider"><div style="font-size:12px;color:#6a6a64;font-style:italic">${invoice.notes}</div>` : ''}
-    </body></html>`)
+  ${paymentLabel ? `<div class="payment-note">Método de pago: <strong>${paymentLabel}</strong></div>` : ''}
+  ${invoice.notes ? `<div class="notes-box">Observaciones: ${invoice.notes}</div>` : ''}
+
+  <!-- AFIP / ARCA -->
+  <div class="afip-footer">
+    <div class="afip-logo">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 155 46" width="130" height="39">
+        <rect width="155" height="46" rx="5" fill="#1B3F7F"/>
+        <text x="10" y="31" font-family="Arial Black,Arial" font-size="21" font-weight="900" fill="#FFFFFF" letter-spacing="2">ARCA</text>
+        <text x="84" y="19" font-family="Arial" font-size="7.5" fill="#93C5FD">Agencia de Recaudación</text>
+        <text x="84" y="30" font-family="Arial" font-size="7.5" fill="#93C5FD">y Control Aduanero</text>
+      </svg>
+    </div>
+    <div class="afip-data">
+      <div class="afip-data-title">Comprobante Autorizado por ARCA</div>
+      <div class="afip-data-line">CAE: <span class="mono">${invoice.afip_cae}</span></div>
+      ${invoice.afip_cae_vto ? `<div class="afip-data-line">Vencimiento CAE: <strong>${invoice.afip_cae_vto}</strong></div>` : ''}
+      <div class="afip-data-line">Tipo: ${typeLabel} &nbsp;·&nbsp; N° ${ptoVenta}-${numero}</div>
+    </div>
+    ${qrDataUrl ? `
+      <div class="afip-qr">
+        <img src="${qrDataUrl}" alt="QR ARCA" />
+        <div class="afip-qr-label">Escanear para<br>verificar</div>
+      </div>
+    ` : ''}
+  </div>
+
+  <div class="doc-footer">
+    Generado por StockOS &nbsp;·&nbsp; ${new Date().toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+  </div>
+
+</body>
+</html>`)
     win.document.close()
     win.focus()
-    setTimeout(() => { win.print(); win.close() }, 400)
+    setTimeout(() => { win.print(); win.close() }, 600)
   }
 
   return (
@@ -564,7 +880,7 @@ function InvoicesPageInner() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
-                  {selectedInvoice.invoice_items.map(item => (
+                  {(selectedInvoice.invoice_items ?? []).map(item => (
                     <tr key={item.id}>
                       <td className="px-3 py-2 text-[var(--text)]">{item.description}</td>
                       <td className="px-3 py-2 text-center mono text-[var(--text2)]">{item.quantity}</td>
@@ -664,10 +980,15 @@ function InvoicesPageInner() {
 
             {/* Acciones */}
             <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-2 border-t border-[var(--border)]">
-              <div className="flex justify-end gap-2">
-                <Button variant="secondary" onClick={() => handlePrintInvoice(selectedInvoice)}>
-                  <Printer size={14} /> Reimprimir comprobante
+              <div className="flex justify-end gap-2 flex-wrap">
+                <Button variant="secondary" onClick={() => handlePrintTicket(selectedInvoice)}>
+                  <Printer size={14} /> Imprimir ticket
                 </Button>
+                {selectedInvoice.afip_status === 'authorized' && selectedInvoice.afip_cae && (
+                  <Button variant="secondary" onClick={() => handlePrintFactura(selectedInvoice)}>
+                    <FileText size={14} /> Imprimir factura
+                  </Button>
+                )}
                 <Button variant="secondary" onClick={() => { setDetailModal(false); setSelectedInvoice(null) }}>
                   Cerrar
                 </Button>
