@@ -15,18 +15,27 @@ export const metadata: Metadata = {
   description:
     'Controlá tu stock, precios y ventas en tiempo real. El sistema todo-en-uno para supermercados, autoservicios y ferreterías. Multi-sucursal, POS ultrarrápido y facturación completa.',
   openGraph: {
-    title: 'StockOS — Gestión de retail sin caos',
+    title: 'StockOS — Sistema de gestión para retail en Argentina y LATAM',
     description:
       'POS ultrarrápido, stock real por depósito, multi-sucursal y facturación para Argentina. Para supermercados, autoservicios y ferreterías en LATAM.',
     type: 'website',
     url: 'https://stockos.digital',
     siteName: 'StockOS',
+    images: [
+      {
+        url: '/opengraph-image',
+        width: 1200,
+        height: 630,
+        alt: 'StockOS — Sistema de gestión para retail en Argentina y LATAM',
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'StockOS — Gestión de retail para LATAM',
+    title: 'StockOS — Sistema de gestión para retail en Argentina y LATAM',
     description:
       'Stock, precios y ventas en tiempo real. Desde una caja hasta múltiples sucursales.',
+    images: ['/opengraph-image'],
   },
   keywords: [
     'sistema de gestión retail',
