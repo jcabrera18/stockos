@@ -11,10 +11,10 @@ const PLANS = [
     price: 19999,
     priceOriginal: 25999,
     popular: false,
-    highlight: '1 sucursal · 1 depósito · hasta 2 cajas',
+    highlight: '1 sucursal · 1 depósito · 1 caja',
     features: [
       { text: '1 sucursal', ok: true },
-      { text: 'Hasta 2 cajas', ok: true },
+      { text: '1 caja', ok: true },
       { text: '1 depósito', ok: true },
       { text: 'Productos ilimitados', ok: true },
       { text: 'Ventas y facturas ilimitadas', ok: true },
