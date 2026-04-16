@@ -10,8 +10,8 @@ import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel, getPeriodDates, getLocalWeekStart } from '@/lib/utils'
 import { TrendingUp, AlertTriangle, DollarSign, CreditCard, RefreshCw } from 'lucide-react'
 import {
-  BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
 
 // ─── Tipos ────────────────────────────────────────────────
@@ -20,6 +20,7 @@ interface PaymentMethod { method: string; total: number }
 interface RecentSale    { id: string; total: number; payment_method: string; created_at: string }
 interface CriticalItem  { id: string; name: string; stock_current: number; stock_min: number; supplier_name: string | null }
 interface WeekComp      { this_week: number; prev_week: number; diff_pct: number; this_count: number; prev_count: number }
+interface DailySale     { sale_date: string; total_sales: number; total_revenue: number; gross_margin: number }
 
 interface DashboardData {
   today_revenue:       number
@@ -89,6 +90,7 @@ const ComparisonCard = ({
 // ═══════════════════════════════════════════════════════════
 export default function DashboardPage() {
   const [data,       setData]       = useState<DashboardData | null>(null)
+  const [salesLast30, setSalesLast30] = useState<DailySale[]>([])
   const [loading,    setLoading]    = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -96,11 +98,15 @@ export default function DashboardPage() {
     if (!silent) setLoading(true)
     else setRefreshing(true)
     try {
-      const result = await api.get<DashboardData>('/api/dashboard/all', {
-        today_from: getPeriodDates('today').from,
-        week_from:  getLocalWeekStart(),
-      })
+      const [result, last30] = await Promise.all([
+        api.get<DashboardData>('/api/dashboard/all', {
+          today_from: getPeriodDates('today').from,
+          week_from:  getLocalWeekStart(),
+        }),
+        api.get<DailySale[]>('/api/dashboard/sales-last-30'),
+      ])
       setData(result)
+      setSalesLast30(last30 ?? [])
     } catch (err) { console.error(err) }
     finally { setLoading(false); setRefreshing(false) }
   }, [])
@@ -114,6 +120,10 @@ export default function DashboardPage() {
 
   const hourlyData  = useMemo(() => data ? [...data.sales_by_hour]  : [], [data])
   const paymentData = useMemo(() => data ? [...data.payment_methods] : [], [data])
+  const dailyData   = useMemo(() => salesLast30.map(d => ({
+    ...d,
+    label: d.sale_date.slice(5).replace('-', '/'), // "MM/DD" → "16/04"
+  })), [salesLast30])
   const paymentColorMap = useMemo(() =>
     Object.fromEntries(paymentData.map((pm, i) => [pm.method, CHART_COLORS[i % CHART_COLORS.length]])),
   [paymentData])
@@ -295,6 +305,49 @@ export default function DashboardPage() {
             )}
           </Card>
         </div>
+
+        {/* ══ Evolución 30 días ═══════════════════════════════════ */}
+        {dailyData.length > 0 && (
+          <Card className="flex flex-col">
+            <CardHeader>
+              <CardTitle>Ventas últimos 30 días</CardTitle>
+              <span className="text-xs text-[var(--text3)]">Facturación y margen bruto</span>
+            </CardHeader>
+            <div style={{ height: 220 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={dailyData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--text3)' }} interval={4} />
+                  <YAxis tick={{ fontSize: 9, fill: 'var(--text3)' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} width={38} />
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null
+                      return (
+                        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 shadow-xl text-xs space-y-1">
+                          <p className="text-[var(--text3)] mb-1">{label}</p>
+                          {payload.map((p) => (
+                            <p key={p.dataKey as string} style={{ color: p.color }} className="font-semibold">
+                              {p.dataKey === 'total_revenue' ? 'Ventas' : 'Margen'}: {formatCurrency(Number(p.value ?? 0))}
+                            </p>
+                          ))}
+                        </div>
+                      )
+                    }}
+                  />
+                  <Legend
+                    formatter={(value) => (
+                      <span className="text-xs text-[var(--text2)]">
+                        {value === 'total_revenue' ? 'Ventas' : 'Margen bruto'}
+                      </span>
+                    )}
+                  />
+                  <Line type="monotone" dataKey="total_revenue" stroke="#16a34a" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+                  <Line type="monotone" dataKey="gross_margin"  stroke="#0ea5e9" strokeWidth={2} dot={false} activeDot={{ r: 4 }} strokeDasharray="4 2" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        )}
 
         {/* ══ Operativo ═══════════════════════════════════════════ */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
