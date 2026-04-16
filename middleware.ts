@@ -24,7 +24,7 @@ export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
   // Rutas públicas — no verificar
-  if (pathname === '/login') return response
+  if (pathname === '/login' || pathname === '/register' || pathname === '/home' || pathname.startsWith('/home/')) return response
 
   try {
     const supabase = createServerClient(

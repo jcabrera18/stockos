@@ -114,6 +114,9 @@ export default function DashboardPage() {
 
   const hourlyData  = useMemo(() => data ? [...data.sales_by_hour]  : [], [data])
   const paymentData = useMemo(() => data ? [...data.payment_methods] : [], [data])
+  const paymentColorMap = useMemo(() =>
+    Object.fromEntries(paymentData.map((pm, i) => [pm.method, CHART_COLORS[i % CHART_COLORS.length]])),
+  [paymentData])
   const peakHour    = useMemo(
     () => hourlyData.reduce((max, h) => h.total_revenue > (max?.total_revenue ?? 0) ? h : max, hourlyData[0]),
     [hourlyData],
@@ -247,8 +250,8 @@ export default function DashboardPage() {
                           data={paymentData} dataKey="total" nameKey="method"
                           cx="50%" cy="50%" innerRadius={35} outerRadius={60} paddingAngle={2}
                         >
-                          {paymentData.map((_, i) => (
-                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                          {paymentData.map((pm) => (
+                            <Cell key={pm.method} fill={paymentColorMap[pm.method]} />
                           ))}
                         </Pie>
                         <Tooltip
@@ -275,13 +278,13 @@ export default function DashboardPage() {
                         <div key={pm.method}>
                           <div className="flex justify-between text-xs mb-0.5">
                             <div className="flex items-center gap-1.5">
-                              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: paymentColorMap[pm.method] }} />
                               <span className="text-[var(--text2)]">{PAYMENT_LABELS[pm.method] ?? pm.method}</span>
                             </div>
                             <span className="mono text-[var(--text3)]">{pct}%</span>
                           </div>
                           <div className="h-1 bg-[var(--surface2)] rounded-full overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: paymentColorMap[pm.method] }} />
                           </div>
                         </div>
                       )

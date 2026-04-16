@@ -9,7 +9,7 @@ import { ProductModalProvider, useProductModal } from '@/contexts/ProductModalCo
 import { ProductModal } from '@/components/modules/ProductModal'
 
 // Rutas que manejan su propio layout full-screen (no necesitan shell)
-const NO_SHELL = ['/login', '/pos']
+const NO_SHELL = ['/login', '/register', '/pos', '/home']
 
 const POS_CART_KEY = 'stockos_pos_cart'
 

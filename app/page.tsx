@@ -6,7 +6,7 @@ export default async function RootPage() {
   const supabase = await createClient()
   const { data: { session } } = await supabase.auth.getSession()
 
-  if (!session) redirect('/login')
+  if (!session) redirect('/home')
 
   // Usar service role para evitar problemas de RLS con el token del usuario
   const admin = createServiceClient(
