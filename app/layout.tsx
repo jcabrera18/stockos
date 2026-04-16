@@ -11,7 +11,7 @@ const BASE_URL = 'https://stockos.digital'
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
   title: {
-    default: 'StockOS — Gestión de stock y ventas para retail LATAM',
+    default: 'StockOS: Gestión de Stock, Ventas y Cajas para Retail LATAM',
     template: '%s | StockOS',
   },
   description: 'Sistema de gestión de stock, ventas y cajas para supermercados y retail en LATAM. Multi-sucursal, POS, inventario, finanzas y más.',
@@ -21,13 +21,13 @@ export const metadata: Metadata = {
     type: 'website',
     url: BASE_URL,
     siteName: 'StockOS',
-    title: 'StockOS — Gestión de stock y ventas para retail LATAM',
+    title: 'StockOS: Gestión de Stock, Ventas y Cajas para Retail LATAM',
     description: 'Sistema de gestión de stock, ventas y cajas para supermercados y retail en LATAM. Multi-sucursal, POS, inventario, finanzas y más.',
     locale: 'es_AR',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'StockOS — Gestión de stock y ventas para retail LATAM',
+    title: 'StockOS: Gestión de Stock, Ventas y Cajas para Retail LATAM',
     description: 'Sistema de gestión de stock, ventas y cajas para supermercados y retail en LATAM.',
   },
   icons: {
