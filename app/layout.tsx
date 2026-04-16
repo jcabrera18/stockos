@@ -1,8 +1,10 @@
 import type { Metadata } from 'next'
 import Script from 'next/script'
+import { Suspense } from 'react'
 import './globals.css'
 import { Toaster } from 'sonner'
 import { AppShellWrapper } from '@/components/layout/AppShellWrapper'
+import { PostHogProvider } from '@/components/PostHogProvider'
 
 export const metadata: Metadata = {
   title: 'StockOS',
@@ -16,9 +18,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="es" data-theme="dark" suppressHydrationWarning>
       <body>
-        <AppShellWrapper>
-          {children}
-        </AppShellWrapper>
+        <Suspense>
+          <PostHogProvider>
+            <AppShellWrapper>
+              {children}
+            </AppShellWrapper>
+          </PostHogProvider>
+        </Suspense>
         <Toaster
           position="bottom-right"
           toastOptions={{

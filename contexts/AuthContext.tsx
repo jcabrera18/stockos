@@ -2,6 +2,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { api } from '@/lib/api'
+import { posthog } from '@/lib/posthog'
 
 interface UserProfile {
   id:           string
@@ -40,6 +41,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const profile = await api.get<UserProfile>('/api/auth/me')
       setUser(profile)
+      if (posthog.__loaded) {
+        posthog.identify(profile.id, {
+          email:       profile.email,
+          name:        profile.full_name,
+          role:        profile.role,
+          business_id: profile.business_id,
+          business:    profile.business?.name,
+        })
+      }
     } catch {
       setUser(null)
     } finally {
@@ -63,6 +73,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [loadProfile])
 
   const signOut = async () => {
+    if (posthog.__loaded) posthog.reset()
     await supabase.auth.signOut()
     setUser(null)
     window.location.replace('/login')
