@@ -6,9 +6,30 @@ import { Toaster } from 'sonner'
 import { AppShellWrapper } from '@/components/layout/AppShellWrapper'
 import { PostHogProvider } from '@/components/PostHogProvider'
 
+const BASE_URL = 'https://stockos.digital'
+
 export const metadata: Metadata = {
-  title: 'StockOS',
-  description: 'Gestión de supermercados y retail para LATAM',
+  metadataBase: new URL(BASE_URL),
+  title: {
+    default: 'StockOS — Gestión de stock y ventas para retail LATAM',
+    template: '%s | StockOS',
+  },
+  description: 'Sistema de gestión de stock, ventas y cajas para supermercados y retail en LATAM. Multi-sucursal, POS, inventario, finanzas y más.',
+  keywords: ['stock', 'ventas', 'retail', 'supermercado', 'POS', 'inventario', 'LATAM', 'gestión'],
+  authors: [{ name: 'StockOS' }],
+  openGraph: {
+    type: 'website',
+    url: BASE_URL,
+    siteName: 'StockOS',
+    title: 'StockOS — Gestión de stock y ventas para retail LATAM',
+    description: 'Sistema de gestión de stock, ventas y cajas para supermercados y retail en LATAM. Multi-sucursal, POS, inventario, finanzas y más.',
+    locale: 'es_AR',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'StockOS — Gestión de stock y ventas para retail LATAM',
+    description: 'Sistema de gestión de stock, ventas y cajas para supermercados y retail en LATAM.',
+  },
   icons: {
     icon: '/icon.svg',
   },
