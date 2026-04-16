@@ -39,7 +39,10 @@ export async function middleware(request: NextRequest) {
     )
 
     const { data: { session } } = await supabase.auth.getSession()
-    if (!session) return response
+    if (!session) {
+      if (pathname === '/') return NextResponse.redirect(new URL('/home', request.url))
+      return response
+    }
 
     // Leer el rol del JWT (ya verificado por updateSession) para evitar
     // un SELECT extra que puede fallar por RLS y defaultear mal a 'cashier'

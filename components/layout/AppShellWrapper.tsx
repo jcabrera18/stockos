@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Sidebar } from './Sidebar'
 import { BottomNav } from './BottomNav'
 import { ShoppingCart } from 'lucide-react'
-import { AuthProvider } from '@/contexts/AuthContext'
+import { AuthProvider, useAuthContext } from '@/contexts/AuthContext'
 import { ProductModalProvider, useProductModal } from '@/contexts/ProductModalContext'
 import { ProductModal } from '@/components/modules/ProductModal'
 
@@ -74,6 +74,26 @@ function GlobalProductModal() {
   )
 }
 
+function AppShell({ children }: { children: React.ReactNode }) {
+  const { loading } = useAuthContext()
+
+  if (loading) return <div className="h-screen bg-[var(--bg)]" />
+
+  return (
+    <ProductModalProvider>
+      <div className="flex h-screen bg-[var(--bg)] overflow-hidden">
+        <Sidebar />
+        <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
+          {children}
+        </main>
+        <BottomNav />
+        <POSBadge />
+        <GlobalProductModal />
+      </div>
+    </ProductModalProvider>
+  )
+}
+
 export function AppShellWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const hasShell = !NO_SHELL.some(r => pathname === r || pathname.startsWith(r + '/'))
@@ -82,17 +102,7 @@ export function AppShellWrapper({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthProvider>
-      <ProductModalProvider>
-        <div className="flex h-screen bg-[var(--bg)] overflow-hidden">
-          <Sidebar />
-          <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
-            {children}
-          </main>
-          <BottomNav />
-          <POSBadge />
-          <GlobalProductModal />
-        </div>
-      </ProductModalProvider>
+      <AppShell>{children}</AppShell>
     </AuthProvider>
   )
 }
