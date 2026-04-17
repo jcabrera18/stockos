@@ -10,8 +10,9 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/Badge'
 import { api } from '@/lib/api'
-import { Plus, Tag, Pencil, Trash2, Star, TrendingUp } from 'lucide-react'
+import { Plus, Tag, Pencil, Trash2, Star, TrendingUp, Printer } from 'lucide-react'
 import { toast } from 'sonner'
+import { PrintShelfLabelsModal } from '@/components/modules/PrintShelfLabelsModal'
 
 export interface PriceList {
   id: string
@@ -52,6 +53,9 @@ export default function PriceListsPage() {
   // Modal presets (primera vez sin listas)
   const [presetsModal, setPresetsModal] = useState(false)
   const [creatingPresets, setCreatingPresets] = useState(false)
+
+  // Modal imprimir etiquetas
+  const [printModal, setPrintModal] = useState(false)
 
   const fetchLists = useCallback(async () => {
     setLoading(true)
@@ -149,9 +153,14 @@ export default function PriceListsPage() {
         title="Listas de precio"
         description={`${lists.length} listas activas`}
         action={
-          <Button onClick={openCreate}>
-            <Plus size={15} /> Nueva lista
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setPrintModal(true)} disabled={lists.length === 0}>
+              <Printer size={15} /> Imprimir precios
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus size={15} /> Nueva lista
+            </Button>
+          </div>
         }
       />
 
@@ -364,6 +373,9 @@ export default function PriceListsPage() {
         loading={deleting}
         danger
       />
+
+      {/* Modal imprimir etiquetas */}
+      <PrintShelfLabelsModal open={printModal} onClose={() => setPrintModal(false)} />
     </AppShell>
   )
 }
