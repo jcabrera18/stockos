@@ -37,7 +37,7 @@ export function CTA() {
               Empezá hoy
             </p>
             <h2 className="text-4xl sm:text-5xl font-bold text-white leading-tight mb-6">
-              Tu competencia ya tiene<br className="hidden sm:block" />
+              Tu competencia ya tiene<br />
               el sistema que vos necesitás
             </h2>
             <p className="text-white/45 text-[17px] max-w-md mx-auto leading-relaxed mb-10">
