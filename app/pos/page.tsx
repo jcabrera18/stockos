@@ -15,6 +15,18 @@ import { useAuth } from '@/hooks/useAuth'
 import { Button } from '@/components/ui/Button'
 import { evaluatePromo, type Promotion } from '@/lib/promoUtils'
 import { Modal } from '@/components/ui/Modal'
+import { usePOSSync } from '@/hooks/usePOSSync'
+import {
+  resolveBarcode,
+  computeLocalPrice,
+  searchProductsLocal,
+  cacheProductFromScan,
+  syncPromotions,
+  getLocalPromotions,
+  getLastSyncTime,
+  type PricingResult,
+  type ScanResult,
+} from '@/lib/pos-cache'
 
 interface CartItem {
   product: Product
@@ -50,21 +62,6 @@ const PAYMENT_METHODS = [
   { value: 'cuenta_corriente', label: 'Cta. Cte.', icon: '📒' },
 ]
 
-interface PricingResult {
-  price:       number
-  list_name:   string
-  margin_pct:  number
-  rule_source: string
-}
-
-interface ScanResult {
-  product: Product
-  pricing: PricingResult
-}
-
-async function fetchPrice(productId: string, quantity: number): Promise<PricingResult> {
-  return api.get('/api/products/price', { product_id: productId, quantity })
-}
 
 const POS_CART_KEY = 'stockos_pos_cart'
 
@@ -130,6 +127,21 @@ export default function POSPage() {
 
   const { workstation, setWorkstation, loaded } = useWorkstation()
   const { user } = useAuth()
+  const { cacheReady, syncing: cacheSyncing, forceSync } = usePOSSync(selectedWarehouse?.id)
+
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
+
+  // Leer timestamp de última sync desde IndexedDB cuando el cache esté listo
+  useEffect(() => {
+    if (!cacheReady) return
+    getLastSyncTime().then(t => setLastSyncedAt(t)).catch(() => {})
+  }, [cacheReady])
+
+  // Re-renderizar cada minuto para mantener el "hace X min" actualizado
+  useEffect(() => {
+    const id = setInterval(() => setLastSyncedAt(prev => prev ? new Date(prev) : prev), 60_000)
+    return () => clearInterval(id)
+  }, [])
 
   useEffect(() => {
     if (user?.business?.shipping_price_default) {
@@ -238,10 +250,18 @@ export default function POSPage() {
 
   const loadPromotions = useCallback(async (showFeedback = false) => {
     try {
-      const data = await api.get<Promotion[]>('/api/promotions')
-      const active = data.filter(p => p.is_active)
-      setPromotions(active)
-      promotionsRef.current = active
+      // Cargar desde cache local primero (instantáneo si ya está sincronizado)
+      const cached = await getLocalPromotions()
+      if (cached.length > 0) {
+        setPromotions(cached)
+        promotionsRef.current = cached
+        setPromosCached(true)
+      }
+      // Sync desde server y actualizar
+      await syncPromotions()
+      const fresh = await getLocalPromotions()
+      setPromotions(fresh)
+      promotionsRef.current = fresh
       setPromosCached(true)
       if (showFeedback) toast.success('Promociones actualizadas')
     } catch { }
@@ -368,18 +388,16 @@ export default function POSPage() {
             setQuery(''); setResults([])
             setTimeout(() => searchRef.current?.focus(), 50)
             if (existingItem.product.price_mode !== 'custom') {
+              const pricing = computeLocalPrice(existingItem.product, newQty)
+              const promo = evaluatePromo(existingItem.product as Parameters<typeof evaluatePromo>[0], newQty, pricing.price, promotionsRef.current)
               if (existingItem.product.use_fixed_sell_price) {
-                const promo = evaluatePromo(existingItem.product as Parameters<typeof evaluatePromo>[0], newQty, existingItem.unit_price, promotionsRef.current)
                 setCart(prev => prev.map(i => i.product.id === knownProductId ? { ...i, quantity: newQty, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id } : i))
               } else {
-                fetchPrice(knownProductId, newQty).then(pricing => {
-                  const promo = evaluatePromo(existingItem.product as Parameters<typeof evaluatePromo>[0], newQty, pricing.price, promotionsRef.current)
-                  setCart(prev => prev.map(i =>
-                    i.product.id === knownProductId
-                      ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
-                      : i,
-                  ))
-                }).catch(() => {})
+                setCart(prev => prev.map(i =>
+                  i.product.id === knownProductId
+                    ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
+                    : i,
+                ))
               }
             }
             return
@@ -390,6 +408,46 @@ export default function POSPage() {
         if (existingPendingId) {
           const qty = pendingQtyRef.current
           setCart(prev => prev.map(i => i.product.id === existingPendingId ? { ...i, quantity: i.quantity + qty } : i))
+          setPendingQty(1); pendingQtyRef.current = 1
+          setQuery(''); setResults([])
+          setTimeout(() => searchRef.current?.focus(), 50)
+          return
+        }
+
+        // Buscar en cache local — sub-5ms si el catálogo está cargado
+        const localResult = await resolveBarcode(trimmed, pendingQtyRef.current)
+        if (localResult) {
+          if (localResult.product.price_mode !== 'custom' && (localResult.product.stock_current ?? 0) <= 0) {
+            toast.error(`${localResult.product.name} sin stock`)
+            setPendingQty(1); pendingQtyRef.current = 1
+            setQuery(''); setResults([])
+            return
+          }
+          barcodeMapRef.current.set(trimmed, localResult.product.id)
+          const existingLocal = cartRef.current.find(i => i.product.id === localResult.product.id)
+          const qty = pendingQtyRef.current
+          if (existingLocal) {
+            const newQty = existingLocal.quantity + qty
+            const promo = evaluatePromo(localResult.product as Parameters<typeof evaluatePromo>[0], newQty, localResult.pricing.price, promotionsRef.current)
+            setCart(prev => prev.map(i =>
+              i.product.id === localResult.product.id
+                ? { ...i, quantity: newQty, unit_price: localResult.pricing.price, applied_list: localResult.pricing.list_name, applied_margin: localResult.pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
+                : i,
+            ))
+          } else {
+            const promo = evaluatePromo(localResult.product as Parameters<typeof evaluatePromo>[0], qty, localResult.pricing.price, promotionsRef.current)
+            setCart(prev => [{
+              product: localResult.product,
+              quantity: qty,
+              unit_price: localResult.pricing.price,
+              applied_list: localResult.pricing.list_name,
+              applied_margin: localResult.pricing.margin_pct,
+              discount: promo.discount,
+              promo_label: promo.promo_label,
+              promotion_id: promo.promotion_id,
+              status: 'resolved' as const,
+            }, ...prev])
+          }
           setPendingQty(1); pendingQtyRef.current = 1
           setQuery(''); setResults([])
           setTimeout(() => searchRef.current?.focus(), 50)
@@ -408,7 +466,7 @@ export default function POSPage() {
         }
 
         pendingBarcodesRef.current.set(trimmed, tempId)
-        setCart(prev => [...prev, tempItem])
+        setCart(prev => [tempItem, ...prev])
         setPendingQty(1); pendingQtyRef.current = 1
         setQuery(''); setResults([])
         setTimeout(() => searchRef.current?.focus(), 50)
@@ -418,6 +476,12 @@ export default function POSPage() {
         }).then(result => {
           barcodeMapRef.current.set(trimmed, result.product.id)
           pendingBarcodesRef.current.delete(trimmed)
+          cacheProductFromScan(result.product)
+          if (result.product.price_mode !== 'custom' && (result.product.stock_current ?? 0) <= 0) {
+            toast.error(`${result.product.name} sin stock`)
+            setCart(prev => prev.filter(i => i.product.id !== tempId))
+            return
+          }
           setCart(prev => {
             const alreadyExists = prev.find(i => i.product.id === result.product.id)
             if (alreadyExists) {
@@ -445,16 +509,22 @@ export default function POSPage() {
         return
       }
 
-      setSearching(true)
-      try {
-        const res = await api.get<{ data: Product[] }>('/api/products', {
-          search: trimmed, limit: 8,
-          ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}),
-        })
-        setResults(res.data)
-        setActiveResultIndex(res.data.length > 0 ? 0 : -1)
-      } catch { setResults([]); setActiveResultIndex(-1) }
-      finally { setSearching(false) }
+      const localResults = await searchProductsLocal(trimmed)
+      if (localResults.length > 0) {
+        setResults(localResults)
+        setActiveResultIndex(0)
+      } else {
+        setSearching(true)
+        try {
+          const res = await api.get<{ data: Product[] }>('/api/products', {
+            search: trimmed, limit: 8,
+            ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}),
+          })
+          setResults(res.data)
+          setActiveResultIndex(res.data.length > 0 ? 0 : -1)
+        } catch { setResults([]); setActiveResultIndex(-1) }
+        finally { setSearching(false) }
+      }
     }, isBarcode ? 0 : 300)
 
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
@@ -510,12 +580,12 @@ export default function POSPage() {
     if (existing) {
       setCart(prev => prev.map(i => i.product.id === product.id ? { ...i, quantity: newQty } : i))
     } else {
-      setCart(prev => [...prev, {
+      setCart(prev => [{
         product, quantity, unit_price: initialPrice, discount: 0,
         applied_list:   pricing?.list_name,
         applied_margin: pricing?.margin_pct,
         promo_label: undefined, promotion_id: null,
-      }])
+      }, ...prev])
     }
 
     setPendingQty(1); pendingQtyRef.current = 1
@@ -531,11 +601,7 @@ export default function POSPage() {
     if (isCustomPrice) return
 
     try {
-      const resolvedPricing = pricing ?? (
-        product.use_fixed_sell_price
-          ? { price: product.sell_price, list_name: 'Precio fijo', margin_pct: 0, rule_source: 'fixed' } as PricingResult
-          : await fetchPrice(product.id, newQty)
-      )
+      const resolvedPricing = pricing ?? computeLocalPrice(product, newQty)
       const promo = evaluatePromo(
         product as Parameters<typeof evaluatePromo>[0],
         newQty,
@@ -564,22 +630,20 @@ export default function POSPage() {
     const newQty = Math.max(1, item.quantity + delta)
     setCart(prev => prev.map(i => i.product.id === id ? { ...i, quantity: newQty } : i))
     if (item.product.price_mode === 'custom') return
+    const pricing = computeLocalPrice(item.product, newQty)
+    const promo = evaluatePromo(
+      item.product as Parameters<typeof evaluatePromo>[0],
+      newQty, pricing.price, promotionsRef.current,
+    )
     if (item.product.use_fixed_sell_price) {
-      const promo = evaluatePromo(item.product as Parameters<typeof evaluatePromo>[0], newQty, item.unit_price, promotionsRef.current)
       setCart(prev => prev.map(i => i.product.id === id ? { ...i, quantity: newQty, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id } : i))
-      return
-    }
-    fetchPrice(id, newQty).then(pricing => {
-      const promo = evaluatePromo(
-        item.product as Parameters<typeof evaluatePromo>[0],
-        newQty, pricing.price, promotionsRef.current,
-      )
+    } else {
       setCart(prev => prev.map(i =>
         i.product.id === id
           ? { ...i, quantity: newQty, unit_price: pricing.price, applied_list: pricing.list_name, applied_margin: pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
           : i,
       ))
-    }).catch(() => {})
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateItemPrice = useCallback((id: string, v: string) =>
@@ -587,6 +651,18 @@ export default function POSPage() {
 
   const removeItem = useCallback((id: string) =>
     setCart(prev => prev.filter(i => i.product.id !== id)), [])
+
+  const handleSync = useCallback(async () => {
+    await Promise.all([loadPromotions(), forceSync()])
+    getLastSyncTime().then(t => setLastSyncedAt(t)).catch(() => {})
+  }, [loadPromotions, forceSync])
+
+  const relativeTime = (date: Date): string => {
+    const min = Math.floor((Date.now() - date.getTime()) / 60_000)
+    if (min < 1) return 'Justo ahora'
+    if (min < 60) return `hace ${min} min`
+    return `hace ${Math.floor(min / 60)} hs`
+  }
 
   const subtotal           = cart.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
   const saleDiscountAmount = Math.round(subtotal * saleDiscountPct / 100 * 100) / 100
@@ -620,7 +696,8 @@ export default function POSPage() {
       let sale: CompletedSale
       if (paymentMethod === 'cuenta_corriente') {
         if (!selectedCustomer) throw new Error('Seleccioná un cliente para cuenta corriente')
-        const freshCustomer = await api.get<CustomerSummary>(`/api/customers/${selectedCustomer.id}`)
+        const freshCustomer = await api.get<CustomerSummary & { is_active?: boolean }>(`/api/customers/${selectedCustomer.id}`)
+        if (freshCustomer.is_active === false) throw new Error('El cliente está desactivado')
         if (freshCustomer.credit_limit > 0) {
           const available = freshCustomer.available_credit ?? (freshCustomer.credit_limit - freshCustomer.current_balance)
           if (available < total) {
@@ -694,15 +771,6 @@ export default function POSPage() {
           </div>
           <span className="text-sm font-bold text-[var(--text)]">StockOS POS</span>
           <div className="ml-auto flex items-center gap-2">
-            {promosCached && (
-              <button
-                onClick={() => loadPromotions(true)}
-                title="Actualizar promociones"
-                className="p-1.5 rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors"
-              >
-                <RefreshCw size={13} />
-              </button>
-            )}
             {workstation && (
               <>
                 <span className="text-xs text-[var(--text3)] hidden sm:block">
@@ -737,21 +805,6 @@ export default function POSPage() {
           </div>
         )}
 
-        {/* Selector de lista */}
-        {priceLists.length > 1 && (
-          <div className="px-4 py-2 border-b border-[var(--border)] bg-[var(--surface2)]">
-            <div className="flex items-center gap-2 overflow-x-auto">
-              <span className="text-xs text-[var(--text3)] flex-shrink-0">Lista:</span>
-              {priceLists.map(list => (
-                <button key={list.id}
-                  onClick={() => { setSelectedList(list); setCart(prev => prev.map(item => ({ ...item, unit_price: Math.round(item.product.cost_price * (1 + list.margin_pct / 100) * 100) / 100, applied_list: list.name, applied_margin: list.margin_pct }))) }}
-                  className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedList?.id === list.id ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)]'}`}>
-                  {list.name} (+{list.margin_pct}%)
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Selector de depósito */}
         {warehouses.length > 1 && workstation && !workstation.warehouse_id && !branches.find(b => b.id === workstation.branch_id)?.warehouse_id && (
@@ -821,18 +874,62 @@ export default function POSPage() {
                           setPendingQty(1); pendingQtyRef.current = 1; setQuery('')
                           return
                         }
+                        // Buscar en cache local antes de crear temp item
+                        const localResultEnter = await resolveBarcode(trimmedQ, pendingQtyRef.current)
+                        if (localResultEnter) {
+                          if (localResultEnter.product.price_mode !== 'custom' && (localResultEnter.product.stock_current ?? 0) <= 0) {
+                            toast.error(`${localResultEnter.product.name} sin stock`)
+                            setPendingQty(1); pendingQtyRef.current = 1; setQuery('')
+                            return
+                          }
+                          barcodeMapRef.current.set(trimmedQ, localResultEnter.product.id)
+                          const existingLocalEnter = cartRef.current.find(i => i.product.id === localResultEnter.product.id)
+                          const qtyLocal = pendingQtyRef.current
+                          if (existingLocalEnter) {
+                            const newQtyLocal = existingLocalEnter.quantity + qtyLocal
+                            const promoLocal = evaluatePromo(localResultEnter.product as Parameters<typeof evaluatePromo>[0], newQtyLocal, localResultEnter.pricing.price, promotionsRef.current)
+                            setCart(prev => prev.map(i =>
+                              i.product.id === localResultEnter.product.id
+                                ? { ...i, quantity: newQtyLocal, unit_price: localResultEnter.pricing.price, applied_list: localResultEnter.pricing.list_name, applied_margin: localResultEnter.pricing.margin_pct, discount: promoLocal.discount, promo_label: promoLocal.promo_label, promotion_id: promoLocal.promotion_id }
+                                : i,
+                            ))
+                          } else {
+                            const promoLocal = evaluatePromo(localResultEnter.product as Parameters<typeof evaluatePromo>[0], qtyLocal, localResultEnter.pricing.price, promotionsRef.current)
+                            setCart(prev => [{
+                              product: localResultEnter.product,
+                              quantity: qtyLocal,
+                              unit_price: localResultEnter.pricing.price,
+                              applied_list: localResultEnter.pricing.list_name,
+                              applied_margin: localResultEnter.pricing.margin_pct,
+                              discount: promoLocal.discount,
+                              promo_label: promoLocal.promo_label,
+                              promotion_id: promoLocal.promotion_id,
+                              status: 'resolved' as const,
+                            }, ...prev])
+                          }
+                          setPendingQty(1); pendingQtyRef.current = 1; setQuery('')
+                          setTimeout(() => searchRef.current?.focus(), 50)
+                          return
+                        }
+
                         const tempIdEnter = `pending_${trimmedQ}_${Date.now()}`
                         const qtyEnter = pendingQtyRef.current
                         pendingBarcodesRef.current.set(trimmedQ, tempIdEnter)
-                        setCart(prev => [...prev, {
+                        setCart(prev => [{
                           product: { id: tempIdEnter, name: trimmedQ, barcode: trimmedQ, sell_price: 0, cost_price: 0, stock_current: 999, price_mode: 'fixed', unit: 'un', is_active: true } as Product,
                           quantity: qtyEnter, unit_price: 0, discount: 0, status: 'pending',
-                        }])
+                        }, ...prev])
                         setPendingQty(1); pendingQtyRef.current = 1; setQuery('')
                         api.post<ScanResult>('/api/pos/scan', { barcode: trimmedQ, warehouse_id: selectedWarehouse?.id ?? null, quantity: qtyEnter })
                           .then(result => {
                             barcodeMapRef.current.set(trimmedQ, result.product.id)
                             pendingBarcodesRef.current.delete(trimmedQ)
+                            cacheProductFromScan(result.product)
+                            if (result.product.price_mode !== 'custom' && (result.product.stock_current ?? 0) <= 0) {
+                              toast.error(`${result.product.name} sin stock`)
+                              setCart(prev => prev.filter(i => i.product.id !== tempIdEnter))
+                              return
+                            }
                             setCart(prev => {
                               const alreadyExists = prev.find(i => i.product.id === result.product.id)
                               if (alreadyExists) return prev.filter(i => i.product.id !== tempIdEnter).map(i => i.product.id === result.product.id ? { ...i, quantity: i.quantity + qtyEnter } : i)
@@ -843,12 +940,18 @@ export default function POSPage() {
                           .catch(() => { pendingBarcodesRef.current.delete(trimmedQ); setCart(prev => prev.map(i => i.product.id === tempIdEnter ? { ...i, status: 'error' } : i)) })
                         return
                       }
-                      setSearching(true)
-                      try {
-                        const res = await api.get<{ data: Product[] }>('/api/products', { search: trimmedQ, limit: 8, ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}) })
-                        setResults(res.data)
-                        if (res.data.length === 1) addToCart(res.data[0], pendingQtyRef.current)
-                      } catch { setResults([]) } finally { setSearching(false) }
+                      const localSearchResults = await searchProductsLocal(trimmedQ)
+                      if (localSearchResults.length > 0) {
+                        setResults(localSearchResults)
+                        if (localSearchResults.length === 1) addToCart(localSearchResults[0], pendingQtyRef.current)
+                      } else {
+                        setSearching(true)
+                        try {
+                          const res = await api.get<{ data: Product[] }>('/api/products', { search: trimmedQ, limit: 8, ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}) })
+                          setResults(res.data)
+                          if (res.data.length === 1) addToCart(res.data[0], pendingQtyRef.current)
+                        } catch { setResults([]) } finally { setSearching(false) }
+                      }
                     }
                   }
                 }}
@@ -909,60 +1012,39 @@ export default function POSPage() {
       {/* ── Panel derecho — carrito ── */}
       <div className={`flex-1 flex flex-col min-h-0 bg-[var(--surface)] pb-14 sm:pb-0 ${mobileView === 'search' ? 'hidden sm:flex' : 'flex'}`}>
 
-        {/* Cliente */}
-        <div className="px-3 py-2 border-b border-[var(--border)] flex-shrink-0">
-          {selectedCustomer ? (
-            <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)]">
-              <div>
-                <p className="text-xs font-semibold text-[var(--accent)]">{selectedCustomer.full_name}</p>
-                <p className="text-xs text-[var(--text3)]">
-                  Saldo: {formatCurrency(selectedCustomer.current_balance)}
-                  {selectedCustomer.credit_limit > 0 && ` · Límite: ${formatCurrency(selectedCustomer.credit_limit)}`}
-                </p>
-              </div>
-              <button onClick={() => { setSelectedCustomer(null); setCustomerQuery('') }}
-                className="text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">✕</button>
-            </div>
-          ) : (
-            <div className="relative">
-              <Users size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
-              {searchingCustomer && <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />}
-              <input value={customerQuery} onChange={e => setCustomerQuery(e.target.value)}
-                placeholder="Cliente (opcional)..."
-                className="w-full pl-7 pr-3 py-1.5 text-xs rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
-              />
-              {customerQuery.length >= 2 && (
-                <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 overflow-hidden">
-                  {customerResults.length > 0 ? (
-                    <>
-                      {customerResults.map(c => (
-                        <button key={c.id}
-                          onClick={() => { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]) }}
-                          className="w-full flex items-center justify-between px-3 py-2 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
-                          <div>
-                            <p className="text-xs font-medium text-[var(--text)]">{c.full_name}</p>
-                            {c.document && <p className="text-xs text-[var(--text3)]">{c.document}</p>}
-                          </div>
-                          {Number(c.current_balance) > 0 && <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>}
-                        </button>
-                      ))}
-                      <button onClick={() => setQuickCustomerModal(true)}
-                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--accent-subtle)] transition-colors text-left border-t border-[var(--border)]">
-                        <Plus size={12} className="text-[var(--accent)]" />
-                        <span className="text-xs text-[var(--accent)] font-medium">Crear "{customerQuery}"</span>
-                      </button>
-                    </>
-                  ) : (
-                    <button onClick={() => setQuickCustomerModal(true)}
-                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--accent-subtle)] transition-colors text-left">
-                      <Plus size={12} className="text-[var(--accent)]" />
-                      <span className="text-xs text-[var(--accent)] font-medium">Crear cliente "{customerQuery}"</span>
+        {/* Listas de precio + botón sync */}
+        <div className="px-3 py-3 border-b border-[var(--border)] flex-shrink-0 bg-[var(--surface)]">
+          <div className="flex items-center gap-2">
+            <div className="flex-1 min-w-0 flex items-center gap-2 overflow-x-auto">
+              {priceLists.length > 1 ? (
+                <>
+                  <span className="text-xs text-[var(--text3)] flex-shrink-0">Lista:</span>
+                  {priceLists.map(list => (
+                    <button key={list.id}
+                      onClick={() => { setSelectedList(list); setCart(prev => prev.map(item => ({ ...item, unit_price: Math.round(item.product.cost_price * (1 + list.margin_pct / 100) * 100) / 100, applied_list: list.name, applied_margin: list.margin_pct }))) }}
+                      className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedList?.id === list.id ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] border border-[var(--border)] text-[var(--text2)]'}`}>
+                      {list.name} (+{list.margin_pct}%)
                     </button>
-                  )}
-                </div>
+                  ))}
+                </>
+              ) : (
+                <span className="text-xs text-[var(--text3)]">
+                  {selectedList ? selectedList.name : 'Precio general'}
+                </span>
               )}
             </div>
-          )}
+            <button
+              onClick={handleSync}
+              disabled={cacheSyncing}
+              title="Actualizar catálogo, precios y promociones"
+              className="flex-shrink-0 flex flex-col items-center gap-0.5 px-2 py-1 rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={13} className={cacheSyncing ? 'animate-spin text-[var(--accent)]' : ''} />
+              <span className="text-[9px] leading-none whitespace-nowrap">
+                {cacheSyncing ? 'Sync...' : lastSyncedAt ? relativeTime(lastSyncedAt) : '—'}
+              </span>
+            </button>
+          </div>
         </div>
 
         <QuickCustomerModal open={quickCustomerModal} onClose={() => setQuickCustomerModal(false)}
@@ -1114,6 +1196,62 @@ export default function POSPage() {
         {/* Footer carrito */}
         {step === 'cart' && (
           <div className="border-t border-[var(--border)] p-4 space-y-3 flex-shrink-0">
+            {/* Cliente */}
+            <div className="relative">
+              {selectedCustomer ? (
+                <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)]">
+                  <div>
+                    <p className="text-xs font-semibold text-[var(--accent)]">{selectedCustomer.full_name}</p>
+                    <p className="text-xs text-[var(--text3)]">
+                      Saldo: {formatCurrency(selectedCustomer.current_balance)}
+                      {selectedCustomer.credit_limit > 0 && ` · Límite: ${formatCurrency(selectedCustomer.credit_limit)}`}
+                    </p>
+                  </div>
+                  <button onClick={() => { setSelectedCustomer(null); setCustomerQuery('') }}
+                    className="text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">✕</button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <Users size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
+                  {searchingCustomer && <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />}
+                  <input value={customerQuery} onChange={e => setCustomerQuery(e.target.value)}
+                    placeholder="Cliente (opcional)..."
+                    className="w-full pl-7 pr-3 py-1.5 text-xs rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                  {customerQuery.length >= 2 && (
+                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 overflow-hidden">
+                      {customerResults.length > 0 ? (
+                        <>
+                          {customerResults.map(c => (
+                            <button key={c.id}
+                              onClick={() => { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]) }}
+                              className="w-full flex items-center justify-between px-3 py-2 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
+                              <div>
+                                <p className="text-xs font-medium text-[var(--text)]">{c.full_name}</p>
+                                {c.document && <p className="text-xs text-[var(--text3)]">{c.document}</p>}
+                              </div>
+                              {Number(c.current_balance) > 0 && <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>}
+                            </button>
+                          ))}
+                          <button onClick={() => setQuickCustomerModal(true)}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--accent-subtle)] transition-colors text-left border-t border-[var(--border)]">
+                            <Plus size={12} className="text-[var(--accent)]" />
+                            <span className="text-xs text-[var(--accent)] font-medium">Crear "{customerQuery}"</span>
+                          </button>
+                        </>
+                      ) : (
+                        <button onClick={() => setQuickCustomerModal(true)}
+                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--accent-subtle)] transition-colors text-left">
+                          <Plus size={12} className="text-[var(--accent)]" />
+                          <span className="text-xs text-[var(--accent)] font-medium">Crear cliente "{customerQuery}"</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             {/* Descuento % */}
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm text-[var(--text3)]">Descuento venta</span>
@@ -1217,8 +1355,62 @@ export default function POSPage() {
                 </button>
               ))}
             </div>
-            {paymentMethod === 'cuenta_corriente' && !selectedCustomer && (
-              <p className="text-xs text-[var(--warning)] text-center">Seleccioná un cliente en el buscador de arriba</p>
+            {paymentMethod === 'cuenta_corriente' && (
+              <div className="relative">
+                {selectedCustomer ? (
+                  <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)]">
+                    <div>
+                      <p className="text-xs font-semibold text-[var(--accent)]">{selectedCustomer.full_name}</p>
+                      <p className="text-xs text-[var(--text3)]">
+                        Saldo: {formatCurrency(selectedCustomer.current_balance)}
+                        {selectedCustomer.credit_limit > 0 && ` · Límite: ${formatCurrency(selectedCustomer.credit_limit)}`}
+                      </p>
+                    </div>
+                    <button onClick={() => { setSelectedCustomer(null); setCustomerQuery('') }}
+                      className="text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">✕</button>
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <Users size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
+                    {searchingCustomer && <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />}
+                    <input value={customerQuery} onChange={e => setCustomerQuery(e.target.value)}
+                      autoFocus
+                      placeholder="Buscar cliente para Cta. Cte. ..."
+                      className="w-full pl-7 pr-3 py-1.5 text-xs rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--warning)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+                    />
+                    {customerQuery.length >= 2 && (
+                      <div className="absolute bottom-full left-0 right-0 mb-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 overflow-hidden">
+                        {customerResults.length > 0 ? (
+                          <>
+                            {customerResults.map(c => (
+                              <button key={c.id}
+                                onClick={() => { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]) }}
+                                className="w-full flex items-center justify-between px-3 py-2 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
+                                <div>
+                                  <p className="text-xs font-medium text-[var(--text)]">{c.full_name}</p>
+                                  {c.document && <p className="text-xs text-[var(--text3)]">{c.document}</p>}
+                                </div>
+                                {Number(c.current_balance) > 0 && <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>}
+                              </button>
+                            ))}
+                            <button onClick={() => setQuickCustomerModal(true)}
+                              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--accent-subtle)] transition-colors text-left border-t border-[var(--border)]">
+                              <Plus size={12} className="text-[var(--accent)]" />
+                              <span className="text-xs text-[var(--accent)] font-medium">Crear "{customerQuery}"</span>
+                            </button>
+                          </>
+                        ) : (
+                          <button onClick={() => setQuickCustomerModal(true)}
+                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--accent-subtle)] transition-colors text-left">
+                            <Plus size={12} className="text-[var(--accent)]" />
+                            <span className="text-xs text-[var(--accent)] font-medium">Crear cliente "{customerQuery}"</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             )}
             {paymentMethod === 'credito' && (
               <div className="flex items-center gap-3">
