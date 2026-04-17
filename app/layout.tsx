@@ -11,24 +11,33 @@ const BASE_URL = 'https://stockos.digital'
 export const metadata: Metadata = {
   metadataBase: new URL(BASE_URL),
   title: {
-    default: 'StockOS: Gestión de Stock, Ventas y Cajas para Retail LATAM',
+    default: 'StockOS — Control total de tu negocio',
     template: '%s | StockOS',
   },
-  description: 'Sistema de gestión de stock, ventas y cajas para supermercados y retail en LATAM. Multi-sucursal, POS, inventario, finanzas y más.',
+  description: 'Stock, ventas y precios en un solo lugar. Para vender más y no perder plata. POS, multi-sucursal y facturación ARCA para retail en LATAM.',
   keywords: ['stock', 'ventas', 'retail', 'supermercado', 'POS', 'inventario', 'LATAM', 'gestión'],
   authors: [{ name: 'StockOS' }],
   openGraph: {
     type: 'website',
     url: BASE_URL,
     siteName: 'StockOS',
-    title: 'StockOS: Gestión de Stock, Ventas y Cajas para Retail LATAM',
-    description: 'Sistema de gestión de stock, ventas y cajas para supermercados y retail en LATAM. Multi-sucursal, POS, inventario, finanzas y más.',
+    title: 'StockOS — Control total de tu negocio',
+    description: 'Stock, ventas y precios en un solo lugar. Para vender más y no perder plata.',
     locale: 'es_AR',
+    images: [
+      {
+        url: `${BASE_URL}/opengraph-image`,
+        width: 1200,
+        height: 630,
+        alt: 'StockOS — Control total de tu negocio, en tiempo real',
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'StockOS: Gestión de Stock, Ventas y Cajas para Retail LATAM',
-    description: 'Sistema de gestión de stock, ventas y cajas para supermercados y retail en LATAM.',
+    title: 'StockOS — Control total de tu negocio',
+    description: 'Stock, ventas y precios en un solo lugar. Para vender más y no perder plata.',
+    images: [`${BASE_URL}/opengraph-image`],
   },
   icons: {
     icon: '/icon.svg',

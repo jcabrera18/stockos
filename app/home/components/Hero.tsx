@@ -31,18 +31,16 @@ export function Hero() {
 
       {/* Headline */}
       <h1 className="relative max-w-3xl text-5xl sm:text-6xl md:text-[68px] font-bold text-white leading-[1.07] tracking-tight mb-6">
-        Tu negocio,{' '}
+        Control total de tu negocio,{' '}
         <br className="hidden sm:block" />
         <span className="bg-gradient-to-br from-[#4ade80] to-[#16a34a] bg-clip-text text-transparent">
-          sin caos ni pérdidas
+          en tiempo real
         </span>
       </h1>
 
       {/* Subheadline */}
       <p className="relative max-w-[540px] text-lg sm:text-[19px] text-white/50 leading-relaxed mb-10">
-        StockOS unifica stock, precios, ventas y caja para supermercados,
-        autoservicios y ferreterías en Argentina y LATAM.
-        Desde una caja hasta una cadena completa.
+        StockOS te muestra stock, ventas y precios en un solo lugar. Para vender más y no perder plata.
       </p>
 
       {/* CTAs */}

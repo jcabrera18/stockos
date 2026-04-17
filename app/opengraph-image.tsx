@@ -1,7 +1,7 @@
 import { ImageResponse } from 'next/og'
 
 export const runtime = 'edge'
-export const alt = 'StockOS — Gestión de stock y ventas para retail LATAM'
+export const alt = 'StockOS — Control total de tu negocio, en tiempo real'
 export const size = { width: 1200, height: 630 }
 export const contentType = 'image/png'
 
@@ -16,88 +16,106 @@ export default function OGImage() {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
+          background: '#0a0a08',
           fontFamily: 'system-ui, sans-serif',
+          position: 'relative',
         }}
       >
-        {/* Logo / icon area */}
+        {/* Glow background */}
+        <div
+          style={{
+            position: 'absolute',
+            top: -100,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 800,
+            height: 400,
+            borderRadius: '50%',
+            background: 'radial-gradient(ellipse, rgba(22,163,74,0.18) 0%, transparent 70%)',
+          }}
+        />
+
+        {/* Logo */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            width: 96,
-            height: 96,
-            borderRadius: 24,
-            background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
-            marginBottom: 32,
+            gap: 20,
+            marginBottom: 40,
           }}
         >
-          <span style={{ fontSize: 48 }}>📦</span>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 72,
+              height: 72,
+              borderRadius: 18,
+              background: '#16a34a',
+            }}
+          >
+            <svg viewBox="0 0 32 32" width="38" height="38">
+              <path d="M18 4 L10 18 L15 18 L14 28 L22 14 L17 14 Z" fill="white" />
+            </svg>
+          </div>
+          <span
+            style={{
+              fontSize: 52,
+              fontWeight: 700,
+              color: '#ffffff',
+              letterSpacing: '-1px',
+            }}
+          >
+            StockOS
+          </span>
         </div>
 
-        {/* Title */}
+        {/* Headline */}
         <div
           style={{
-            fontSize: 72,
+            fontSize: 64,
             fontWeight: 700,
-            color: '#f8fafc',
+            color: '#ffffff',
+            textAlign: 'center',
             letterSpacing: '-2px',
-            marginBottom: 16,
+            lineHeight: 1.1,
+            maxWidth: 900,
+            marginBottom: 20,
           }}
         >
-          Stock<span style={{ color: '#3b82f6' }}>OS</span>
+          Control total de tu negocio,{' '}
+          <span style={{ color: '#4ade80' }}>en tiempo real</span>
         </div>
 
-        {/* Tagline */}
+        {/* Subheadline */}
         <div
           style={{
-            fontSize: 28,
-            color: '#94a3b8',
+            fontSize: 26,
+            color: 'rgba(255,255,255,0.45)',
             textAlign: 'center',
             maxWidth: 700,
             lineHeight: 1.4,
+            marginBottom: 48,
           }}
         >
-          Gestión de stock y ventas para retail LATAM
+          Stock, ventas y precios en un solo lugar. Para vender más y no perder plata.
         </div>
 
-        {/* Features row */}
+        {/* CTA pill */}
         <div
           style={{
             display: 'flex',
-            gap: 24,
-            marginTop: 48,
+            alignItems: 'center',
+            padding: '16px 40px',
+            borderRadius: 999,
+            background: '#16a34a',
+            color: '#ffffff',
+            fontSize: 24,
+            fontWeight: 600,
           }}
         >
-          {['Multi-sucursal', 'POS', 'Inventario', 'Finanzas'].map((feature) => (
-            <div
-              key={feature}
-              style={{
-                display: 'flex',
-                padding: '10px 20px',
-                borderRadius: 999,
-                background: 'rgba(59, 130, 246, 0.15)',
-                border: '1px solid rgba(59, 130, 246, 0.3)',
-                color: '#93c5fd',
-                fontSize: 20,
-              }}
-            >
-              {feature}
-            </div>
-          ))}
-        </div>
-
-        {/* URL */}
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 40,
-            color: '#475569',
-            fontSize: 20,
-          }}
-        >
-          stockos.digital
+          Empezar gratis — stockos.digital
         </div>
       </div>
     ),

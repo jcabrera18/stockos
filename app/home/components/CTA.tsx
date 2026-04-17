@@ -54,7 +54,9 @@ export function CTA() {
                 <ArrowRight size={17} className="group-hover:translate-x-0.5 transition-transform" />
               </Link>
               <a
-                href="mailto:hola@stockos.digital"
+                href="https://wa.me/5493438445203"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 border border-white/[0.09] hover:border-white/[0.18] hover:bg-white/[0.025] text-white/60 hover:text-white/85 rounded-xl font-medium text-base transition-all duration-200"
               >
                 <Mail size={15} />

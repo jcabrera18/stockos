@@ -31,9 +31,10 @@ export function Navbar() {
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
         {/* Logo */}
         <Link href="/home" className="flex items-center gap-2.5 group">
-          <div className="w-8 h-8 bg-[#16a34a] rounded-[8px] flex items-center justify-center shadow-[0_0_12px_rgba(22,163,74,0.35)] group-hover:shadow-[0_0_20px_rgba(22,163,74,0.5)] transition-shadow">
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden>
-              <path d="M2 4h12M2 8h8M2 12h10" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
+          <div className="shadow-[0_0_12px_rgba(22,163,74,0.35)] group-hover:shadow-[0_0_20px_rgba(22,163,74,0.5)] transition-shadow rounded-[8px]">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" aria-hidden>
+              <rect width="32" height="32" rx="8" fill="#16a34a"/>
+              <path d="M18 4 L10 18 L15 18 L14 28 L22 14 L17 14 Z" fill="white"/>
             </svg>
           </div>
           <span className="font-bold text-white text-[17px] tracking-tight">StockOS</span>
