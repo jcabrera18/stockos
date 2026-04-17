@@ -97,18 +97,13 @@ export default function CategoriesPage() {
         parent_id: formParent || null,
       }
       if (editCat) {
-        // No hay PATCH de categorías en la API, usamos el endpoint de productos
-        await api.post('/api/products/categories', payload)
-        // Si es edición eliminamos la anterior y creamos nueva
-        // Por simplicidad: delete + create
-        await api.delete(`/api/products/categories/${editCat.id}`)
+        await api.patch(`/api/products/categories/${editCat.id}`, payload)
         toast.success('Categoría actualizada')
-        setModal(false)
       } else {
         await api.post('/api/products/categories', payload)
         toast.success('Categoría creada')
-        setModal(false)
       }
+      setModal(false)
       fetchCategories(true)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
@@ -174,9 +169,24 @@ export default function CategoriesPage() {
     ])
   }
 
-  // Opciones para el select de padre (excluye la categoría que se está editando)
+  // Recolecta IDs de la categoría en edición + todos sus descendientes (para evitar ciclos)
+  const excludedIds = (() => {
+    if (!editCat) return new Set<string>()
+    const ids = new Set<string>([editCat.id])
+    const collect = (cats: CategoryWithChildren[]) => {
+      cats.forEach(c => { ids.add(c.id); collect(c.children) })
+    }
+    const node = buildTree(categories).find(c => c.id === editCat.id)
+      ?? buildTree(categories).flatMap(function flatten(c): CategoryWithChildren[] {
+        return [c, ...c.children.flatMap(flatten)]
+      }).find(c => c.id === editCat.id)
+    if (node) collect(node.children)
+    return ids
+  })()
+
+  // Opciones para el select de padre (excluye la categoría editada y sus descendientes)
   const parentOptions = flattenTree(
-    buildTree(categories.filter(c => c.id !== editCat?.id))
+    buildTree(categories.filter(c => !excludedIds.has(c.id)))
   )
 
   // Contar productos por categoría no disponible sin join extra — mostramos solo el árbol
@@ -432,7 +442,7 @@ export default function CategoriesPage() {
         onClose={() => { setDeleteModal(false); setDeleteCat(null) }}
         onConfirm={handleDelete}
         title="Eliminar categoría"
-        message={`¿Eliminás "${deleteCat?.name}"? Los productos asociados quedarán sin categoría.${deleteCat && categories.some(c => c.parent_id === deleteCat.id) ? ' Las subcategorías también se verán afectadas.' : ''}`}
+        message={`¿Eliminás "${deleteCat?.name}"? Los productos asociados quedarán sin categoría.${deleteCat && categories.some(c => c.parent_id === deleteCat.id) ? ' Las subcategorías pasarán a ser categorías raíz.' : ''}`}
         confirmLabel="Eliminar"
         loading={deleting}
         danger
