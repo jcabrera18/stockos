@@ -34,6 +34,16 @@ export interface SyncMeta {
   synced_at: string
 }
 
+export interface PendingSale {
+  id: string                              // local UUID
+  created_at: string
+  payload: Record<string, unknown>        // cuerpo del POST /api/sales
+  customer_charge?: { customer_id: string; amount: number }  // solo para cuenta_corriente
+  status: 'pending' | 'failed'
+  retry_count: number
+  last_error?: string
+}
+
 class POSDatabase extends Dexie {
   products!: Table<Product>
   barcodes!: Table<LocalBarcode>
@@ -41,6 +51,7 @@ class POSDatabase extends Dexie {
   priceRules!: Table<LocalPriceRule>
   promotions!: Table<Promotion>
   syncMeta!: Table<SyncMeta>
+  pendingSales!: Table<PendingSale>
 
   constructor() {
     super('stockos_pos')
@@ -48,9 +59,18 @@ class POSDatabase extends Dexie {
       products:   'id, name, barcode, updated_at',
       barcodes:   'barcode, product_id',
       priceLists: 'id',
-      priceRules: 'id, product_id, price_list_id',  // compound lookup por product+list
+      priceRules: 'id, product_id, price_list_id',
       promotions: 'id, scope, scope_id',
       syncMeta:   'key',
+    })
+    this.version(2).stores({
+      products:     'id, name, barcode, updated_at',
+      barcodes:     'barcode, product_id',
+      priceLists:   'id',
+      priceRules:   'id, product_id, price_list_id',
+      promotions:   'id, scope, scope_id',
+      syncMeta:     'key',
+      pendingSales: 'id, status, created_at',
     })
   }
 }

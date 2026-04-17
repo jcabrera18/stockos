@@ -27,6 +27,7 @@ import {
   type PricingResult,
   type ScanResult,
 } from '@/lib/pos-cache'
+import { queueSale, syncPendingSales, getPendingSalesCount, isNetworkError } from '@/lib/sales-queue'
 
 interface CartItem {
   product: Product
@@ -130,12 +131,31 @@ export default function POSPage() {
   const { cacheReady, syncing: cacheSyncing, forceSync } = usePOSSync(selectedWarehouse?.id)
 
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
+  const [pendingCount, setPendingCount] = useState(0)
 
   // Leer timestamp de última sync desde IndexedDB cuando el cache esté listo
   useEffect(() => {
     if (!cacheReady) return
     getLastSyncTime().then(t => setLastSyncedAt(t)).catch(() => {})
+    getPendingSalesCount().then(setPendingCount).catch(() => {})
   }, [cacheReady])
+
+  // Sincronizar ventas offline cuando se recupera la conexión
+  useEffect(() => {
+    const handleOnline = () => {
+      syncPendingSales()
+        .then(({ synced, failed }) => {
+          if (synced > 0) toast.success(`${synced} venta${synced > 1 ? 's' : ''} sincronizada${synced > 1 ? 's' : ''}`)
+          if (failed > 0) toast.error(`${failed} venta${failed > 1 ? 's' : ''} no se pudieron sincronizar`)
+          getPendingSalesCount().then(setPendingCount).catch(() => {})
+        })
+        .catch(() => {})
+    }
+    window.addEventListener('online', handleOnline)
+    // También intentar al montar por si había ventas pendientes de sesiones anteriores
+    handleOnline()
+    return () => window.removeEventListener('online', handleOnline)
+  }, [])
 
   // Re-renderizar cada minuto para mantener el "hace X min" actualizado
   useEffect(() => {
@@ -696,22 +716,81 @@ export default function POSPage() {
       let sale: CompletedSale
       if (paymentMethod === 'cuenta_corriente') {
         if (!selectedCustomer) throw new Error('Seleccioná un cliente para cuenta corriente')
-        const freshCustomer = await api.get<CustomerSummary & { is_active?: boolean }>(`/api/customers/${selectedCustomer.id}`)
-        if (freshCustomer.is_active === false) throw new Error('El cliente está desactivado')
-        if (freshCustomer.credit_limit > 0) {
-          const available = freshCustomer.available_credit ?? (freshCustomer.credit_limit - freshCustomer.current_balance)
-          if (available < total) {
-            throw new Error(
-              `Límite de cuenta corriente insuficiente. Disponible: ${formatCurrency(available)} — Total: ${formatCurrency(total)}`
-            )
+        try {
+          const freshCustomer = await api.get<CustomerSummary & { is_active?: boolean }>(`/api/customers/${selectedCustomer.id}`)
+          if (freshCustomer.is_active === false) throw new Error('El cliente está desactivado')
+          if (freshCustomer.credit_limit > 0) {
+            const available = freshCustomer.available_credit ?? (freshCustomer.credit_limit - freshCustomer.current_balance)
+            if (available < total) {
+              throw new Error(
+                `Límite de cuenta corriente insuficiente. Disponible: ${formatCurrency(available)} — Total: ${formatCurrency(total)}`
+              )
+            }
           }
+          sale = await api.post<CompletedSale>('/api/sales', { ...payload, payment_method: 'cuenta_corriente', installments: 1 })
+          await api.post(`/api/customers/${selectedCustomer.id}/charge`, { sale_id: sale.id, amount: total })
+          toast.success('Venta registrada y cargada a cuenta corriente')
+        } catch (err) {
+          if (!isNetworkError(err)) throw err
+          // Sin conexión: guardar en cola con el cargo a cuenta corriente incluido
+          const offlineId = crypto.randomUUID()
+          await queueSale({
+            id: offlineId,
+            created_at: new Date().toISOString(),
+            payload: { ...payload, payment_method: 'cuenta_corriente', installments: 1 },
+            customer_charge: { customer_id: selectedCustomer.id, amount: total },
+          })
+          setPendingCount(c => c + 1)
+          toast.info('Sin conexión — venta guardada en cuenta corriente, se sincronizará automáticamente')
+          sale = {
+            id: offlineId,
+            total,
+            subtotal,
+            discount: saleDiscountAmount,
+            shipping_amount: shipping,
+            payment_method: 'cuenta_corriente',
+            installments: 1,
+            items: cart,
+            created_at: new Date().toISOString(),
+          }
+          setCompletedSale(sale)
+          localStorage.removeItem(POS_CART_KEY)
+          setCart([]); setSaleDiscountPct(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
+          setStep('ticket')
+          return
         }
-        sale = await api.post<CompletedSale>('/api/sales', { ...payload, payment_method: 'cuenta_corriente', installments: 1 })
-        await api.post(`/api/customers/${selectedCustomer.id}/charge`, { sale_id: sale.id, amount: total })
-        toast.success('Venta registrada y cargada a cuenta corriente')
       } else {
-        sale = await api.post<CompletedSale>('/api/sales', payload)
-        toast.success('Venta registrada')
+        try {
+          sale = await api.post<CompletedSale>('/api/sales', payload)
+          toast.success('Venta registrada')
+        } catch (err) {
+          if (!isNetworkError(err)) throw err
+          // Sin conexión: guardar en cola offline y mostrar ticket igual
+          const offlineId = crypto.randomUUID()
+          await queueSale({
+            id: offlineId,
+            created_at: new Date().toISOString(),
+            payload,
+          })
+          setPendingCount(c => c + 1)
+          toast.info('Sin conexión — venta guardada, se sincronizará automáticamente')
+          sale = {
+            id: offlineId,
+            total,
+            subtotal,
+            discount: saleDiscountAmount,
+            shipping_amount: shipping,
+            payment_method: paymentMethod,
+            installments: paymentMethod === 'credito' ? installments : 1,
+            items: cart,
+            created_at: new Date().toISOString(),
+          }
+          setCompletedSale(sale)
+          localStorage.removeItem(POS_CART_KEY)
+          setCart([]); setSaleDiscountPct(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
+          setStep('ticket')
+          return
+        }
       }
       const saleId     = sale.id
       const customerId = selectedCustomer?.id ?? null
@@ -805,6 +884,30 @@ export default function POSPage() {
           </div>
         )}
 
+
+        {/* Banner ventas offline pendientes */}
+        {pendingCount > 0 && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-yellow-50 dark:bg-yellow-950/30 border-b border-yellow-300 dark:border-yellow-700">
+            <div className="flex items-center gap-2 text-xs text-yellow-700 dark:text-yellow-400">
+              <AlertTriangle size={14} className="flex-shrink-0" />
+              <span className="font-medium">{pendingCount} venta{pendingCount > 1 ? 's' : ''} sin sincronizar</span>
+            </div>
+            <button
+              onClick={() => {
+                syncPendingSales()
+                  .then(({ synced, failed }) => {
+                    if (synced > 0) toast.success(`${synced} venta${synced > 1 ? 's' : ''} sincronizada${synced > 1 ? 's' : ''}`)
+                    if (failed > 0) toast.error(`${failed} no se pudieron sincronizar`)
+                    getPendingSalesCount().then(setPendingCount).catch(() => {})
+                  })
+                  .catch(() => {})
+              }}
+              className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 underline flex-shrink-0"
+            >
+              Reintentar
+            </button>
+          </div>
+        )}
 
         {/* Selector de depósito */}
         {warehouses.length > 1 && workstation && !workstation.warehouse_id && !branches.find(b => b.id === workstation.branch_id)?.warehouse_id && (
