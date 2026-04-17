@@ -11,13 +11,13 @@ import { useTheme } from '@/hooks/useTheme'
 import { getRoleLabel } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
-import { Sun, Moon, Shield, Truck, UserPlus, Building2, Receipt } from 'lucide-react'
+import { Sun, Moon, Shield, Truck, Building2, Receipt } from 'lucide-react'
 
-const ROLE_OPTIONS = [
-  { value: 'cashier', label: 'Cajero' },
-  { value: 'stocker', label: 'Repositor' },
-  { value: 'seller',  label: 'Vendedor' },
-]
+// const ROLE_OPTIONS = [
+//   { value: 'cashier', label: 'Cajero' },
+//   { value: 'stocker', label: 'Repositor' },
+//   { value: 'seller',  label: 'Vendedor' },
+// ]
 
 const IVA_OPTIONS = [
   { value: 'RI', label: 'Responsable Inscripto (Facturas A/B)' },
@@ -31,7 +31,7 @@ const ENV_OPTIONS = [
   { value: 'prod',    label: 'Producción' },
 ]
 
-interface Branch { id: string; name: string }
+// interface Branch { id: string; name: string }
 
 export default function SettingsPage() {
   const { user, signOut } = useAuth()
@@ -57,16 +57,9 @@ export default function SettingsPage() {
   const [afipKey, setAfipKey]               = useState('')
   const [savingAfip, setSavingAfip]         = useState(false)
 
-  // Create user form
-  const [branches, setBranches] = useState<Branch[]>([])
-  const [newUser, setNewUser] = useState({
-    full_name: '',
-    email: '',
-    password: '',
-    role: 'cashier',
-    branch_id: '',
-  })
-  const [creating, setCreating] = useState(false)
+  // const [branches, setBranches] = useState<Branch[]>([])
+  // const [newUser, setNewUser] = useState({ full_name: '', email: '', password: '', role: 'cashier', branch_id: '' })
+  // const [creating, setCreating] = useState(false)
   const initialized = useRef(false)
 
   useEffect(() => {
@@ -84,13 +77,13 @@ export default function SettingsPage() {
     setAfipEnv(user.business?.afip_environment ?? 'homo')
   }, [user])
 
-  useEffect(() => {
-    if (['owner', 'admin'].includes(role)) {
-      api.get<Branch[]>('/api/branches').then(res => {
-        setBranches(res ?? [])
-      }).catch(() => {})
-    }
-  }, [role])
+  // useEffect(() => {
+  //   if (['owner', 'admin'].includes(role)) {
+  //     api.get<Branch[]>('/api/branches').then(res => {
+  //       setBranches(res ?? [])
+  //     }).catch(() => {})
+  //   }
+  // }, [role])
 
   const handleSaveBiz = async () => {
     setSavingBiz(true)
@@ -145,29 +138,7 @@ export default function SettingsPage() {
     }
   }
 
-  const handleCreateUser = async () => {
-    if (!newUser.full_name || !newUser.email || !newUser.password) {
-      toast.error('Completá todos los campos obligatorios')
-      return
-    }
-    setCreating(true)
-    try {
-      await api.post('/api/auth/register', {
-        full_name:   newUser.full_name,
-        email:       newUser.email,
-        password:    newUser.password,
-        role:        newUser.role,
-        business_id: user?.business_id,
-        branch_id:   newUser.branch_id || null,
-      })
-      toast.success('Usuario creado correctamente')
-      setNewUser({ full_name: '', email: '', password: '', role: 'cashier', branch_id: '' })
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error al crear usuario')
-    } finally {
-      setCreating(false)
-    }
-  }
+  // const handleCreateUser = async () => { ... }
 
   const isOwnerAdmin = ['owner', 'admin'].includes(role)
 
@@ -391,54 +362,8 @@ export default function SettingsPage() {
               </Card>
             )}
 
-            {/* Crear usuario */}
-            {isOwnerAdmin && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <UserPlus size={15} className="text-[var(--accent)]" />
-                    Crear usuario
-                  </CardTitle>
-                </CardHeader>
-                <div className="space-y-3">
-                  <Input
-                    placeholder="Nombre completo *"
-                    value={newUser.full_name}
-                    onChange={e => setNewUser(u => ({ ...u, full_name: e.target.value }))}
-                  />
-                  <Input
-                    type="email"
-                    placeholder="Email *"
-                    value={newUser.email}
-                    onChange={e => setNewUser(u => ({ ...u, email: e.target.value }))}
-                  />
-                  <Input
-                    type="password"
-                    placeholder="Contraseña * (mín. 6 caracteres)"
-                    value={newUser.password}
-                    onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))}
-                  />
-                  <Select
-                    options={ROLE_OPTIONS}
-                    value={newUser.role}
-                    onChange={e => setNewUser(u => ({ ...u, role: e.target.value }))}
-                  />
-                  {branches.length > 0 && (
-                    <Select
-                      options={[
-                        { value: '', label: 'Sin sucursal asignada' },
-                        ...branches.map(b => ({ value: b.id, label: b.name })),
-                      ]}
-                      value={newUser.branch_id}
-                      onChange={e => setNewUser(u => ({ ...u, branch_id: e.target.value }))}
-                    />
-                  )}
-                  <Button onClick={handleCreateUser} disabled={creating} className="w-full">
-                    {creating ? 'Creando...' : 'Crear usuario'}
-                  </Button>
-                </div>
-              </Card>
-            )}
+            {/* Crear usuario — oculto temporalmente */}
+            {/* {isOwnerAdmin && <CreateUserCard ... />} */}
 
             {/* Sesión */}
             <Card>
