@@ -9,6 +9,7 @@ import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { toast } from 'sonner'
 import { CheckCircle, Printer } from 'lucide-react'
 import type { CustomerSummary } from '@/app/customers/page'
+import { useAuth } from '@/hooks/useAuth'
 
 interface PaymentModalProps {
   open: boolean
@@ -43,6 +44,7 @@ const METHOD_LABELS: Record<string, string> = {
 }
 
 export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalProps) {
+  const { user } = useAuth()
   const [step, setStep] = useState<'form' | 'receipt'>('form')
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState('efectivo')
@@ -51,6 +53,7 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
   const [payAll, setPayAll] = useState(false)
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
   const receiptRef = useRef<HTMLDivElement>(null)
+  const printRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (open) {
@@ -98,64 +101,26 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
   }
 
   const handlePrint = () => {
-    if (!receipt) return
-    const win = window.open('', '_blank', 'width=420,height=600')
+    const content = printRef.current
+    if (!content) return
+
+    const win = window.open('', '_blank', 'width=350,height=800')
     if (!win) return
 
-    win.document.write(`<!DOCTYPE html><html><head>
-      <meta charset="utf-8"><title>Recibo de pago</title>
-      <style>
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:'Inter',Arial,sans-serif; background:#fff; color:#1a1a18; padding:32px; max-width:380px; }
-        .mono { font-family:'Courier New',monospace; }
-        .header { text-align:center; margin-bottom:24px; }
-        .header h1 { font-size:18px; font-weight:700; margin-bottom:2px; }
-        .header p { font-size:12px; color:#6a6a64; }
-        .divider { border:none; border-top:1px dashed #d4d4cc; margin:16px 0; }
-        .row { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
-        .row .label { font-size:12px; color:#6a6a64; }
-        .row .value { font-size:13px; font-weight:600; }
-        .amount-box { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:16px; text-align:center; margin:16px 0; }
-        .amount-box .lbl { font-size:11px; color:#16a34a; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:4px; }
-        .amount-box .val { font-size:32px; font-weight:700; font-family:'Courier New',monospace; color:#15803d; }
-        .balance-box { background:#fafaf9; border:1px solid #e5e5e2; border-radius:10px; padding:12px 16px; }
-        .balance-row { display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px; }
-        .balance-row:last-child { margin-bottom:0; font-size:14px; font-weight:700; padding-top:8px; border-top:1px dashed #e5e5e2; }
-        .footer { text-align:center; margin-top:24px; font-size:10px; color:#b4b2a9; }
-      </style>
-    </head><body>
-      <div class="header">
-        <h1>Recibo de Pago</h1>
-        <p>${formatDateTime(receipt.paidAt)}</p>
-      </div>
-
-      <div class="row"><span class="label">Cliente</span><span class="value">${receipt.customerName}</span></div>
-      ${receipt.customerDoc ? `<div class="row"><span class="label">Documento</span><span class="value mono">${receipt.customerDoc}</span></div>` : ''}
-      <div class="row"><span class="label">Método</span><span class="value">${METHOD_LABELS[receipt.method] ?? receipt.method}</span></div>
-      ${receipt.description !== 'Pago de cuenta corriente' ? `<div class="row"><span class="label">Concepto</span><span class="value">${receipt.description}</span></div>` : ''}
-
-      <div class="amount-box">
-        <div class="lbl">Monto pagado</div>
-        <div class="val">${formatCurrency(receipt.amount)}</div>
-      </div>
-
-      <div class="balance-box">
-        <div class="balance-row">
-          <span style="color:#6a6a64">Saldo anterior</span>
-          <span class="mono">${formatCurrency(receipt.balanceBefore)}</span>
-        </div>
-        <div class="balance-row">
-          <span style="color:#6a6a64">Pago aplicado</span>
-          <span class="mono" style="color:#16a34a">− ${formatCurrency(receipt.amount)}</span>
-        </div>
-        <div class="balance-row">
-          <span>${receipt.balanceAfter === 0 ? '✓ Saldo cancelado' : receipt.balanceAfter < 0 ? 'Saldo a favor' : 'Saldo restante'}</span>
-          <span class="mono" style="color:${receipt.balanceAfter <= 0 ? '#15803d' : '#dc2626'}">${formatCurrency(receipt.balanceAfter)}</span>
-        </div>
-      </div>
-
-      <div class="footer">⚡ Powered by StockOS</div>
-    </body></html>`)
+    win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Recibo de pago</title>
+  <style>
+    @page { size: 80mm auto; margin: 2mm 0; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 80mm; background: #fff; }
+    body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; }
+  </style>
+</head>
+<body>${content.innerHTML}</body>
+</html>`)
     win.document.close()
     win.focus()
     setTimeout(() => { win.print(); win.close() }, 400)
@@ -245,6 +210,106 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
       {/* ── Paso 2: Recibo ── */}
       {step === 'receipt' && receipt && (
         <div className="space-y-4" ref={receiptRef}>
+
+          {/* Ticket térmico oculto (solo para impresión) */}
+          <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '302px' }}>
+            <div
+              ref={printRef}
+              style={{
+                fontFamily: "'Courier New', Courier, monospace",
+                fontSize: '11px',
+                color: '#000',
+                background: '#fff',
+                width: '302px',
+                padding: '12px 10px',
+              }}
+            >
+              {/* Encabezado negocio */}
+              <div style={{ textAlign: 'center', marginBottom: '2px' }}>
+                <div style={{ fontSize: '15px', fontWeight: 'bold', letterSpacing: '0.04em' }}>
+                  {user?.business?.name ?? ''}
+                </div>
+                {user?.business?.cuit && (
+                  <div style={{ marginTop: '2px' }}>CUIT: {user.business.cuit}</div>
+                )}
+                {user?.business?.address && (
+                  <div style={{ fontSize: '10px', marginTop: '1px' }}>{user.business.address}</div>
+                )}
+                {user?.business?.phone && (
+                  <div style={{ fontSize: '10px' }}>Tel: {user.business.phone}</div>
+                )}
+              </div>
+
+              <div style={{ borderTop: '1px dashed #999', margin: '8px 0' }} />
+
+              <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '13px', letterSpacing: '0.04em' }}>
+                RECIBO DE PAGO
+              </div>
+              <div style={{ textAlign: 'center', fontSize: '10px', marginTop: '2px' }}>
+                Fecha: {formatDateTime(receipt.paidAt)}
+              </div>
+
+              <div style={{ borderTop: '1px dashed #999', margin: '8px 0' }} />
+
+              {/* Datos del cliente */}
+              <div style={{ lineHeight: '1.6' }}>
+                <div style={{ fontWeight: 'bold' }}>{receipt.customerName}</div>
+                {receipt.customerDoc && <div>Doc: {receipt.customerDoc}</div>}
+              </div>
+
+              <div style={{ borderTop: '1px dashed #999', margin: '8px 0' }} />
+
+              {/* Concepto y método */}
+              <div style={{ lineHeight: '1.6' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Método</span>
+                  <span>{METHOD_LABELS[receipt.method] ?? receipt.method}</span>
+                </div>
+                {receipt.description !== 'Pago de cuenta corriente' && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Concepto</span>
+                    <span style={{ textAlign: 'right', maxWidth: '160px', wordBreak: 'break-word' }}>{receipt.description}</span>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ borderTop: '1px dashed #999', margin: '8px 0' }} />
+
+              {/* Monto pagado */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', fontSize: '14px' }}>
+                <span>MONTO PAGADO</span>
+                <span>{formatCurrency(receipt.amount)}</span>
+              </div>
+
+              <div style={{ borderTop: '1px dashed #999', margin: '8px 0' }} />
+
+              {/* Saldos */}
+              <div style={{ lineHeight: '1.8', fontSize: '11px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Saldo anterior</span>
+                  <span>{formatCurrency(receipt.balanceBefore)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Pago aplicado</span>
+                  <span>− {formatCurrency(receipt.amount)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
+                  <span>
+                    {receipt.balanceAfter === 0 ? 'Saldo cancelado' : receipt.balanceAfter < 0 ? 'Saldo a favor' : 'Saldo restante'}
+                  </span>
+                  <span>{formatCurrency(receipt.balanceAfter)}</span>
+                </div>
+              </div>
+
+              <div style={{ borderTop: '1px dashed #999', margin: '8px 0' }} />
+
+              {/* Footer */}
+              <div style={{ textAlign: 'center', fontSize: '10px', lineHeight: '1.6' }}>
+                <div>¡Gracias por su pago!</div>
+                <div style={{ color: '#888' }}>Powered by StockOS</div>
+              </div>
+            </div>
+          </div>
           <div className="flex flex-col items-center py-2 gap-1">
             <div className="w-10 h-10 rounded-full bg-[var(--accent-subtle)] flex items-center justify-center">
               <CheckCircle size={20} className="text-[var(--accent)]" />

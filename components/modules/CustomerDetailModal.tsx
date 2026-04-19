@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -8,7 +8,8 @@ import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import type { CustomerSummary } from '@/app/customers/page'
 import type { Pagination as PaginationType } from '@/types'
-import { CreditCard, TrendingUp, TrendingDown, SlidersHorizontal, MapPin, Calendar } from 'lucide-react'
+import { CreditCard, TrendingUp, TrendingDown, SlidersHorizontal, MapPin, Calendar, Printer } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
 
 interface Movement {
   id: string
@@ -35,6 +36,8 @@ const movementConfig = {
 }
 
 export function CustomerDetailModal({ open, onClose, customer, onPayment }: CustomerDetailModalProps) {
+  const { user } = useAuth()
+  const printRef = useRef<HTMLDivElement>(null)
   const [movements, setMovements] = useState<Movement[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 30, pages: 0 })
   const [page, setPage] = useState(1)
@@ -53,6 +56,35 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
   }, [open, customer, page])
 
   useEffect(() => { if (!open) { setPage(1); setMovements([]) } }, [open])
+
+  const handlePrint = () => {
+    const content = printRef.current
+    if (!content) return
+
+    const win = window.open('', '_blank', 'width=350,height=800')
+    if (!win) return
+
+    win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Recibo</title>
+  <style>
+    @page { size: 80mm auto; margin: 2mm 0; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 80mm; background: #fff; }
+    body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; }
+  </style>
+</head>
+<body>${content.innerHTML}</body>
+</html>`)
+    win.document.close()
+    win.focus()
+    setTimeout(() => { win.print(); win.close() }, 400)
+  }
+
+  const sep: React.CSSProperties = { borderTop: '1px dashed #999', margin: '8px 0' }
+  const row: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }
 
   if (!customer) return null
 
@@ -141,11 +173,125 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
           </div>
         )}
 
-        {/* Botón pagar */}
-        <Button onClick={onPayment} className="w-full">
-          <CreditCard size={15} />
-          Registrar pago
-        </Button>
+        {/* Botones */}
+        <div className="grid grid-cols-2 gap-2">
+          <Button onClick={onPayment} className="w-full">
+            <CreditCard size={15} />
+            Registrar pago
+          </Button>
+          <Button variant="secondary" onClick={handlePrint} className="w-full">
+            <Printer size={15} />
+            Imprimir recibo
+          </Button>
+        </div>
+
+        {/* Recibo térmico oculto (solo para impresión) */}
+        <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', width: '302px' }}>
+          <div
+            ref={printRef}
+            style={{
+              fontFamily: "'Courier New', Courier, monospace",
+              fontSize: '11px',
+              color: '#000',
+              background: '#fff',
+              width: '302px',
+              padding: '12px 10px',
+            }}
+          >
+            {/* Encabezado negocio */}
+            <div style={{ textAlign: 'center', marginBottom: '2px' }}>
+              <div style={{ fontSize: '15px', fontWeight: 'bold', letterSpacing: '0.04em' }}>
+                {user?.business?.name ?? ''}
+              </div>
+              {user?.business?.cuit && (
+                <div style={{ marginTop: '2px' }}>CUIT: {user.business.cuit}</div>
+              )}
+              {user?.business?.address && (
+                <div style={{ fontSize: '10px', marginTop: '1px' }}>{user.business.address}</div>
+              )}
+              {user?.business?.phone && (
+                <div style={{ fontSize: '10px' }}>Tel: {user.business.phone}</div>
+              )}
+            </div>
+
+            <div style={sep} />
+
+            {/* Tipo de documento */}
+            <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '13px', letterSpacing: '0.04em' }}>
+              ESTADO DE CUENTA CORRIENTE
+            </div>
+            <div style={{ textAlign: 'center', fontSize: '10px', marginTop: '2px' }}>
+              Fecha: {new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })} {new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
+            </div>
+
+            <div style={sep} />
+
+            {/* Datos del cliente */}
+            <div style={{ lineHeight: '1.6' }}>
+              <div style={{ fontWeight: 'bold' }}>{customer.full_name}</div>
+              {customer.document && (
+                <div>{customer.document_type ?? 'Doc'}: {customer.document}</div>
+              )}
+              {customer.phone && <div>Tel: {customer.phone}</div>}
+              {customer.address && <div style={{ fontSize: '10px' }}>{customer.address}</div>}
+            </div>
+
+            <div style={sep} />
+
+            {/* Saldo */}
+            <div style={{ ...row, fontWeight: 'bold', fontSize: '14px' }}>
+              <span>SALDO DEUDOR</span>
+              <span>{formatCurrency(customer.current_balance)}</span>
+            </div>
+            {customer.credit_limit > 0 && (
+              <div style={{ fontSize: '10px', marginTop: '4px', lineHeight: '1.5' }}>
+                <div style={row}>
+                  <span>Límite de crédito</span>
+                  <span>{formatCurrency(customer.credit_limit)}</span>
+                </div>
+                <div style={row}>
+                  <span>Disponible</span>
+                  <span>{formatCurrency(Math.max(0, customer.credit_limit - Number(customer.current_balance)))}</span>
+                </div>
+              </div>
+            )}
+
+            <div style={sep} />
+
+            {/* Movimientos */}
+            <div style={{ fontWeight: 'bold', fontSize: '10px', marginBottom: '4px' }}>
+              ÚLTIMOS MOVIMIENTOS
+            </div>
+            {movements.slice(0, 10).map((mov) => (
+              <div key={mov.id} style={{ marginBottom: '5px', fontSize: '10px' }}>
+                <div style={row}>
+                  <span style={{ flex: 1, paddingRight: '6px', wordBreak: 'break-word' }}>
+                    {mov.type === 'sale' ? 'Venta' : mov.type === 'payment' ? 'Pago' : 'Ajuste'} — {mov.description}
+                  </span>
+                  <span style={{ flexShrink: 0, fontWeight: 'bold' }}>
+                    {Number(mov.amount) > 0 ? '+' : ''}{formatCurrency(mov.amount)}
+                  </span>
+                </div>
+                <div style={{ color: '#555' }}>
+                  {formatDateTime(mov.created_at)} · Saldo: {formatCurrency(mov.balance_after)}
+                </div>
+              </div>
+            ))}
+            {movements.length > 10 && (
+              <div style={{ textAlign: 'center', fontSize: '10px', color: '#888', marginTop: '2px' }}>
+                ... {movements.length - 10} movimientos anteriores no mostrados
+              </div>
+            )}
+
+            <div style={sep} />
+
+            {/* Footer */}
+            <div style={{ textAlign: 'center', fontSize: '10px', lineHeight: '1.6' }}>
+              <div>¡Gracias por su confianza!</div>
+              <div style={{ color: '#888' }}>Powered by StockOS</div>
+            </div>
+          </div>
+        </div>
 
         {/* Historial de movimientos */}
         <div className="pb-4">

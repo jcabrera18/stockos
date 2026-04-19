@@ -338,6 +338,18 @@ export default function POSPage() {
         return
       }
 
+      // F5: abrir modal de cobro
+      if (e.key === 'F5') {
+        e.preventDefault()
+        if (cartRef.current.length > 0) {
+          const currentTotal = cartRef.current.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
+          setPaymentSplits([{ method: 'efectivo', amount: currentTotal, installments: 1 }])
+          setActiveSplitIndex(0)
+          setPaymentModalOpen(true)
+        }
+        return
+      }
+
       // Don't intercept inputs other than search
       if (inInput && !inSearch) return
 
@@ -717,7 +729,7 @@ export default function POSPage() {
   const subtotal           = cart.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
   const saleDiscountAmount = Math.round(subtotal * saleDiscountPct / 100 * 100) / 100
   const shipping           = shippingEnabled ? shippingAmount : 0
-  const total              = Math.max(0, subtotal - saleDiscountAmount) + shipping
+  const total              = Math.round((Math.max(0, subtotal - saleDiscountAmount) + shipping) * 100) / 100
   const hasMissingCustomPrice = cart.some(i => i.product.price_mode === 'custom' && i.unit_price === 0)
   const hasPendingItems       = cart.some(i => i.status === 'pending')
 
@@ -728,6 +740,11 @@ export default function POSPage() {
     s => s.method === 'efectivo' && s.received !== undefined && s.received > 0 && s.received < s.amount
   )
   const canConfirm = splitsValid && !hasInvalidReceived
+  const canConfirmRef = useRef(canConfirm)
+  const processingRef = useRef(processing)
+  const handleConfirmRef = useRef<() => void>(() => {})
+  useEffect(() => { canConfirmRef.current = canConfirm }, [canConfirm])
+  useEffect(() => { processingRef.current = processing }, [processing])
 
   const updateSplitMethod = useCallback((i: number, method: string) =>
     setPaymentSplits(prev => prev.map((s, idx) => idx === i ? { ...s, method, received: undefined } : s)), [])
@@ -777,6 +794,18 @@ export default function POSPage() {
     }
     const handler = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') { setPaymentModalOpen(false); return }
+
+      // No interceptar si el foco está en un input de texto (ej: buscador de cliente)
+      const active = document.activeElement as HTMLInputElement | null
+      const isTextInput = active?.tagName === 'INPUT' && active?.type !== 'number'
+      if (isTextInput) return
+
+      // Enter confirma la venta desde cualquier lugar del modal (excepto text inputs)
+      if (ev.key === 'Enter') {
+        ev.preventDefault()
+        if (canConfirmRef.current && !processingRef.current) handleConfirmRef.current()
+        return
+      }
 
       const method = METHOD_KEYS[ev.key.toLowerCase()]
       if (method) {
@@ -934,6 +963,8 @@ export default function POSPage() {
       toast.error(err instanceof Error ? err.message : 'Error al procesar la venta')
     } finally { setProcessing(false) }
   }
+  // Mantener ref siempre actualizado para el handler de teclado del modal
+  useEffect(() => { handleConfirmRef.current = handleConfirm })
 
   const handleNewSale = () => {
     localStorage.removeItem(POS_CART_KEY)
@@ -943,23 +974,6 @@ export default function POSPage() {
     setCompletedSale(null); setSelectedCustomer(null); setCustomerQuery('')
     setStep('cart')
     setTimeout(() => searchRef.current?.focus(), 100)
-  }
-
-  if (step === 'ticket' && completedSale) {
-    return (
-      <POSTicket
-        sale={completedSale}
-        invoiceId={completedSale.invoice_id}
-        onNewSale={handleNewSale}
-        onClose={() => router.push('/sales')}
-        customerPhone={selectedCustomer?.phone}
-        customerName={selectedCustomer?.full_name}
-        business={user?.business ?? undefined}
-        branchName={workstation?.branch_name}
-        registerName={workstation?.register_name}
-        sellerName={user?.full_name}
-      />
-    )
   }
 
   const cartItemCount = cart.reduce((a, i) => a + i.quantity, 0)
@@ -1201,7 +1215,8 @@ export default function POSPage() {
             <p className="mt-1 text-[10px] text-[var(--text3)] pl-1">
               <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">Espacio</kbd> cantidad ·{' '}
               <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">↓</kbd> ir al carrito ·{' '}
-              <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">F2</kbd> carrito
+              <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">F2</kbd> carrito ·{' '}
+              <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">F5</kbd> cobrar
             </p>
           )}
         </div>
@@ -1399,6 +1414,7 @@ export default function POSPage() {
                       type="number" min="0" step="0.01" value={item.unit_price}
                       onChange={e => updateItemPrice(item.product.id, e.target.value)}
                       onFocus={e => { e.target.select(); setFocusedCartIndex(index) }}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); searchRef.current?.focus() } }}
                       className={`w-full text-sm mono text-right bg-transparent border-b-2 px-1 py-0.5 focus:outline-none transition-colors rounded-t ${
                         item.product.price_mode === 'custom' && item.unit_price === 0
                           ? 'border-[var(--warning)] text-[var(--warning)]'
@@ -1566,6 +1582,7 @@ export default function POSPage() {
               className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-[var(--radius-md)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
             >
               Cobrar {cart.length > 0 ? formatCurrency(total) : ''}
+              <kbd className="ml-2 text-[10px] bg-white/20 border border-white/20 px-1.5 py-0.5 rounded font-sans">F5</kbd>
             </button>
           </div>
         )}
@@ -1782,7 +1799,7 @@ export default function POSPage() {
           )}
 
           {/* Confirmar — sticky abajo */}
-          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-1 border-t border-[var(--border)]">
+          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-6 border-t border-[var(--border)]">
             <button onClick={handleConfirm}
               disabled={processing || !canConfirm || (paymentSplits.some(s => s.method === 'cuenta_corriente') && !selectedCustomer)}
               className="w-full py-4 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-bold text-base rounded-[var(--radius-md)] transition-colors disabled:opacity-60 active:scale-95 flex items-center justify-center gap-3">
@@ -1824,7 +1841,7 @@ export default function POSPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setInvoiceModal(false)}>
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6 max-w-sm w-full">
             <h3 className="text-base font-semibold text-[var(--text)] mb-4">Emitir factura</h3>
-            <p className="text-sm text-[var(--text3)] mb-4">Integración AFIP en configuración. Próximamente disponible.</p>
+            <p className="text-sm text-[var(--text3)] mb-4">Integración ARCA en configuración. Próximamente disponible.</p>
             <button onClick={() => setInvoiceModal(false)} className="w-full py-2 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] text-sm text-[var(--text2)]">Cerrar</button>
           </div>
         </div>
@@ -1911,6 +1928,20 @@ export default function POSPage() {
           </div>
         </div>
       </Modal>
+
+      <POSTicket
+        open={step === 'ticket' && !!completedSale}
+        sale={completedSale ?? { id: '', total: 0, subtotal: 0, discount: 0, payment_method: 'efectivo', installments: 1, items: [], created_at: new Date().toISOString() }}
+        invoiceId={completedSale?.invoice_id}
+        onNewSale={handleNewSale}
+        onClose={() => router.push('/sales')}
+        customerPhone={selectedCustomer?.phone}
+        customerName={selectedCustomer?.full_name}
+        business={user?.business ?? undefined}
+        branchName={workstation?.branch_name}
+        registerName={workstation?.register_name}
+        sellerName={user?.full_name}
+      />
 
     </div>
   )

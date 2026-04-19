@@ -12,8 +12,8 @@ const FAQS = [
     a: 'Los planes se ajustan según la cantidad de sucursales y cajas. Podés empezar gratis para probarlo sin compromisos. Para conocer los valores actualizados escribinos al mail o al chat y te armamos una propuesta según tu operación.',
   },
   {
-    q: '¿Funciona para facturación AFIP?',
-    a: 'Sí. StockOS emite Ticket X, Facturas A, B y C, y Notas de Crédito/Débito con autorización ante AFIP (CAE) incluida. Numeración automática, control de secuencias y comprobantes listos para entregar al cliente.',
+    q: '¿Funciona para facturación ARCA?',
+    a: 'Sí. StockOS emite Ticket X, Facturas A, B y C, y Notas de Crédito/Débito con autorización ante ARCA (CAE) incluida. Numeración automática, control de secuencias y comprobantes listos para entregar al cliente.',
   },
   {
     q: '¿Puedo migrar desde otro sistema?',

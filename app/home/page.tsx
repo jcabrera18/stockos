@@ -44,7 +44,7 @@ export const metadata: Metadata = {
     'POS Argentina',
     'sistema de caja',
     'gestión multi-sucursal',
-    'facturación AFIP',
+    'facturación ARCA',
   ],
 }
 

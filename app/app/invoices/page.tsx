@@ -62,7 +62,7 @@ const TYPE_VARIANTS: Record<string, string> = {
 }
 
 const AFIP_LABELS: Record<string, string> = {
-  not_requested: 'Sin AFIP',
+  not_requested: 'Sin ARCA',
   pending:       'Pendiente',
   authorized:    'Autorizado',
   rejected:      'Rechazado',
@@ -224,7 +224,7 @@ export default function InvoicesPage() {
                   <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Fecha</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Receptor</th>
                   <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Total</th>
-                  <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">AFIP</th>
+                  <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">ARCA</th>
                   <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]"></th>
                 </tr>
               </thead>
@@ -387,7 +387,7 @@ export default function InvoicesPage() {
               </div>
             </div>
 
-            {/* AFIP status */}
+            {/* ARCA status */}
             <div className={`flex items-center gap-2 px-3 py-2.5 rounded-[var(--radius-md)] ${
               selectedInvoice.afip_status === 'authorized' ? 'bg-[var(--accent-subtle)]' :
               selectedInvoice.afip_status === 'rejected'   ? 'bg-[var(--danger-subtle)]' :

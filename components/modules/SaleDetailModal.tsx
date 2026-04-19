@@ -3,12 +3,13 @@ import { useEffect, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
+import { Input } from '@/components/ui/Input'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
 import { Printer, CreditCard, Package, User, Calendar, Hash, FileText, Download, Receipt } from 'lucide-react'
-import { useRouter } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
-
+import { toast } from 'sonner'
+import QRCode from 'qrcode'
 
 interface SaleItem {
   id: string
@@ -51,11 +52,14 @@ interface InvoiceSummary {
   iva_amount: number
   afip_status: string
   cae?: string
+  afip_cae?: string
+  afip_cae_vto?: string
   receptor_name?: string
   receptor_cuit?: string
+  receptor_address?: string
   receptor_iva_condition: string
   notes?: string
-  invoice_items: { id: string; description: string; quantity: number; unit_price: number; subtotal: number }[]
+  invoice_items: { id: string; description: string; quantity: number; unit_price: number; iva_rate?: number; subtotal: number }[]
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -64,44 +68,53 @@ const TYPE_LABELS: Record<string, string> = {
   NDA: 'ND A', NDB: 'ND B', NDC: 'ND C',
 }
 
+const IVA_LABELS: Record<string, string> = {
+  RI: 'Responsable Inscripto', MO: 'Monotributista', EX: 'Exento',
+  CF: 'Consumidor Final', M: 'Monotributista',
+}
+
 interface SaleDetailModalProps {
   open: boolean
   onClose: () => void
   saleId: string | null
 }
 
+function buildAfipQrUrl(invoice: InvoiceSummary, cuit: string, ptoVta: number): string {
+  const tipoCmpMap: Record<string, number> = {
+    A: 1, B: 6, C: 11, R: 91,
+    NCA: 3, NCB: 8, NCC: 13,
+    NDA: 2, NDB: 7, NDC: 12,
+  }
+  const cuitEmisor = Number(cuit.replace(/\D/g, ''))
+  const cuitReceptor = invoice.receptor_cuit ? Number(invoice.receptor_cuit.replace(/\D/g, '')) : 0
+  const payload = {
+    ver: 1, fecha: invoice.fecha, cuit: cuitEmisor, ptoVta,
+    tipoCmp: tipoCmpMap[invoice.invoice_type] ?? 1,
+    nroCmp: invoice.numero, importe: invoice.total_amount,
+    moneda: 'PES', ctz: 1,
+    tipoDocRec: invoice.receptor_cuit ? 80 : 99,
+    nroDocRec: cuitReceptor, tipoCodAut: 'E',
+    codAut: Number(invoice.afip_cae ?? invoice.cae),
+  }
+  return `https://www.afip.gob.ar/fe/qr/?p=${btoa(JSON.stringify(payload))}`
+}
+
 export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps) {
   const [sale, setSale] = useState<SaleDetail | null>(null)
   const [customer, setCustomer] = useState<CustomerInfo | null>(null)
-  const [invoice, setInvoice] = useState<{
-    id: string
-    invoice_type: string
-    numero: number
-    fecha?: string
-    receptor_name?: string
-    receptor_cuit?: string
-    receptor_address?: string
-    receptor_iva_condition?: string
-    net_amount?: number
-    iva_amount?: number
-    total_amount?: number
-    afip_status?: string
-    cae?: string
-    cae_expiry?: string
-    notes?: string
-    invoice_items?: {
-      id: string
-      description: string
-      quantity: number
-      unit_price: number
-      iva_rate?: number  // ← opcional
-      subtotal: number
-    }[]
-  } | null>(null)
+  const [invoice, setInvoice] = useState<InvoiceSummary | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadingInvoice, setLoadingInvoice] = useState(false)
-  const router = useRouter()
   const { user } = useAuth()
+
+  // Convert modal state
+  const [convertModal, setConvertModal] = useState(false)
+  const [convertType, setConvertType] = useState<'A' | 'B' | 'C'>('B')
+  const [receptorCuit, setReceptorCuit] = useState('')
+  const [receptorName, setReceptorName] = useState('')
+  const [receptorAddress, setReceptorAddress] = useState('')
+  const [receptorIva, setReceptorIva] = useState('CF')
+  const [converting, setConverting] = useState(false)
 
   useEffect(() => {
     if (!open || !saleId) return
@@ -128,15 +141,39 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
       .finally(() => setLoading(false))
   }, [open, saleId])
 
-  // Cargar el comprobante cuando se abre el modal
   useEffect(() => {
     if (!saleId) return
     setLoadingInvoice(true)
     api.get(`/api/invoices/sale/${saleId}`)
-      .then((data: unknown) => setInvoice(data as { id: string; invoice_type: string; numero: number } | null))
+      .then((data: unknown) => setInvoice(data as InvoiceSummary | null))
       .catch(() => { })
       .finally(() => setLoadingInvoice(false))
   }, [saleId])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (!open || convertModal) return
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (e.key === 'p' || e.key === 'P') { e.preventDefault(); handlePrint() }
+      if ((e.key === 'f' || e.key === 'F') && invoice?.invoice_type === 'X') {
+        e.preventDefault(); openConvertModal()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [open, convertModal, sale, invoice]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openConvertModal = () => {
+    if (!invoice) return
+    setConvertType('B')
+    setReceptorName(invoice.receptor_name ?? customer?.full_name ?? '')
+    setReceptorCuit(invoice.receptor_cuit ?? '')
+    setReceptorAddress(invoice.receptor_address ?? '')
+    setReceptorIva(invoice.receptor_iva_condition ?? 'CF')
+    setConvertModal(true)
+  }
 
   const handlePrint = () => {
     if (!sale) return
@@ -146,7 +183,7 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
     const itemsSubtotal = sale.sale_items.reduce(
       (a, i) => a + i.unit_price * i.quantity - i.discount, 0
     )
-    const isInvoiced = !!(invoice && invoice.afip_status === 'authorized' && invoice.cae)
+    const isInvoiced = !!(invoice && invoice.afip_status === 'authorized' && (invoice.cae || invoice.afip_cae))
     const invoiceTypeLabel = (type: string) => {
       const map: Record<string, string> = {
         A: 'FACTURA A', B: 'FACTURA B', C: 'FACTURA C',
@@ -227,8 +264,8 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
         <div style="text-align:center;line-height:1.6;">
           <div style="font-weight:bold;font-size:12px;">${invoiceTypeLabel(invoice.invoice_type)}</div>
           ${invoice.numero !== undefined ? `<div>N&#176;: ${String(invoice.numero).padStart(8, '0')}</div>` : ''}
-          <div>CAE: ${invoice.cae}</div>
-          ${invoice.cae_expiry ? `<div>Vto. CAE: ${invoice.cae_expiry}</div>` : ''}
+          <div>CAE: ${invoice.cae ?? invoice.afip_cae}</div>
+          ${invoice.afip_cae_vto ? `<div>Vto. CAE: ${invoice.afip_cae_vto}</div>` : ''}
         </div>` : `
         <div style="text-align:center;font-weight:bold;padding:2px 0;letter-spacing:0.03em;">*** NO VALIDO COMO FACTURA ***</div>`}
         ${sep}
@@ -238,6 +275,110 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
         </div>
       </div>
     </body></html>`)
+    win.document.close()
+    win.focus()
+    setTimeout(() => { win.print(); win.close() }, 400)
+  }
+
+  const handlePrintInvoiceTicket = async (inv: InvoiceSummary) => {
+    const biz = user?.business
+    const fmt = (n: number) =>
+      new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(n)
+    const typeLabel = TYPE_LABELS[inv.invoice_type] ?? inv.invoice_type
+    const numero = String(inv.numero).padStart(8, '0')
+    const isA = inv.invoice_type === 'A'
+    const ptoVenta = String(biz?.afip_punto_venta ?? 1).padStart(5, '0')
+    const cae = inv.afip_cae ?? inv.cae
+
+    let qrDataUrl = ''
+    if (cae && biz?.cuit) {
+      try {
+        const url = buildAfipQrUrl({ ...inv, afip_cae: cae }, biz.cuit, biz.afip_punto_venta ?? 1)
+        qrDataUrl = await QRCode.toDataURL(url, { width: 120, margin: 1, errorCorrectionLevel: 'M' })
+      } catch { }
+    }
+
+    const sep = `<div style="border-top:1px dashed #999;margin:8px 0;"></div>`
+    const row = (left: string, right: string) =>
+      `<div style="display:flex;justify-content:space-between;">${left}${right}</div>`
+
+    const html = `
+      <div style="text-align:center;margin-bottom:2px;">
+        <div style="font-size:15px;font-weight:bold;letter-spacing:0.04em;">${biz?.name ?? ''}</div>
+        ${biz?.cuit ? `<div>CUIT: ${biz.cuit}</div>` : ''}
+        ${biz?.address ? `<div style="font-size:10px;">${biz.address}</div>` : ''}
+        ${biz?.phone ? `<div style="font-size:10px;">Tel: ${biz.phone}</div>` : ''}
+        ${biz?.iva_condition ? `<div style="font-size:10px;">Cond. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div>` : ''}
+      </div>
+      ${sep}
+      <div style="text-align:center;font-weight:bold;font-size:13px;">${typeLabel.toUpperCase()}</div>
+      <div style="text-align:center;">N° ${ptoVenta}-${numero}</div>
+      <div style="text-align:center;">Fecha: ${inv.fecha}</div>
+      ${sep}
+      <div><strong>Receptor:</strong> ${inv.receptor_name ?? customer?.full_name ?? 'Consumidor Final'}</div>
+      ${inv.receptor_cuit ? `<div style="font-size:10px;">CUIT: ${inv.receptor_cuit}</div>` : ''}
+      ${inv.receptor_address ? `<div style="font-size:10px;">${inv.receptor_address}</div>` : ''}
+      <div style="font-size:10px;">Cond. IVA: ${IVA_LABELS[inv.receptor_iva_condition] ?? inv.receptor_iva_condition}</div>
+      ${sep}
+      ${row('<span style="font-weight:bold;font-size:10px;">DESCRIPCIÓN</span>', '<span style="font-weight:bold;font-size:10px;">IMPORTE</span>')}
+      <div style="margin-top:4px;">
+        ${(inv.invoice_items ?? []).map(item => `
+          <div style="margin-bottom:6px;">
+            ${row(
+              `<span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity} ${item.description}</span>`,
+              `<span style="flex-shrink:0;">${fmt(item.subtotal)}</span>`
+            )}
+            <div style="font-size:10px;color:#555;">  c/u ${fmt(item.unit_price)}</div>
+          </div>
+        `).join('')}
+      </div>
+      ${sep}
+      ${isA ? `
+        ${row('<span>Neto gravado</span>', `<span>${fmt(inv.net_amount)}</span>`)}
+        ${row('<span>IVA 21%</span>', `<span>${fmt(inv.iva_amount)}</span>`)}
+      ` : ''}
+      <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;margin-top:2px;">
+        <span>TOTAL</span><span>${fmt(inv.total_amount)}</span>
+      </div>
+      ${sep}
+      ${cae ? `
+        <div style="text-align:center;font-weight:bold;font-size:11px;">COMPROBANTE AUTORIZADO</div>
+        <div style="text-align:center;font-size:10px;">CAE: ${cae}</div>
+        ${inv.afip_cae_vto ? `<div style="text-align:center;font-size:10px;">Vto. CAE: ${inv.afip_cae_vto}</div>` : ''}
+        ${qrDataUrl ? `
+          <div style="text-align:center;margin:6px 0;">
+            <img src="${qrDataUrl}" style="width:100px;height:100px;" />
+          </div>
+          <div style="text-align:center;font-size:9px;color:#555;">Verificar en afip.gob.ar/fe/qr</div>
+          <div style="text-align:center;margin:6px 0;">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170 58" width="110" height="38">
+              <text x="85" y="38" text-anchor="middle" font-family="Arial Black,Arial" font-size="44" font-weight="900" fill="#4A4A4A">ARCA</text>
+              <text x="85" y="49" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#666" letter-spacing="1">AGENCIA DE RECAUDACIÓN</text>
+              <text x="85" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#666" letter-spacing="1">Y CONTROL ADUANERO</text>
+            </svg>
+          </div>
+        ` : ''}
+      ` : `
+        <div style="text-align:center;font-weight:bold;padding:2px 0;letter-spacing:0.03em;">*** NO VÁLIDO COMO FACTURA ***</div>
+      `}
+      ${sep}
+      <div style="text-align:center;font-size:10px;line-height:1.6;">
+        <div>¡Gracias por su compra!</div>
+        <div style="color:#888;">Powered by StockOS</div>
+      </div>
+    `
+
+    const win = window.open('', '_blank', 'width=350,height=800')
+    if (!win) return
+    win.document.write(`<!DOCTYPE html><html><head>
+      <meta charset="utf-8"><title>${typeLabel} ${ptoVenta}-${numero}</title>
+      <style>
+        @page { size: 80mm auto; margin: 2mm 0; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 80mm; background: #fff; }
+        body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; }
+      </style>
+    </head><body><div style="padding:12px 10px;">${html}</div></body></html>`)
     win.document.close()
     win.focus()
     setTimeout(() => { win.print(); win.close() }, 400)
@@ -268,10 +409,6 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
         td { padding:8px 0; border-bottom:1px solid #f5f5f4; vertical-align:top; }
         td.right { text-align:right; font-family:'Courier New',monospace; }
         .total-row td { font-size:15px; font-weight:700; border-bottom:none; padding-top:12px; }
-        .badge { display:inline-block; padding:2px 8px; border-radius:20px; font-size:11px; font-weight:600; }
-        .badge-ok { background:#dcfce7; color:#15803d; }
-        .badge-pending { background:#fef9c3; color:#a16207; }
-        .badge-rej { background:#fee2e2; color:#dc2626; }
         @media print { body { padding:16px; } }
       </style>
     </head><body>
@@ -280,17 +417,13 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
         <h1>${typeLabel}</h1>
         <div class="sub">N° ${numero} · ${invoice.fecha}</div>
       </div>
-
       <div class="section">
         <div class="label">Receptor</div>
         <div style="font-size:14px;font-weight:600">${invoice.receptor_name ?? customer?.full_name ?? 'Consumidor Final'}</div>
-        ${invoice.receptor_cuit ? `<div class="mono" style="font-size:12px;color:#6a6a64">CUIT: ${invoice.receptor_cuit}</div>` : customer?.full_name && !invoice.receptor_cuit ? '' : ''}
         ${invoice.receptor_address ? `<div style="font-size:12px;color:#6a6a64">${invoice.receptor_address}</div>` : ''}
         <div style="font-size:12px;color:#6a6a64">Condición IVA: ${invoice.receptor_iva_condition}</div>
       </div>
-
       <hr class="divider">
-
       <table>
         <thead><tr>
           <th style="width:50%">Descripción</th>
@@ -317,13 +450,11 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
           </tr>
         </tfoot>
       </table>
-
-      ${invoice.cae ? `<hr class="divider">
+      ${(invoice.cae || invoice.afip_cae) ? `<hr class="divider">
       <div class="section">
-        <div class="label">AFIP</div>
-        <div class="mono" style="font-size:12px">CAE: ${invoice.cae}</div>
+        <div class="label">ARCA</div>
+        <div class="mono" style="font-size:12px">CAE: ${invoice.afip_cae ?? invoice.cae}</div>
       </div>` : ''}
-
       ${invoice.notes ? `<hr class="divider"><div style="font-size:12px;color:#6a6a64;font-style:italic">${invoice.notes}</div>` : ''}
     </body></html>`)
     win.document.close()
@@ -331,192 +462,293 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
     setTimeout(() => { win.print(); win.close() }, 400)
   }
 
+  const handleConvert = async () => {
+    if (!invoice) return
+    if (convertType === 'A' && !receptorCuit) {
+      toast.error('El CUIT del receptor es obligatorio para Factura A')
+      return
+    }
+    setConverting(true)
+    try {
+      const converted = await api.post<InvoiceSummary>('/api/invoices/convert', {
+        invoice_id: invoice.id,
+        invoice_type: convertType,
+        receptor_cuit: receptorCuit || null,
+        receptor_name: receptorName || null,
+        receptor_address: receptorAddress || null,
+        receptor_iva_condition: receptorIva,
+      })
+      setConvertModal(false)
+
+      toast.loading('Autorizando en ARCA...', { id: 'afip-auth' })
+      try {
+        const authorized = await api.post<InvoiceSummary>(`/api/invoices/${converted.id}/authorize`, {})
+        toast.success(`Factura ${convertType} autorizada — CAE: ${authorized.afip_cae ?? authorized.cae}`, { id: 'afip-auth' })
+        const merged = { ...authorized, invoice_items: authorized.invoice_items ?? converted.invoice_items }
+        setInvoice(merged)
+        await handlePrintInvoiceTicket(merged)
+      } catch (afipErr: unknown) {
+        toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar en ARCA', { id: 'afip-auth' })
+        setInvoice(converted)
+      }
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al convertir')
+    } finally { setConverting(false) }
+  }
+
   const itemCount = sale?.sale_items.reduce((a, i) => a + i.quantity, 0) ?? 0
 
   return (
-    <Modal open={open} onClose={onClose} title="Detalle de venta" size="md">
-      {loading ? (
-        <div className="flex justify-center py-10">
-          <div className="w-6 h-6 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
-        </div>
-      ) : !sale ? null : (
+    <>
+      <Modal open={open} onClose={onClose} title="Detalle de venta" size="md">
+        {loading ? (
+          <div className="flex justify-center py-10">
+            <div className="w-6 h-6 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
+          </div>
+        ) : !sale ? null : (
+          <div className="space-y-4">
+
+            {/* Header de la venta */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)]">
+                <p className="text-xs text-[var(--text3)] mb-0.5">Total</p>
+                <p className="text-2xl font-bold mono text-[var(--accent)]">{formatCurrency(sale.total)}</p>
+              </div>
+              <div className="px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
+                <div className="flex items-center gap-1.5 text-xs text-[var(--text2)]">
+                  <Calendar size={11} className="text-[var(--text3)]" />
+                  {formatDateTime(sale.created_at)}
+                </div>
+                <div className="flex items-center gap-1.5 text-xs text-[var(--text2)]">
+                  <Hash size={11} className="text-[var(--text3)]" />
+                  <span className="text-[var(--text3)]">N° Ticket:</span>
+                  <span className="mono font-semibold">#{sale.id.slice(-8).toUpperCase()}</span>
+                </div>
+                {sale.users && (
+                  <div className="flex items-center gap-1.5 text-xs text-[var(--text2)]">
+                    <User size={11} className="text-[var(--text3)]" />
+                    {sale.users.full_name}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Método de pago + cliente */}
+            <div className="flex flex-wrap gap-2">
+              {sale.payment_splits && sale.payment_splits.length > 1 ? (
+                sale.payment_splits.map((s, i) => (
+                  <Badge key={i} variant="default">
+                    {getPaymentMethodLabel(s.method)} {formatCurrency(s.amount)}
+                    {s.method === 'credito' && (s.installments ?? 1) > 1 && ` · ${s.installments} cuotas`}
+                  </Badge>
+                ))
+              ) : (
+                <Badge variant="default">
+                  {getPaymentMethodLabel(sale.payment_method)}
+                  {sale.payment_method === 'credito' && sale.installments > 1 && ` · ${sale.installments} cuotas`}
+                </Badge>
+              )}
+              {customer && (
+                <Badge variant="warning">
+                  <CreditCard size={11} className="inline mr-1" />
+                  {customer.full_name} · saldo {formatCurrency(customer.current_balance)}
+                </Badge>
+              )}
+              <Badge variant="default">
+                <Package size={11} className="inline mr-1" />
+                {itemCount} {itemCount === 1 ? 'producto' : 'productos'}
+              </Badge>
+            </div>
+
+            {/* Cliente */}
+            {customer && (
+              <div className="flex items-center gap-3 px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)]">
+                <div className="w-8 h-8 rounded-full bg-[var(--surface3)] flex items-center justify-center flex-shrink-0">
+                  <User size={14} className="text-[var(--text3)]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-[var(--text)]">{customer.full_name}</p>
+                  <p className="text-xs text-[var(--text3)]">Cuenta corriente</p>
+                </div>
+                <div className="text-right flex-shrink-0">
+                  <p className="text-xs text-[var(--text3)]">Saldo actual</p>
+                  <p className={`text-sm font-bold mono ${Number(customer.current_balance) > 0 ? 'text-[var(--danger)]' : 'text-[var(--accent)]'}`}>
+                    {formatCurrency(customer.current_balance)}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Ítems */}
+            <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden">
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[400px]">
+                <thead>
+                  <tr className="border-b border-[var(--border)]">
+                    <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)]">Producto</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Cant.</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">P. Unit.</th>
+                    <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]">
+                  {sale.sale_items.map(item => (
+                    <tr key={item.id}>
+                      <td className="px-3 py-2.5">
+                        <p className="font-medium text-[var(--text)]">{item.products.name}</p>
+                        {item.products.barcode && (
+                          <p className="text-xs mono text-[var(--text3)]">{item.products.barcode}</p>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">
+                        {item.quantity} {item.products.unit}
+                      </td>
+                      <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">
+                        {formatCurrency(item.unit_price)}
+                        {item.discount > 0 && (
+                          <p className="text-xs text-[var(--danger)]">-{formatCurrency(item.discount)}</p>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right mono font-semibold text-[var(--text)]">
+                        {formatCurrency(item.subtotal)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  {sale.discount > 0 && (
+                    <tr className="border-t border-[var(--border)]">
+                      <td colSpan={3} className="px-3 py-2 text-sm text-[var(--text3)]">Descuento</td>
+                      <td className="px-3 py-2 text-right mono text-[var(--danger)]">− {formatCurrency(sale.discount)}</td>
+                    </tr>
+                  )}
+                  {(sale.shipping_amount ?? 0) > 0 && (
+                    <tr className="border-t border-[var(--border)]">
+                      <td colSpan={3} className="px-3 py-2 text-sm text-[var(--text3)]">Envío</td>
+                      <td className="px-3 py-2 text-right mono text-[var(--text2)]">+ {formatCurrency(sale.shipping_amount!)}</td>
+                    </tr>
+                  )}
+                  <tr className="border-t-2 border-[var(--border)]">
+                    <td colSpan={3} className="px-3 py-2.5 text-sm font-semibold text-[var(--text)]">Total</td>
+                    <td className="px-3 py-2.5 text-right mono font-bold text-[var(--accent)]">{formatCurrency(sale.total)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+              </div>
+            </div>
+
+            {/* Notas */}
+            {sale.notes && (
+              <p className="text-sm text-[var(--text2)] italic px-1">"{sale.notes}"</p>
+            )}
+
+            {/* Comprobante asociado */}
+            {invoice && (
+              <div className="flex items-center justify-between px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)]">
+                <div className="flex items-center gap-2">
+                  <FileText size={14} className="text-[var(--text3)]" />
+                  <div>
+                    <p className="text-xs font-medium text-[var(--text)]">
+                      {TYPE_LABELS[invoice.invoice_type]} #{String(invoice.numero).padStart(8, '0')}
+                    </p>
+                    <p className="text-xs text-[var(--text3)]">{formatCurrency(invoice.total_amount ?? 0)}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleDownloadInvoice}
+                  className="flex items-center gap-1.5 text-xs font-medium text-[var(--accent)] hover:underline"
+                >
+                  <Download size={13} /> Descargar
+                </button>
+              </div>
+            )}
+
+            {/* Acciones */}
+            <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+              <div className="flex justify-end gap-2 flex-wrap">
+                <Button variant="secondary" onClick={handlePrint}>
+                  <Printer size={14} />
+                  Reimprimir ticket
+                  <kbd className="ml-1 text-[10px] bg-[var(--surface3)] px-1.5 py-0.5 rounded font-sans">P</kbd>
+                </Button>
+                {invoice && invoice.invoice_type === 'X' && (
+                  <Button variant="secondary" onClick={openConvertModal}>
+                    <Receipt size={15} />
+                    Facturar
+                    <kbd className="ml-1 text-[10px] bg-[var(--surface3)] px-1.5 py-0.5 rounded font-sans">F</kbd>
+                  </Button>
+                )}
+                <Button variant="secondary" onClick={onClose}>Cerrar</Button>
+              </div>
+            </div>
+
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal convertir a factura (inline, sin navegar) */}
+      <Modal open={convertModal} onClose={() => setConvertModal(false)} title="Convertir a factura" size="sm">
         <div className="space-y-4">
 
-          {/* Header de la venta */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)]">
-              <p className="text-xs text-[var(--text3)] mb-0.5">Total</p>
-              <p className="text-2xl font-bold mono text-[var(--accent)]">{formatCurrency(sale.total)}</p>
-            </div>
-            <div className="px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
-              <div className="flex items-center gap-1.5 text-xs text-[var(--text2)]">
-                <Calendar size={11} className="text-[var(--text3)]" />
-                {formatDateTime(sale.created_at)}
-              </div>
-              <div className="flex items-center gap-1.5 text-xs text-[var(--text2)]">
-                <Hash size={11} className="text-[var(--text3)]" />
-                <span className="text-[var(--text3)]">N° Ticket:</span>
-                <span className="mono font-semibold">#{sale.id.slice(-8).toUpperCase()}</span>
-              </div>
-              {sale.users && (
-                <div className="flex items-center gap-1.5 text-xs text-[var(--text2)]">
-                  <User size={11} className="text-[var(--text3)]" />
-                  {sale.users.full_name}
-                </div>
-              )}
-            </div>
+          <div className="px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)] text-xs text-[var(--text3)]">
+            Ticket X #{String(invoice?.numero ?? 0).padStart(8, '0')} · {formatCurrency(invoice?.total_amount ?? 0)}
           </div>
 
-          {/* Método de pago + cliente */}
-          <div className="flex flex-wrap gap-2">
-            {sale.payment_splits && sale.payment_splits.length > 1 ? (
-              sale.payment_splits.map((s, i) => (
-                <Badge key={i} variant="default">
-                  {getPaymentMethodLabel(s.method)} {formatCurrency(s.amount)}
-                  {s.method === 'credito' && (s.installments ?? 1) > 1 && ` · ${s.installments} cuotas`}
-                </Badge>
-              ))
-            ) : (
-              <Badge variant="default">
-                {getPaymentMethodLabel(sale.payment_method)}
-                {sale.payment_method === 'credito' && sale.installments > 1 && ` · ${sale.installments} cuotas`}
-              </Badge>
-            )}
-            {customer && (
-              <Badge variant="warning">
-                <CreditCard size={11} className="inline mr-1" />
-                {customer.full_name} · saldo {formatCurrency(customer.current_balance)}
-              </Badge>
-            )}
-            <Badge variant="default">
-              <Package size={11} className="inline mr-1" />
-              {itemCount} {itemCount === 1 ? 'producto' : 'productos'}
-            </Badge>
+          {/* Tipo de factura */}
+          <div>
+            <label className="text-sm font-medium text-[var(--text2)] block mb-2">Tipo de factura *</label>
+            <div className="grid grid-cols-3 gap-2">
+              {(['A', 'B', 'C'] as const).map(t => (
+                <button key={t} onClick={() => setConvertType(t)}
+                  className={`py-2.5 text-sm font-semibold rounded-[var(--radius-md)] border transition-all ${convertType === t
+                    ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'
+                    }`}>
+                  Factura {t}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-[var(--text3)] mt-1.5">
+              {convertType === 'A' && 'Para empresas o responsables inscriptos en IVA'}
+              {convertType === 'B' && 'Para consumidores finales con datos del comprador'}
+              {convertType === 'C' && 'Para monotributistas'}
+            </p>
           </div>
 
-          {/* Cliente */}
-          {customer && (
-            <div className="flex items-center gap-3 px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)]">
-              <div className="w-8 h-8 rounded-full bg-[var(--surface3)] flex items-center justify-center flex-shrink-0">
-                <User size={14} className="text-[var(--text3)]" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-[var(--text)]">{customer.full_name}</p>
-                <p className="text-xs text-[var(--text3)]">Cuenta corriente</p>
-              </div>
-              <div className="text-right flex-shrink-0">
-                <p className="text-xs text-[var(--text3)]">Saldo actual</p>
-                <p className={`text-sm font-bold mono ${Number(customer.current_balance) > 0 ? 'text-[var(--danger)]' : 'text-[var(--accent)]'}`}>
-                  {formatCurrency(customer.current_balance)}
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Ítems */}
-          <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden">
-            <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[400px]">
-              <thead>
-                <tr className="border-b border-[var(--border)]">
-                  <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)]">Producto</th>
-                  <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Cant.</th>
-                  <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">P. Unit.</th>
-                  <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Subtotal</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--border)]">
-                {sale.sale_items.map(item => (
-                  <tr key={item.id}>
-                    <td className="px-3 py-2.5">
-                      <p className="font-medium text-[var(--text)]">{item.products.name}</p>
-                      {item.products.barcode && (
-                        <p className="text-xs mono text-[var(--text3)]">{item.products.barcode}</p>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">
-                      {item.quantity} {item.products.unit}
-                    </td>
-                    <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">
-                      {formatCurrency(item.unit_price)}
-                      {item.discount > 0 && (
-                        <p className="text-xs text-[var(--danger)]">-{formatCurrency(item.discount)}</p>
-                      )}
-                    </td>
-                    <td className="px-3 py-2.5 text-right mono font-semibold text-[var(--text)]">
-                      {formatCurrency(item.subtotal)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                {sale.discount > 0 && (
-                  <tr className="border-t border-[var(--border)]">
-                    <td colSpan={3} className="px-3 py-2 text-sm text-[var(--text3)]">Descuento</td>
-                    <td className="px-3 py-2 text-right mono text-[var(--danger)]">− {formatCurrency(sale.discount)}</td>
-                  </tr>
-                )}
-                {(sale.shipping_amount ?? 0) > 0 && (
-                  <tr className="border-t border-[var(--border)]">
-                    <td colSpan={3} className="px-3 py-2 text-sm text-[var(--text3)]">Envío</td>
-                    <td className="px-3 py-2 text-right mono text-[var(--text2)]">+ {formatCurrency(sale.shipping_amount!)}</td>
-                  </tr>
-                )}
-                <tr className="border-t-2 border-[var(--border)]">
-                  <td colSpan={3} className="px-3 py-2.5 text-sm font-semibold text-[var(--text)]">Total</td>
-                  <td className="px-3 py-2.5 text-right mono font-bold text-[var(--accent)]">{formatCurrency(sale.total)}</td>
-                </tr>
-              </tfoot>
-            </table>
-            </div>
+          {/* Condición IVA */}
+          <div>
+            <label className="text-sm font-medium text-[var(--text2)] block mb-1">Condición IVA receptor</label>
+            <select value={receptorIva} onChange={e => setReceptorIva(e.target.value)}
+              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]">
+              <option value="CF">Consumidor Final</option>
+              <option value="RI">Responsable Inscripto</option>
+              <option value="M">Monotributista</option>
+              <option value="EX">Exento</option>
+            </select>
           </div>
 
-          {/* Notas */}
-          {sale.notes && (
-            <p className="text-sm text-[var(--text2)] italic px-1">"{sale.notes}"</p>
-          )}
+          <Input label={`Razón social / Nombre${convertType === 'A' ? ' *' : ''}`}
+            value={receptorName} onChange={e => setReceptorName(e.target.value)}
+            placeholder="Nombre o razón social" />
 
-          {/* Comprobante asociado */}
-          {invoice && (
-            <div className="flex items-center justify-between px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)]">
-              <div className="flex items-center gap-2">
-                <FileText size={14} className="text-[var(--text3)]" />
-                <div>
-                  <p className="text-xs font-medium text-[var(--text)]">
-                    {TYPE_LABELS[invoice.invoice_type]} #{String(invoice.numero).padStart(8, '0')}
-                  </p>
-                  <p className="text-xs text-[var(--text3)]">{formatCurrency(invoice.total_amount ?? 0)}</p>
-                </div>
-              </div>
-              <button
-                onClick={handleDownloadInvoice}
-                className="flex items-center gap-1.5 text-xs font-medium text-[var(--accent)] hover:underline"
-              >
-                <Download size={13} /> Descargar
-              </button>
-            </div>
-          )}
+          <Input label={`CUIT${convertType === 'A' ? ' *' : ''}`}
+            value={receptorCuit} onChange={e => setReceptorCuit(e.target.value)}
+            placeholder="20-12345678-9" />
 
-          {/* Acciones */}
-          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+          <Input label="Domicilio"
+            value={receptorAddress} onChange={e => setReceptorAddress(e.target.value)}
+            placeholder="Dirección del receptor" />
+
+          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 border-t border-[var(--border)]">
             <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={handlePrint}>
-                <Printer size={14} /> Reimprimir ticket
+              <Button variant="secondary" onClick={() => setConvertModal(false)} disabled={converting}>Cancelar</Button>
+              <Button onClick={handleConvert} loading={converting}>
+                Generar Factura {convertType}
               </Button>
-              {invoice && invoice.invoice_type === 'X' && (
-                <Button
-                  variant="secondary"
-                  onClick={() => router.push(`/invoices?facturar=${invoice.id}`)}
-                >
-                  <Receipt size={15} /> Facturar
-                </Button>
-              )}
-              <Button variant="secondary" onClick={onClose}>Cerrar</Button>
             </div>
           </div>
-
         </div>
-      )}
-    </Modal>
+      </Modal>
+    </>
   )
 }

@@ -19,10 +19,10 @@ interface ModalProps {
 export function Modal({ open, onClose, title, children, size = 'md', zIndex, minimizable, minimized, onMinimize, onRestore }: ModalProps) {
   useEffect(() => {
     if (!open) return
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') e.preventDefault() }
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [open])
+  }, [open, onClose])
 
   if (!open) return null
 
@@ -52,12 +52,14 @@ export function Modal({ open, onClose, title, children, size = 'md', zIndex, min
     <div
       className="fixed inset-0 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: zIndex ?? 50 }}
-      onClick={e => e.stopPropagation()}
+      onClick={onClose}
     >
       <div className={cn(
         'w-full bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl max-h-[90vh] flex flex-col',
         sizes[size]
-      )}>
+      )}
+        onClick={e => e.stopPropagation()}
+      >
         {title && (
           <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] flex-shrink-0">
             <h2 className="text-base font-semibold text-[var(--text)]">{title}</h2>

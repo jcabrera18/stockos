@@ -13,7 +13,7 @@ const DIFFS = [
   {
     Icon: Globe,
     title: 'Pensado para LATAM',
-    desc: 'Facturación con CAE (AFIP) incluida: A/B/C/X + NC/ND. Cuenta corriente de clientes, listas de precio y soporte para precios con inflación.',
+    desc: 'Facturación con CAE (ARCA) incluida: A/B/C/X + NC/ND. Cuenta corriente de clientes, listas de precio y soporte para precios con inflación.',
     stat: 'Argentina',
     statLabel: 'y en expansión al resto de LATAM',
   },

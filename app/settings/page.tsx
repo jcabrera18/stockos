@@ -49,7 +49,7 @@ export default function SettingsPage() {
   const [shippingDefault, setShippingDefault] = useState('')
   const [savingShipping, setSavingShipping]   = useState(false)
 
-  // AFIP
+  // ARCA
   const [ivaCondition, setIvaCondition]     = useState('MO')
   const [ptoVenta, setPtoVenta]             = useState('')
   const [afipEnv, setAfipEnv]               = useState('homo')
@@ -128,7 +128,7 @@ export default function SettingsPage() {
       if (afipKey.trim())  payload.afip_key  = afipKey.trim()
 
       await api.patch('/api/auth/business-settings', payload)
-      toast.success('Configuración AFIP guardada')
+      toast.success('Configuración ARCA guardada')
       setAfipCert('')
       setAfipKey('')
     } catch {
@@ -203,13 +203,13 @@ export default function SettingsPage() {
               </Card>
             )}
 
-            {/* AFIP */}
+            {/* ARCA */}
             {isOwnerAdmin && (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Receipt size={15} className="text-[var(--accent)]" />
-                    AFIP / Facturación electrónica
+                    ARCA / Facturación electrónica
                   </CardTitle>
                 </CardHeader>
                 <div className="space-y-4">
@@ -247,7 +247,7 @@ export default function SettingsPage() {
                     <div>
                       <p className="text-xs text-[var(--text3)] mb-1">Certificado digital (.crt)</p>
                       <p className="text-xs text-[var(--text3)] mb-2">
-                        Pegá el contenido del archivo .crt descargado de AFIP.
+                        Pegá el contenido del archivo .crt descargado de ARCA.
                       </p>
                       <textarea
                         value={afipCert}
@@ -274,12 +274,12 @@ export default function SettingsPage() {
 
                   {afipEnv === 'prod' && (
                     <p className="text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-[var(--radius-md)] p-2">
-                      Estás configurando el ambiente de <strong>producción</strong>. Los comprobantes emitidos serán válidos ante AFIP.
+                      Estás configurando el ambiente de <strong>producción</strong>. Los comprobantes emitidos serán válidos ante ARCA.
                     </p>
                   )}
 
                   <Button onClick={handleSaveAfip} disabled={savingAfip}>
-                    {savingAfip ? 'Guardando...' : 'Guardar configuración AFIP'}
+                    {savingAfip ? 'Guardando...' : 'Guardar configuración ARCA'}
                   </Button>
                 </div>
               </Card>

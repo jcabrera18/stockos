@@ -70,7 +70,7 @@ const TYPE_VARIANTS: Record<string, string> = {
 }
 
 const AFIP_LABELS: Record<string, string> = {
-  not_requested: 'Sin AFIP',
+  not_requested: 'Sin ARCA',
   pending: 'Pendiente',
   authorized: 'Autorizado',
   rejected: 'Rechazado',
@@ -253,7 +253,7 @@ function InvoicesPageInner() {
       setSelectedInvoice({ ...updated, invoice_items: updated.invoice_items ?? invoice.invoice_items })
       fetchInvoices()
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error al autorizar en AFIP')
+      toast.error(err instanceof Error ? err.message : 'Error al autorizar en ARCA')
     } finally {
       setAuthorizing(false)
     }
@@ -288,14 +288,14 @@ function InvoicesPageInner() {
       })
       setConvertModal(false)
 
-      // Autorizar en AFIP automáticamente
-      toast.loading('Autorizando en AFIP...', { id: 'afip-auth' })
+      // Autorizar en ARCA automáticamente
+      toast.loading('Autorizando en ARCA...', { id: 'afip-auth' })
       try {
         const authorized = await api.post<Invoice>(`/api/invoices/${converted.id}/authorize`, {})
         toast.success(`Factura ${convertType} autorizada — CAE: ${authorized.afip_cae}`, { id: 'afip-auth' })
         setSelectedInvoice({ ...authorized, invoice_items: authorized.invoice_items ?? converted.invoice_items })
       } catch (afipErr: unknown) {
-        toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar en AFIP', { id: 'afip-auth' })
+        toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar en ARCA', { id: 'afip-auth' })
         setSelectedInvoice(converted)
       }
 
@@ -388,11 +388,10 @@ function InvoicesPageInner() {
           </div>
           <div style="text-align:center;font-size:9px;color:#555;">Verificar en afip.gob.ar/fe/qr</div>
           <div style="text-align:center;margin:6px 0;">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 44" width="110" height="32">
-              <rect width="150" height="44" rx="5" fill="#1B3F7F"/>
-              <text x="10" y="30" font-family="Arial Black,Arial" font-size="20" font-weight="900" fill="#FFFFFF" letter-spacing="2">ARCA</text>
-              <text x="82" y="18" font-family="Arial" font-size="7.5" fill="#93C5FD">Agencia de Recaudación</text>
-              <text x="82" y="29" font-family="Arial" font-size="7.5" fill="#93C5FD">y Control Aduanero</text>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170 58" width="110" height="38">
+              <text x="85" y="38" text-anchor="middle" font-family="Arial Black,Arial" font-size="44" font-weight="900" fill="#4A4A4A">ARCA</text>
+              <text x="85" y="49" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#666" letter-spacing="1">AGENCIA DE RECAUDACIÓN</text>
+              <text x="85" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#666" letter-spacing="1">Y CONTROL ADUANERO</text>
             </svg>
           </div>
         ` : ''}
@@ -408,13 +407,10 @@ function InvoicesPageInner() {
       </div>
     `
 
-    const iframe = document.createElement('iframe')
-    iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:80mm;height:0;border:0;'
-    document.body.appendChild(iframe)
-    const doc = iframe.contentDocument ?? iframe.contentWindow?.document
-    if (!doc) { document.body.removeChild(iframe); return }
-    doc.open()
-    doc.write(`<!DOCTYPE html>
+    const win = window.open('', '_blank', 'width=350,height=800')
+    if (!win) return
+
+    win.document.write(`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
@@ -428,12 +424,9 @@ function InvoicesPageInner() {
 </head>
 <body><div style="padding:12px 10px;">${html}</div></body>
 </html>`)
-    doc.close()
-    iframe.onload = () => {
-      iframe.contentWindow?.focus()
-      iframe.contentWindow?.print()
-      setTimeout(() => document.body.removeChild(iframe), 1000)
-    }
+    win.document.close()
+    win.focus()
+    setTimeout(() => { win.print(); win.close() }, 400)
   }
 
   // ── Factura A4 moderna ───────────────────────────────────────────────────
@@ -529,10 +522,10 @@ function InvoicesPageInner() {
     .payment-note { text-align: right; font-size: 10px; color: #555; margin-top: 7px; }
     .notes-box { margin-top: 10px; padding: 8px 12px; border: 1px solid #e5e5e5; border-radius: 2px; font-size: 11px; color: #555; font-style: italic; }
 
-    .afip-footer { margin-top: 24px; border: 2px solid #1B3F7F; border-radius: 5px; padding: 14px 16px; display: flex; align-items: center; gap: 20px; }
+    .afip-footer { margin-top: 24px; border: 2px solid #ccc; border-radius: 5px; padding: 14px 16px; display: flex; align-items: center; gap: 20px; }
     .afip-logo { flex-shrink: 0; }
     .afip-data { flex: 1; }
-    .afip-data-title { font-size: 12px; font-weight: 700; color: #1B3F7F; margin-bottom: 5px; }
+    .afip-data-title { font-size: 12px; font-weight: 700; color: #4A4A4A; margin-bottom: 5px; }
     .afip-data-line { font-size: 10px; color: #333; line-height: 1.8; }
     .afip-data-line .mono { font-family: 'Courier New', monospace; font-size: 11px; font-weight: 700; color: #111; }
     .afip-qr { flex-shrink: 0; text-align: center; }
@@ -635,11 +628,10 @@ function InvoicesPageInner() {
   <!-- AFIP / ARCA -->
   <div class="afip-footer">
     <div class="afip-logo">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 155 46" width="130" height="39">
-        <rect width="155" height="46" rx="5" fill="#1B3F7F"/>
-        <text x="10" y="31" font-family="Arial Black,Arial" font-size="21" font-weight="900" fill="#FFFFFF" letter-spacing="2">ARCA</text>
-        <text x="84" y="19" font-family="Arial" font-size="7.5" fill="#93C5FD">Agencia de Recaudación</text>
-        <text x="84" y="30" font-family="Arial" font-size="7.5" fill="#93C5FD">y Control Aduanero</text>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 68" width="150" height="51">
+        <text x="100" y="44" text-anchor="middle" font-family="Arial Black,Arial" font-size="52" font-weight="900" fill="#4A4A4A">ARCA</text>
+        <text x="100" y="57" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#666" letter-spacing="1.2">AGENCIA DE RECAUDACIÓN</text>
+        <text x="100" y="68" text-anchor="middle" font-family="Arial,sans-serif" font-size="9" fill="#666" letter-spacing="1.2">Y CONTROL ADUANERO</text>
       </svg>
     </div>
     <div class="afip-data">
@@ -729,7 +721,7 @@ function InvoicesPageInner() {
                   <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Fecha</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Receptor</th>
                   <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Total</th>
-                  <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">AFIP</th>
+                  <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">ARCA</th>
                   <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]"></th>
                 </tr>
               </thead>
@@ -912,7 +904,7 @@ function InvoicesPageInner() {
               </div>
             </div>
 
-            {/* AFIP status */}
+            {/* ARCA status */}
             <div className={`flex items-start gap-2 px-3 py-2.5 rounded-[var(--radius-md)] ${selectedInvoice.afip_status === 'authorized' ? 'bg-[var(--accent-subtle)]' :
               selectedInvoice.afip_status === 'rejected' ? 'bg-[var(--danger-subtle)]' :
                 'bg-[var(--surface2)]'
@@ -936,10 +928,10 @@ function InvoicesPageInner() {
               </div>
             </div>
 
-            {/* Botón autorizar en AFIP si está pendiente */}
+            {/* Botón autorizar en ARCA si está pendiente */}
             {selectedInvoice.afip_status === 'pending' && (
               <Button onClick={() => handleAuthorize(selectedInvoice)} disabled={authorizing} className="w-full">
-                {authorizing ? 'Autorizando en AFIP...' : 'Autorizar en AFIP'}
+                {authorizing ? 'Autorizando en ARCA...' : 'Autorizar en ARCA'}
               </Button>
             )}
 

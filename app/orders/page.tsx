@@ -738,7 +738,8 @@ export default function OrdersPage() {
           />
         ) : (
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="border-b border-[var(--border)]">
                   <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Cliente</th>
@@ -817,6 +818,7 @@ export default function OrdersPage() {
                 })}
               </tbody>
             </table>
+            </div>
             <Pagination pagination={pagination} onPageChange={handlePageChange} />
           </div>
         )}
