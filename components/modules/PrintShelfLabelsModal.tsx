@@ -65,6 +65,17 @@ function formatPrice(n: number): string {
   return '$' + Math.round(n).toLocaleString('es-AR')
 }
 
+function qtyLabel(qty: number): string {
+  return qty === 1 ? '1 unidad' : `x${qty} unidades`
+}
+
+function calcSaving(mainPrice: number, tierPrice: number): { pct: number; amount: number } {
+  if (mainPrice <= 0 || tierPrice >= mainPrice) return { pct: 0, amount: 0 }
+  const amount = Math.round(mainPrice - tierPrice)
+  const pct = Math.round((amount / mainPrice) * 100)
+  return { pct, amount }
+}
+
 const LABELS_PER_PAGE = 15
 
 const selectClass =
@@ -75,44 +86,38 @@ const selectClass =
 interface LabelProps {
   product: ProductRow
   mainList: PriceList
-  otherLists: PriceList[]      // ya ordenadas por min_quantity, sin mainList
+  otherLists: PriceList[]   // ordenadas por min_quantity, sin mainList
   showCode: boolean
   showTiers: boolean
 }
 
 export function PriceLabel({ product, mainList, otherLists, showCode, showTiers }: LabelProps) {
-  const isFixed = product.use_fixed_sell_price
-  const mainPrice = getListPrice(product, mainList)
   const code = getProductCode(product)
-  const visibleTiers = (!isFixed && showTiers) ? otherLists : []
+  const mainPrice = getListPrice(product, mainList)
+  const tiers = (!product.use_fixed_sell_price && showTiers) ? otherLists : []
 
   return (
     <div className="label-card">
-      {/* Nombre */}
       <p className="label-name">{product.name}</p>
 
-      {/* Precio principal */}
-      <div className="label-price-block">
+      {/* Precio principal — zona grande */}
+      <div className="label-main-block">
+        <p className="label-qty">{qtyLabel(mainList.min_quantity)}</p>
         <p className="label-price">{formatPrice(mainPrice)}</p>
-        {!isFixed && (
-          <p className="label-from">
-            desde {mainList.min_quantity === 1 ? '1 unidad' : `${mainList.min_quantity} unidades`}
-          </p>
-        )}
       </div>
 
-      {/* Escalas */}
-      {visibleTiers.length > 0 && (
+      {/* Escalas — columnas inferiores */}
+      {tiers.length > 0 && (
         <div className="label-tiers">
-          {visibleTiers.map(l => (
-            <span key={l.id} className="label-tier">
-              {l.min_quantity}u: {formatPrice(getListPrice(product, l))}
-            </span>
+          {tiers.map(l => (
+            <div key={l.id} className="label-tier-col">
+              <span className="tier-qty">{qtyLabel(l.min_quantity)}</span>
+              <span className="tier-price">{formatPrice(getListPrice(product, l))}</span>
+            </div>
           ))}
         </div>
       )}
 
-      {/* Código numérico */}
       {showCode && code && (
         <p className="label-code">{code}</p>
       )}
@@ -141,7 +146,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   const [mainListId, setMainListId] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [brandId, setBrandId] = useState('')
-  const [recentDays, setRecentDays] = useState('0')
+  const [recentHours, setRecentHours] = useState('0')
   const [showCode, setShowCode] = useState(false)
   const [showTiers, setShowTiers] = useState(true)
   const [copies, setCopies] = useState(1)
@@ -159,7 +164,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   useEffect(() => {
     if (!open) {
       setStep('config')
-      setMainListId(''); setCategoryId(''); setBrandId(''); setRecentDays('0')
+      setMainListId(''); setCategoryId(''); setBrandId(''); setRecentHours('0')
       setShowCode(false); setShowTiers(true); setCopies(1)
       setAllProducts([]); setSelected(new Set()); setSearchText('')
       setPreviewPage(1)
@@ -196,9 +201,9 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
         filtered = filtered.filter(p => p.category_id && ids.has(p.category_id))
       }
 
-      if (recentDays !== '0') {
+      if (recentHours !== '0') {
         const cutoff = new Date()
-        cutoff.setDate(cutoff.getDate() - Number(recentDays))
+        cutoff.setTime(cutoff.getTime() - Number(recentHours) * 60 * 60 * 1000)
         filtered = filtered.filter(p => new Date(p.updated_at) >= cutoff)
       }
 
@@ -253,24 +258,40 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     if (!mainList) return
 
     const labelsHtml = labelItems.map(p => {
-      const isFixed = p.use_fixed_sell_price
       const mainPrice = getListPrice(p, mainList)
       const code = getProductCode(p)
-      const tiers = (!isFixed && showTiers)
-        ? otherLists.map(l =>
-          `<span class="tier">${l.min_quantity}u: ${formatPrice(getListPrice(p, l))}</span>`
-        ).join('')
+      const tiers = (!p.use_fixed_sell_price && showTiers) ? otherLists : []
+
+      const tiersHtml = tiers.length > 0
+        ? `<div class="ltiers">
+            ${tiers.map(l => {
+              const tierPrice = getListPrice(p, l)
+              const { pct } = calcSaving(mainPrice, tierPrice)
+              return `
+              <div class="ltier-col">
+                ${pct > 0 ? `<span class="ltier-off">${pct}% OFF</span>` : ''}
+                <span class="ltier-qty">${qtyLabel(l.min_quantity)}</span>
+                <span class="ltier-price">${formatPrice(tierPrice)}</span>
+                ${l.min_quantity > 1 ? `<span class="ltier-cu">c/u</span>` : ''}
+              </div>`
+            }).join('')}
+           </div>`
+        : ''
+
+      const codeHtml = showCode && code
+        ? `<p class="lcode">${code}</p>`
         : ''
 
       return `
         <div class="label">
           <p class="lname">${p.name}</p>
-          <div class="lprice-block">
+          <div class="lmain">
+            <p class="lqty">${qtyLabel(mainList.min_quantity)}</p>
             <p class="lprice">${formatPrice(mainPrice)}</p>
-            ${!isFixed ? `<p class="lfrom">desde ${mainList.min_quantity === 1 ? '1 unidad' : `${mainList.min_quantity} unidades`}</p>` : ''}
+            ${mainList.min_quantity > 1 ? `<p class="lmain-cu">c/u</p>` : ''}
           </div>
-          ${tiers ? `<div class="ltiers">${tiers}</div>` : ''}
-          ${showCode && code ? `<p class="lcode">${code}</p>` : ''}
+          ${tiersHtml}
+          ${codeHtml}
         </div>
       `
     }).join('')
@@ -292,7 +313,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     }
 
     body {
-      font-family: Arial, Helvetica, sans-serif;
+      font-family: 'Arial', Helvetica, sans-serif;
       background: white;
       color: #111;
     }
@@ -303,79 +324,131 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
       gap: 4mm;
     }
 
+    /* ── Etiqueta ── */
     .label {
-      border: 1.5px solid #222;
-      border-radius: 2mm;
-      padding: 5mm 5mm 4mm;
-      min-height: 50mm;
+      border: 1px solid #d1d5db;
+      border-radius: 2.5mm;
+      overflow: hidden;
+      min-height: 52mm;
       display: flex;
       flex-direction: column;
-      gap: 2mm;
       page-break-inside: avoid;
       break-inside: avoid;
-      overflow: hidden;
     }
 
+    /* Nombre */
     .lname {
-      font-size: 11pt;
+      font-size: 9.5pt;
       font-weight: 700;
-      line-height: 1.25;
+      line-height: 1.3;
       color: #111;
+      padding: 4mm 4.5mm 3mm;
       word-break: break-word;
     }
 
-    .lprice-block {
-      margin-top: auto;
+    /* Bloque precio principal */
+    .lmain {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 3mm 4mm;
+      background: #f9fafb;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .lqty {
+      font-size: 7pt;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #9ca3af;
+      margin-bottom: 1mm;
     }
 
     .lprice {
-      font-size: 30pt;
+      font-size: 34pt;
       font-weight: 900;
       color: #111;
       line-height: 1;
-      letter-spacing: -0.5pt;
+      letter-spacing: -1pt;
     }
 
-    .lfrom {
-      font-size: 8pt;
-      color: #444;
-      margin-top: 1mm;
+    .lmain-cu {
+      font-size: 7.5pt;
+      font-weight: 600;
+      color: #9ca3af;
+      margin-top: 0.8mm;
+      letter-spacing: 0.04em;
     }
 
+    /* Tira de escalas */
     .ltiers {
       display: flex;
-      flex-wrap: wrap;
-      gap: 1.5mm;
-      border-top: 0.5pt solid #ddd;
-      padding-top: 2mm;
-      margin-top: auto;
+      border-top: 1px solid #e5e7eb;
     }
 
-    .tier {
-      font-size: 8pt;
+    .ltier-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2.5mm 2mm;
+      gap: 0.8mm;
+    }
+
+    .ltier-col:not(:last-child) {
+      border-right: 1px solid #e5e7eb;
+    }
+
+    .ltier-off {
+      font-size: 6pt;
+      font-weight: 700;
+      color: #059669;
+      background: #ecfdf5;
+      padding: 0.4mm 1.2mm;
+      border-radius: 1mm;
+      letter-spacing: 0.04em;
+      line-height: 1.2;
+    }
+
+    .ltier-qty {
+      font-size: 6.5pt;
       font-weight: 600;
-      color: #333;
-      white-space: nowrap;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #9ca3af;
     }
 
-    .tier:not(:last-child)::after {
-      content: ' ·';
-      color: #999;
+    .ltier-price {
+      font-size: 15pt;
+      font-weight: 800;
+      color: #374151;
+      line-height: 1;
+      letter-spacing: -0.3pt;
     }
 
+    .ltier-cu {
+      font-size: 6pt;
+      font-weight: 500;
+      color: #9ca3af;
+    }
+
+    /* Código */
     .lcode {
-      font-size: 8pt;
+      font-size: 7pt;
       font-family: 'Courier New', monospace;
-      color: #888;
-      border-top: 0.5pt solid #eee;
-      padding-top: 1.5mm;
-      margin-top: auto;
+      color: #9ca3af;
+      border-top: 1px solid #f3f4f6;
+      padding: 1.5mm 4mm;
       word-break: break-all;
+      letter-spacing: 0.03em;
     }
 
     @media screen {
       body { background: #e5e7eb; padding: 20px; }
-      .grid { max-width: 794px; margin: 0 auto; background: white; padding: 10mm; }
+      .grid { max-width: 794px; margin: 0 auto; background: white; padding: 10mm; border-radius: 4px; }
     }
   </style>
 </head>
@@ -401,6 +474,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
 
   return (
     <Modal open={open} onClose={onClose} title={stepTitle[step]} size={step === 'preview' ? 'xl' : 'md'}>
+
       {/* ── PASO 1: Configurar ─────────────────────────────────────────────── */}
       {step === 'config' && (
         <div className="space-y-5 pb-6">
@@ -417,7 +491,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
                 ))}
               </select>
             </div>
-            <p className="text-xs text-[var(--text3)]">Este es el precio grande que aparece en la etiqueta</p>
+            <p className="text-xs text-[var(--text3)]">Precio grande central de la etiqueta</p>
           </div>
 
           {/* Filtros */}
@@ -441,11 +515,17 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <label className="text-sm font-medium text-[var(--text2)]">Precio actualizado</label>
-              <select value={recentDays} onChange={e => setRecentDays(e.target.value)} className={selectClass}>
+              <select value={recentHours} onChange={e => setRecentHours(e.target.value)} className={selectClass}>
                 <option value="0">Todos los productos</option>
-                <option value="7">Últimos 7 días</option>
-                <option value="15">Últimos 15 días</option>
-                <option value="30">Últimos 30 días</option>
+                <option value="1">Última hora</option>
+                <option value="4">Últimas 4 horas</option>
+                <option value="8">Últimas 8 horas</option>
+                <option value="12">Últimas 12 horas</option>
+                <option value="24">Últimas 24 horas</option>
+                <option value="48">Últimos 2 días</option>
+                <option value="72">Últimos 3 días</option>
+                <option value="96">Últimos 4 días</option>
+                <option value="120">Últimos 5 días</option>
               </select>
             </div>
             <div className="flex flex-col gap-1.5">
@@ -554,9 +634,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
                   />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-[var(--text)] truncate">{p.name}</p>
-                    {code && (
-                      <p className="text-xs text-[var(--text3)] mono">{code}</p>
-                    )}
+                    {code && <p className="text-xs text-[var(--text3)] mono">{code}</p>}
                   </div>
                   <span className="text-sm font-semibold mono text-[var(--text)] flex-shrink-0">
                     {formatPrice(price)}
@@ -598,48 +676,65 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
           {/* Grid de etiquetas */}
           <div className="grid grid-cols-3 gap-2 p-3 bg-gray-100 rounded-[var(--radius-lg)]">
             {pageItems.map((p, i) => {
-              const isFixed = p.use_fixed_sell_price
               const mainPrice = getListPrice(p, mainList)
               const code = getProductCode(p)
-              const visibleTiers = (!isFixed && showTiers) ? otherLists : []
+              const tiers = (!p.use_fixed_sell_price && showTiers) ? otherLists : []
 
               return (
                 <div
                   key={`${p.id}-${i}`}
-                  className="bg-white border border-gray-300 rounded p-3 flex flex-col gap-1.5"
-                  style={{ minHeight: 140 }}
+                  className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col"
+                  style={{ minHeight: 156 }}
                 >
                   {/* Nombre */}
-                  <p className="text-[11px] font-bold text-gray-900 leading-tight line-clamp-3">
+                  <p className="text-[10px] font-bold text-gray-900 leading-snug px-3 pt-2.5 pb-2 line-clamp-2">
                     {p.name}
                   </p>
 
-                  {/* Precio */}
-                  <div className="mt-auto">
-                    <p className="text-[26px] font-black text-gray-900 leading-none tracking-tight">
+                  {/* Precio principal — zona central */}
+                  <div className="flex-1 flex flex-col items-center justify-center bg-gray-50 border-t border-gray-100 py-3 px-2">
+                    <span className="text-[7px] font-semibold text-gray-400 uppercase tracking-widest mb-0.5">
+                      {qtyLabel(mainList.min_quantity)}
+                    </span>
+                    <span className="text-[30px] font-black text-gray-900 leading-none tracking-tight">
                       {formatPrice(mainPrice)}
-                    </p>
-                    {!isFixed && (
-                      <p className="text-[9px] text-gray-500 mt-0.5">
-                        desde {mainList.min_quantity === 1 ? '1 unidad' : `${mainList.min_quantity} unidades`}
-                      </p>
+                    </span>
+                    {mainList.min_quantity > 1 && (
+                      <span className="text-[7px] font-semibold text-gray-400 mt-0.5">c/u</span>
                     )}
                   </div>
 
-                  {/* Escalas */}
-                  {visibleTiers.length > 0 && (
-                    <div className="flex flex-wrap gap-x-2 gap-y-0.5 border-t border-gray-100 pt-1.5 mt-0.5">
-                      {visibleTiers.map(l => (
-                        <span key={l.id} className="text-[9px] font-semibold text-gray-600 whitespace-nowrap">
-                          {l.min_quantity}u: {formatPrice(getListPrice(p, l))}
-                        </span>
-                      ))}
+                  {/* Escalas — tira inferior */}
+                  {tiers.length > 0 && (
+                    <div className="flex border-t border-gray-100 divide-x divide-gray-100">
+                      {tiers.map(l => {
+                        const tierPrice = getListPrice(p, l)
+                        const { pct } = calcSaving(mainPrice, tierPrice)
+                        return (
+                          <div key={l.id} className="flex-1 flex flex-col items-center py-1.5 px-1 gap-px">
+                            {pct > 0 && (
+                              <span className="text-[6px] font-bold text-emerald-600 bg-emerald-50 px-1 py-px rounded-sm leading-none">
+                                {pct}% OFF
+                              </span>
+                            )}
+                            <span className="text-[6px] font-semibold text-gray-400 uppercase tracking-wider">
+                              {qtyLabel(l.min_quantity)}
+                            </span>
+                            <span className="text-[13px] font-extrabold text-gray-700 leading-tight tracking-tight">
+                              {formatPrice(tierPrice)}
+                            </span>
+                            {l.min_quantity > 1 && (
+                              <span className="text-[6px] font-medium text-gray-400">c/u</span>
+                            )}
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
 
                   {/* Código */}
                   {showCode && code && (
-                    <p className="text-[8px] text-gray-400 font-mono border-t border-gray-100 pt-1 mt-auto break-all">
+                    <p className="text-[7px] text-gray-400 font-mono border-t border-gray-100 px-3 py-1 break-all">
                       {code}
                     </p>
                   )}
@@ -647,12 +742,12 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
               )
             })}
 
-            {/* Celdas vacías para completar la grilla */}
+            {/* Celdas vacías */}
             {Array(LABELS_PER_PAGE - pageItems.length).fill(null).map((_, i) => (
               <div
                 key={`empty-${i}`}
-                className="border border-dashed border-gray-200 rounded"
-                style={{ minHeight: 140 }}
+                className="border border-dashed border-gray-200 rounded-lg"
+                style={{ minHeight: 156 }}
               />
             ))}
           </div>

@@ -41,6 +41,32 @@ interface CartItem {
   status?: 'pending' | 'resolved' | 'error'
 }
 
+interface PaymentSplit {
+  method: string
+  amount: number
+  installments: number
+  received?: number  // solo efectivo: cuánto entregó el cliente
+}
+
+// Sugiere denominaciones de billetes redondeando hacia arriba del importe
+function suggestReceived(amount: number): number[] {
+  const candidates = [
+    Math.ceil(amount),
+    Math.ceil(amount / 10)   * 10,
+    Math.ceil(amount / 50)   * 50,
+    Math.ceil(amount / 100)  * 100,
+    Math.ceil(amount / 200)  * 200,
+    Math.ceil(amount / 500)  * 500,
+    Math.ceil(amount / 1000) * 1000,
+    Math.ceil(amount / 2000) * 2000,
+    Math.ceil(amount / 5000) * 5000,
+  ]
+  return [...new Set(candidates)]
+    .filter(v => v > amount)
+    .sort((a, b) => a - b)
+    .slice(0, 4)
+}
+
 interface CompletedSale {
   id: string
   total: number
@@ -49,6 +75,7 @@ interface CompletedSale {
   shipping_amount: number
   payment_method: string
   installments: number
+  payment_splits?: PaymentSplit[]
   items: CartItem[]
   created_at: string
   invoice_id?: string
@@ -96,9 +123,12 @@ export default function POSPage() {
   }, [])
   const cartItemRefs = useRef<(HTMLDivElement | null)[]>([])
 
-  const [step, setStep] = useState<'cart' | 'payment' | 'ticket'>('cart')
-  const [paymentMethod, setPaymentMethod] = useState('efectivo')
-  const [installments, setInstallments] = useState(1)
+  const [step, setStep] = useState<'cart' | 'ticket'>('cart')
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [paymentSplits, setPaymentSplits] = useState<PaymentSplit[]>([{ method: 'efectivo', amount: 0, installments: 1 }])
+  const [activeSplitIndex, setActiveSplitIndex] = useState(0)
+  const amountInputRefs    = useRef<(HTMLInputElement | null)[]>([])
+  const receivedInputRefs  = useRef<(HTMLInputElement | null)[]>([])
   const [processing, setProcessing] = useState(false)
   const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null)
 
@@ -691,10 +721,108 @@ export default function POSPage() {
   const hasMissingCustomPrice = cart.some(i => i.product.price_mode === 'custom' && i.unit_price === 0)
   const hasPendingItems       = cart.some(i => i.status === 'pending')
 
+  const splitTotal         = paymentSplits.reduce((a, s) => a + (s.amount || 0), 0)
+  const remaining          = Math.round((total - splitTotal) * 100) / 100
+  const splitsValid        = Math.abs(remaining) < 0.01
+  const hasInvalidReceived = paymentSplits.some(
+    s => s.method === 'efectivo' && s.received !== undefined && s.received > 0 && s.received < s.amount
+  )
+  const canConfirm = splitsValid && !hasInvalidReceived
+
+  const updateSplitMethod = useCallback((i: number, method: string) =>
+    setPaymentSplits(prev => prev.map((s, idx) => idx === i ? { ...s, method, received: undefined } : s)), [])
+
+  const updateSplitAmount = useCallback((i: number, val: string) =>
+    setPaymentSplits(prev => prev.map((s, idx) => idx === i ? { ...s, amount: Math.max(0, Number(val) || 0) } : s)), [])
+
+  const updateSplitInstallments = useCallback((i: number, n: number) =>
+    setPaymentSplits(prev => prev.map((s, idx) => idx === i ? { ...s, installments: n } : s)), [])
+
+  const addSplit = useCallback(() =>
+    setPaymentSplits(prev => {
+      const rem = Math.max(0, Math.round((total - prev.reduce((a, s) => a + s.amount, 0)) * 100) / 100)
+      return [...prev, { method: 'efectivo', amount: rem, installments: 1 }]
+    }), [total]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const removeSplit = useCallback((i: number) =>
+    setPaymentSplits(prev => prev.filter((_, idx) => idx !== i)), [])
+
+  const updateSplitReceived = useCallback((i: number, val: number) =>
+    setPaymentSplits(prev => prev.map((s, idx) => idx === i ? { ...s, received: val } : s)), [])
+
+  // Foco inicial al abrir el modal
+  useEffect(() => {
+    if (paymentModalOpen) {
+      setTimeout(() => amountInputRefs.current[activeSplitIndex]?.focus(), 150)
+    }
+  }, [paymentModalOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cuando se añade un split, el nuevo queda activo y se enfoca su input de monto
+  useEffect(() => {
+    const last = paymentSplits.length - 1
+    setActiveSplitIndex(last)
+    if (paymentModalOpen) {
+      setTimeout(() => amountInputRefs.current[last]?.focus(), 50)
+    }
+  }, [paymentSplits.length]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Shortcuts globales del modal — método de pago, split y escape.
+  // Usan preventDefault() para que las letras no escriban en inputs numéricos.
+  // Funcionan independientemente de dónde esté el foco.
+  useEffect(() => {
+    if (!paymentModalOpen) return
+    const METHOD_KEYS: Record<string, string> = {
+      e: 'efectivo', d: 'debito', c: 'credito',
+      t: 'transferencia', q: 'qr', a: 'cuenta_corriente',
+    }
+    const handler = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') { setPaymentModalOpen(false); return }
+
+      const method = METHOD_KEYS[ev.key.toLowerCase()]
+      if (method) {
+        ev.preventDefault()
+        updateSplitMethod(activeSplitIndex, method)
+        setTimeout(() => amountInputRefs.current[activeSplitIndex]?.focus(), 30)
+        return
+      }
+
+      if ((ev.key === '+' || ev.key === 'n' || ev.key === 'N') && remaining > 0.01) {
+        ev.preventDefault()
+        addSplit()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [paymentModalOpen, activeSplitIndex, remaining, updateSplitMethod, addSplit])
+
+  // Shortcuts foco-específicos del input de monto: Enter confirma, R va a recibido.
+  // Los métodos (E/D/C/T/Q/A) y N los maneja el listener global.
+  const handleAmountKeyDown = useCallback((
+    e: React.KeyboardEvent<HTMLInputElement>,
+    splitIndex: number,
+    isEfectivo: boolean,
+  ) => {
+    if ((e.key === 'r' || e.key === 'R') && isEfectivo) {
+      e.preventDefault()
+      setTimeout(() => receivedInputRefs.current[splitIndex]?.focus(), 30)
+      return
+    }
+    if (e.key === 'Enter' && canConfirm && !processing) {
+      e.preventDefault()
+      handleConfirm()
+    }
+  }, [canConfirm, processing]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleConfirm = async () => {
     if (cart.length === 0) return
     setProcessing(true)
     try {
+      const isSingleSplit        = paymentSplits.length === 1
+      const ccSplit              = paymentSplits.find(s => s.method === 'cuenta_corriente')
+      const singleSplit          = paymentSplits[0]
+      const effectiveMethod      = isSingleSplit ? singleSplit.method : 'mixto'
+      const effectiveInstallments = isSingleSplit && singleSplit.method === 'credito' ? singleSplit.installments : 1
+
       const payload = {
         items: cart.map(i => ({
           product_id: i.product.id,
@@ -705,40 +833,40 @@ export default function POSPage() {
         })),
         discount:         saleDiscountAmount,
         shipping_amount:  shipping,
-        payment_method:   paymentMethod,
-        installments:     paymentMethod === 'credito' ? installments : 1,
+        payment_method:   effectiveMethod,
+        installments:     effectiveInstallments,
         price_list_id:    selectedList?.id ?? null,
         warehouse_id:     selectedWarehouse?.id ?? null,
         branch_id:        workstation?.branch_id ?? null,
         register_id:      workstation?.register_id ?? null,
         customer_id:      selectedCustomer?.id ?? null,
+        ...(!isSingleSplit ? { payment_splits: paymentSplits } : {}),
       }
       let sale: CompletedSale
-      if (paymentMethod === 'cuenta_corriente') {
+      if (ccSplit) {
         if (!selectedCustomer) throw new Error('Seleccioná un cliente para cuenta corriente')
         try {
           const freshCustomer = await api.get<CustomerSummary & { is_active?: boolean }>(`/api/customers/${selectedCustomer.id}`)
           if (freshCustomer.is_active === false) throw new Error('El cliente está desactivado')
           if (freshCustomer.credit_limit > 0) {
             const available = freshCustomer.available_credit ?? (freshCustomer.credit_limit - freshCustomer.current_balance)
-            if (available < total) {
+            if (available < ccSplit.amount) {
               throw new Error(
-                `Límite de cuenta corriente insuficiente. Disponible: ${formatCurrency(available)} — Total: ${formatCurrency(total)}`
+                `Límite de cuenta corriente insuficiente. Disponible: ${formatCurrency(available)} — Monto CC: ${formatCurrency(ccSplit.amount)}`
               )
             }
           }
-          sale = await api.post<CompletedSale>('/api/sales', { ...payload, payment_method: 'cuenta_corriente', installments: 1 })
-          await api.post(`/api/customers/${selectedCustomer.id}/charge`, { sale_id: sale.id, amount: total })
-          toast.success('Venta registrada y cargada a cuenta corriente')
+          sale = await api.post<CompletedSale>('/api/sales', payload)
+          await api.post(`/api/customers/${selectedCustomer.id}/charge`, { sale_id: sale.id, amount: ccSplit.amount })
+          toast.success(isSingleSplit ? 'Venta registrada y cargada a cuenta corriente' : 'Venta registrada')
         } catch (err) {
           if (!isNetworkError(err)) throw err
-          // Sin conexión: guardar en cola con el cargo a cuenta corriente incluido
           const offlineId = crypto.randomUUID()
           await queueSale({
             id: offlineId,
             created_at: new Date().toISOString(),
-            payload: { ...payload, payment_method: 'cuenta_corriente', installments: 1 },
-            customer_charge: { customer_id: selectedCustomer.id, amount: total },
+            payload,
+            customer_charge: { customer_id: selectedCustomer.id, amount: ccSplit.amount },
           })
           setPendingCount(c => c + 1)
           toast.info('Sin conexión — venta guardada en cuenta corriente, se sincronizará automáticamente')
@@ -748,15 +876,16 @@ export default function POSPage() {
             subtotal,
             discount: saleDiscountAmount,
             shipping_amount: shipping,
-            payment_method: 'cuenta_corriente',
-            installments: 1,
+            payment_method: effectiveMethod,
+            installments: effectiveInstallments,
+            ...(isSingleSplit ? {} : { payment_splits: paymentSplits }),
             items: cart,
             created_at: new Date().toISOString(),
           }
           setCompletedSale(sale)
           localStorage.removeItem(POS_CART_KEY)
           setCart([]); setSaleDiscountPct(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
-          setStep('ticket')
+          setPaymentModalOpen(false); setStep('ticket')
           return
         }
       } else {
@@ -765,7 +894,6 @@ export default function POSPage() {
           toast.success('Venta registrada')
         } catch (err) {
           if (!isNetworkError(err)) throw err
-          // Sin conexión: guardar en cola offline y mostrar ticket igual
           const offlineId = crypto.randomUUID()
           await queueSale({
             id: offlineId,
@@ -780,15 +908,16 @@ export default function POSPage() {
             subtotal,
             discount: saleDiscountAmount,
             shipping_amount: shipping,
-            payment_method: paymentMethod,
-            installments: paymentMethod === 'credito' ? installments : 1,
+            payment_method: effectiveMethod,
+            installments: effectiveInstallments,
+            ...(isSingleSplit ? {} : { payment_splits: paymentSplits }),
             items: cart,
             created_at: new Date().toISOString(),
           }
           setCompletedSale(sale)
           localStorage.removeItem(POS_CART_KEY)
           setCart([]); setSaleDiscountPct(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
-          setStep('ticket')
+          setPaymentModalOpen(false); setStep('ticket')
           return
         }
       }
@@ -797,7 +926,7 @@ export default function POSPage() {
       setCompletedSale({ ...sale, items: cart, shipping_amount: shipping })
       localStorage.removeItem(POS_CART_KEY)
       setCart([]); setSaleDiscountPct(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
-      setStep('ticket')
+      setPaymentModalOpen(false); setStep('ticket')
       api.post<{ id: string }>('/api/invoices', { sale_id: saleId, customer_id: customerId })
         .then(inv => { setCompletedSale(prev => prev?.id === saleId ? { ...prev, invoice_id: inv.id } : prev) })
         .catch(() => {})
@@ -808,7 +937,9 @@ export default function POSPage() {
 
   const handleNewSale = () => {
     localStorage.removeItem(POS_CART_KEY)
-    setCart([]); setSaleDiscountPct(0); setShippingEnabled(false); setPaymentMethod('efectivo'); setInstallments(1)
+    setCart([]); setSaleDiscountPct(0); setShippingEnabled(false)
+    setPaymentSplits([{ method: 'efectivo', amount: 0, installments: 1 }])
+    setPaymentModalOpen(false)
     setCompletedSale(null); setSelectedCustomer(null); setCustomerQuery('')
     setStep('cart')
     setTimeout(() => searchRef.current?.focus(), 100)
@@ -1430,7 +1561,7 @@ export default function POSPage() {
               <p className="text-xs text-[var(--text3)] text-center">Resolviendo productos...</p>
             )}
             <button
-              onClick={() => setStep('payment')}
+              onClick={() => { setPaymentSplits([{ method: 'efectivo', amount: total, installments: 1 }]); setActiveSplitIndex(0); setPaymentModalOpen(true) }}
               disabled={cart.length === 0 || hasMissingCustomPrice || hasPendingItems}
               className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-[var(--radius-md)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
             >
@@ -1439,103 +1570,231 @@ export default function POSPage() {
           </div>
         )}
 
-        {/* Paso de pago */}
-        {step === 'payment' && (
-          <div className="border-t border-[var(--border)] p-4 space-y-4 flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-[var(--text)]">Método de pago</h3>
-              <button onClick={() => setStep('cart')} className="text-xs text-[var(--text3)] hover:text-[var(--text)]">← Volver</button>
-            </div>
-            <div className="text-center py-2">
-              <p className="text-3xl font-bold mono text-[var(--accent)]">{formatCurrency(total)}</p>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {PAYMENT_METHODS.map(m => (
-                <button key={m.value} onClick={() => setPaymentMethod(m.value)}
-                  className={`flex flex-col items-center gap-1 py-3 rounded-[var(--radius-md)] border text-xs font-medium transition-all ${paymentMethod === m.value ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]' : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'}`}>
-                  <span className="text-lg">{m.icon}</span>
-                  {m.label}
-                </button>
-              ))}
-            </div>
-            {paymentMethod === 'cuenta_corriente' && (
-              <div className="relative">
-                {selectedCustomer ? (
-                  <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)]">
-                    <div>
-                      <p className="text-xs font-semibold text-[var(--accent)]">{selectedCustomer.full_name}</p>
-                      <p className="text-xs text-[var(--text3)]">
-                        Saldo: {formatCurrency(selectedCustomer.current_balance)}
-                        {selectedCustomer.credit_limit > 0 && ` · Límite: ${formatCurrency(selectedCustomer.credit_limit)}`}
-                      </p>
-                    </div>
-                    <button onClick={() => { setSelectedCustomer(null); setCustomerQuery('') }}
-                      className="text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">✕</button>
+      </div>
+
+      {/* ── Modal de cobro ── */}
+      <Modal open={paymentModalOpen} onClose={() => setPaymentModalOpen(false)} title="Cobrar" size="md">
+        <div className="space-y-4">
+
+          {/* Total */}
+          <div className="text-center py-2 bg-[var(--accent-subtle)] rounded-[var(--radius-lg)]">
+            <p className="text-xs text-[var(--accent)] font-medium uppercase tracking-wide mb-1">Total a cobrar</p>
+            <p className="text-4xl font-bold mono text-[var(--accent)]">{formatCurrency(total)}</p>
+          </div>
+
+          {/* Splits */}
+          {paymentSplits.map((split, i) => {
+            const KEY_HINT: Record<string, string> = {
+              efectivo: 'E', debito: 'D', credito: 'C',
+              transferencia: 'T', qr: 'Q', cuenta_corriente: 'A',
+            }
+            const isActive = activeSplitIndex === i
+            return (
+              <div key={i}
+                onClick={() => setActiveSplitIndex(i)}
+                className={`border rounded-[var(--radius-md)] p-2 space-y-2 transition-all cursor-default ${isActive ? 'border-[var(--accent)]' : 'border-[var(--border)]'}`}
+              >
+                {paymentSplits.length > 1 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-[var(--text3)]">Pago {i + 1}</span>
+                    <button onClick={e => { e.stopPropagation(); removeSplit(i) }}
+                      className="p-1 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--surface2)] transition-colors">
+                      <X size={13} />
+                    </button>
                   </div>
-                ) : (
-                  <div className="relative">
-                    <Users size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
-                    {searchingCustomer && <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />}
-                    <input value={customerQuery} onChange={e => setCustomerQuery(e.target.value)}
-                      autoFocus
-                      placeholder="Buscar cliente para Cta. Cte. ..."
-                      className="w-full pl-7 pr-3 py-1.5 text-xs rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--warning)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
-                    />
-                    {customerQuery.length >= 2 && (
-                      <div className="absolute bottom-full left-0 right-0 mb-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 overflow-hidden">
-                        {customerResults.length > 0 ? (
-                          <>
-                            {customerResults.map(c => (
-                              <button key={c.id}
-                                onClick={() => { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]) }}
-                                className="w-full flex items-center justify-between px-3 py-2 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
-                                <div>
-                                  <p className="text-xs font-medium text-[var(--text)]">{c.full_name}</p>
-                                  {c.document && <p className="text-xs text-[var(--text3)]">{c.document}</p>}
-                                </div>
-                                {Number(c.current_balance) > 0 && <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>}
-                              </button>
-                            ))}
-                            <button onClick={() => setQuickCustomerModal(true)}
-                              className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--accent-subtle)] transition-colors text-left border-t border-[var(--border)]">
-                              <Plus size={12} className="text-[var(--accent)]" />
-                              <span className="text-xs text-[var(--accent)] font-medium">Crear "{customerQuery}"</span>
-                            </button>
-                          </>
-                        ) : (
-                          <button onClick={() => setQuickCustomerModal(true)}
-                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--accent-subtle)] transition-colors text-left">
-                            <Plus size={12} className="text-[var(--accent)]" />
-                            <span className="text-xs text-[var(--accent)] font-medium">Crear cliente "{customerQuery}"</span>
-                          </button>
-                        )}
+                )}
+
+                {/* Grilla de métodos con hints de teclado */}
+                <div className="grid grid-cols-3 gap-1">
+                  {PAYMENT_METHODS.map(m => (
+                    <button key={m.value}
+                      onClick={e => { e.stopPropagation(); updateSplitMethod(i, m.value); setActiveSplitIndex(i); setTimeout(() => amountInputRefs.current[i]?.focus(), 30) }}
+                      className={`relative flex items-center gap-1.5 px-2 py-1.5 rounded border text-xs font-medium transition-all active:scale-95
+                        ${split.method === m.value
+                          ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                          : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'}`}>
+                      {isActive && (
+                        <kbd className="absolute top-0.5 right-1 text-[8px] font-mono bg-[var(--surface3)] text-[var(--text3)] px-0.5 rounded leading-none">
+                          {KEY_HINT[m.value]}
+                        </kbd>
+                      )}
+                      <span className="text-sm flex-shrink-0">{m.icon}</span>
+                      <span className="truncate">{m.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Monto */}
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-[var(--text3)] flex-shrink-0">
+                    ${isActive && split.method === 'efectivo' && (
+                      <kbd className="ml-1 text-[9px] font-mono bg-[var(--surface3)] text-[var(--text3)] px-1 py-0.5 rounded align-middle">R→recibido</kbd>
+                    )}
+                  </span>
+                  <input
+                    ref={el => { amountInputRefs.current[i] = el }}
+                    type="number" min="0" step="0.01"
+                    value={split.amount || ''}
+                    onFocus={() => setActiveSplitIndex(i)}
+                    onChange={e => updateSplitAmount(i, e.target.value)}
+                    onKeyDown={e => handleAmountKeyDown(e, i, split.method === 'efectivo')}
+                    className="flex-1 px-3 py-2.5 text-xl mono font-bold rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                </div>
+
+                {/* Crédito: cuotas */}
+                {split.method === 'credito' && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-[var(--text2)] flex-shrink-0">Cuotas</span>
+                    <div className="flex gap-1 flex-wrap">
+                      {[1, 3, 6, 12, 18, 24].map(n => (
+                        <button key={n} onClick={e => { e.stopPropagation(); updateSplitInstallments(i, n) }}
+                          className={`px-2.5 py-1 text-xs rounded font-medium transition-colors
+                            ${(split.installments ?? 1) === n ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'}`}>
+                          {n}x
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Efectivo: recibido y vuelto */}
+                {split.method === 'efectivo' && split.amount > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-[var(--border)]">
+                    {/* Sugerencias de denominación */}
+                    <div className="flex gap-1.5 flex-wrap">
+                      {suggestReceived(split.amount).map(v => (
+                        <button key={v}
+                          onClick={e => { e.stopPropagation(); updateSplitReceived(i, v) }}
+                          className={`px-2.5 py-1 text-xs mono font-medium rounded border transition-all active:scale-95
+                            ${split.received === v
+                              ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                              : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'}`}>
+                          {formatCurrency(v)}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Input recibido */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-[var(--text3)] flex-shrink-0 w-16">Recibido</span>
+                      <input
+                        ref={el => { receivedInputRefs.current[i] = el }}
+                        type="number" min={split.amount} step="1"
+                        value={split.received || ''}
+                        onChange={e => updateSplitReceived(i, Number(e.target.value))}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && canConfirm && !processing) { e.preventDefault(); handleConfirm() }
+                          if (e.key === 'Escape') { e.preventDefault(); amountInputRefs.current[i]?.focus() }
+                        }}
+                        placeholder={String(Math.ceil(split.amount))}
+                        onClick={e => e.stopPropagation()}
+                        className={`flex-1 px-3 py-2 text-base mono rounded-[var(--radius-md)] bg-[var(--surface2)] border text-[var(--text)] focus:outline-none ${(split.received ?? 0) > 0 && (split.received ?? 0) < split.amount ? 'border-[var(--danger)] focus:border-[var(--danger)]' : 'border-[var(--border)] focus:border-[var(--accent)]'}`}
+                      />
+                    </div>
+                    {/* Vuelto — redondeado a favor del consumidor */}
+                    {(split.received ?? 0) > split.amount && (
+                      <div className="flex items-center justify-between px-1 py-1.5 bg-[var(--accent-subtle)] rounded-[var(--radius-md)]">
+                        <span className="text-sm font-semibold text-[var(--text2)]">Vuelto</span>
+                        <span className="text-2xl font-bold mono text-[var(--accent)]">
+                          {formatCurrency(Math.ceil((split.received ?? 0) - split.amount))}
+                        </span>
                       </div>
                     )}
                   </div>
                 )}
               </div>
-            )}
-            {paymentMethod === 'credito' && (
-              <div className="flex items-center gap-3">
-                <span className="text-sm text-[var(--text2)]">Cuotas</span>
-                <div className="flex gap-1">
-                  {[1, 3, 6, 12, 18, 24].map(n => (
-                    <button key={n} onClick={() => setInstallments(n)}
-                      className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${installments === n ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'}`}>
-                      {n}x
-                    </button>
-                  ))}
+            )
+          })}
+
+          {/* Resumen multi-split */}
+          {paymentSplits.length > 1 && (
+            <div className={`flex justify-between text-sm px-1 font-medium ${splitsValid ? 'text-[var(--accent)]' : 'text-[var(--warning)]'}`}>
+              <span>{splitsValid ? '✓ Total cubierto' : 'Pendiente'}</span>
+              <span className="mono">{splitsValid ? formatCurrency(total) : formatCurrency(Math.abs(remaining))}</span>
+            </div>
+          )}
+
+          {/* Agregar medio de pago */}
+          {remaining > 0.01 && (
+            <button onClick={addSplit}
+              className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-[var(--border)] rounded-[var(--radius-md)] text-sm text-[var(--text3)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors">
+              <Plus size={14} /> Dividir en otro medio
+              <kbd className="text-[10px] font-mono bg-[var(--surface2)] border border-[var(--border)] px-1.5 py-0.5 rounded">N</kbd>
+            </button>
+          )}
+
+          {/* Búsqueda de cliente para Cta. Cte. */}
+          {paymentSplits.some(s => s.method === 'cuenta_corriente') && (
+            <div className="relative">
+              {selectedCustomer ? (
+                <div className="flex items-center justify-between px-3 py-2 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)]">
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--accent)]">{selectedCustomer.full_name}</p>
+                    <p className="text-xs text-[var(--text3)]">
+                      Saldo: {formatCurrency(selectedCustomer.current_balance)}
+                      {selectedCustomer.credit_limit > 0 && ` · Límite: ${formatCurrency(selectedCustomer.credit_limit)}`}
+                    </p>
+                  </div>
+                  <button onClick={() => { setSelectedCustomer(null); setCustomerQuery('') }}
+                    className="text-sm text-[var(--text3)] hover:text-[var(--danger)] transition-colors">✕</button>
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="relative">
+                  <Users size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
+                  {searchingCustomer && <div className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />}
+                  <input value={customerQuery} onChange={e => setCustomerQuery(e.target.value)}
+                    placeholder="Buscar cliente para Cta. Cte. ..."
+                    className="w-full pl-9 pr-3 py-2.5 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--warning)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                  {customerQuery.length >= 2 && (
+                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 overflow-hidden">
+                      {customerResults.length > 0 ? (
+                        <>
+                          {customerResults.map(c => (
+                            <button key={c.id}
+                              onClick={() => { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]) }}
+                              className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
+                              <div>
+                                <p className="text-sm font-medium text-[var(--text)]">{c.full_name}</p>
+                                {c.document && <p className="text-xs text-[var(--text3)]">{c.document}</p>}
+                              </div>
+                              {Number(c.current_balance) > 0 && <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>}
+                            </button>
+                          ))}
+                          <button onClick={() => setQuickCustomerModal(true)}
+                            className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[var(--accent-subtle)] transition-colors text-left border-t border-[var(--border)]">
+                            <Plus size={13} className="text-[var(--accent)]" />
+                            <span className="text-sm text-[var(--accent)] font-medium">Crear "{customerQuery}"</span>
+                          </button>
+                        </>
+                      ) : (
+                        <button onClick={() => setQuickCustomerModal(true)}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[var(--accent-subtle)] transition-colors text-left">
+                          <Plus size={13} className="text-[var(--accent)]" />
+                          <span className="text-sm text-[var(--accent)] font-medium">Crear cliente "{customerQuery}"</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Confirmar — sticky abajo */}
+          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-1 border-t border-[var(--border)]">
             <button onClick={handleConfirm}
-              disabled={processing || (paymentMethod === 'cuenta_corriente' && !selectedCustomer)}
-              className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-[var(--radius-md)] transition-colors disabled:opacity-60 active:scale-95 flex items-center justify-center gap-2">
-              {processing ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Procesando...</> : 'Confirmar venta'}
+              disabled={processing || !canConfirm || (paymentSplits.some(s => s.method === 'cuenta_corriente') && !selectedCustomer)}
+              className="w-full py-4 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-bold text-base rounded-[var(--radius-md)] transition-colors disabled:opacity-60 active:scale-95 flex items-center justify-center gap-3">
+              {processing
+                ? <><span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Procesando...</>
+                : <>Confirmar venta <kbd className="text-xs font-mono bg-white/20 border border-white/30 px-2 py-0.5 rounded">↵ Enter</kbd></>
+              }
             </button>
           </div>
-        )}
-      </div>
+
+        </div>
+      </Modal>
 
       {/* Tabs mobile */}
       <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 flex border-t border-[var(--border)] bg-[var(--surface)]/95 backdrop-blur-md">

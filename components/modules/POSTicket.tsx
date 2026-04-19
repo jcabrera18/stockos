@@ -24,6 +24,7 @@ interface TicketSale {
   shipping_amount?: number
   payment_method: string
   installments: number
+  payment_splits?: Array<{ method: string; amount: number; installments?: number }>
   items: CartItem[]
   created_at: string
 }
@@ -304,11 +305,22 @@ export function POSTicket({
                 <span>TOTAL</span>
                 <span>{formatCurrency(sale.total)}</span>
               </div>
-              <div style={{ marginTop: '4px', fontSize: '11px' }}>
-                Pago: {getPaymentMethodLabel(sale.payment_method)}
-                {sale.payment_method === 'credito' && sale.installments > 1
-                  && ` (${sale.installments} cuotas)`}
-              </div>
+              {sale.payment_splits && sale.payment_splits.length > 1 ? (
+                <div style={{ marginTop: '4px', fontSize: '11px' }}>
+                  {sale.payment_splits.map((s, i) => (
+                    <div key={i}>
+                      {getPaymentMethodLabel(s.method)}: {formatCurrency(s.amount)}
+                      {s.method === 'credito' && (s.installments ?? 1) > 1 && ` (${s.installments} cuotas)`}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ marginTop: '4px', fontSize: '11px' }}>
+                  Pago: {getPaymentMethodLabel(sale.payment_method)}
+                  {sale.payment_method === 'credito' && sale.installments > 1
+                    && ` (${sale.installments} cuotas)`}
+                </div>
+              )}
             </div>
 
             <div style={sep} />

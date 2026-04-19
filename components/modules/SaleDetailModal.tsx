@@ -27,6 +27,7 @@ interface SaleDetail {
   shipping_amount?: number
   payment_method: string
   installments: number
+  payment_splits?: Array<{ method: string; amount: number; installments?: number }>
   notes?: string
   created_at: string
   users?: { full_name: string }
@@ -214,9 +215,12 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
           <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;margin-top:2px;">
             <span>TOTAL</span><span>${formatCurrency(sale.total)}</span>
           </div>
-          <div style="margin-top:4px;font-size:11px;">
-            Pago: ${getPaymentMethodLabel(sale.payment_method)}${sale.payment_method === 'credito' && sale.installments > 1 ? ` (${sale.installments} cuotas)` : ''}
-          </div>
+          ${sale.payment_splits && sale.payment_splits.length > 1
+            ? sale.payment_splits.map(s =>
+                `<div style="font-size:11px;">${getPaymentMethodLabel(s.method)}: ${formatCurrency(s.amount)}${s.method === 'credito' && (s.installments ?? 1) > 1 ? ` (${s.installments} cuotas)` : ''}</div>`
+              ).join('')
+            : `<div style="margin-top:4px;font-size:11px;">Pago: ${getPaymentMethodLabel(sale.payment_method)}${sale.payment_method === 'credito' && sale.installments > 1 ? ` (${sale.installments} cuotas)` : ''}</div>`
+          }
         </div>
         ${sep}
         ${isInvoiced && invoice ? `
@@ -365,10 +369,19 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
 
           {/* Método de pago + cliente */}
           <div className="flex flex-wrap gap-2">
-            <Badge variant="default">
-              {getPaymentMethodLabel(sale.payment_method)}
-              {sale.payment_method === 'credito' && sale.installments > 1 && ` · ${sale.installments} cuotas`}
-            </Badge>
+            {sale.payment_splits && sale.payment_splits.length > 1 ? (
+              sale.payment_splits.map((s, i) => (
+                <Badge key={i} variant="default">
+                  {getPaymentMethodLabel(s.method)} {formatCurrency(s.amount)}
+                  {s.method === 'credito' && (s.installments ?? 1) > 1 && ` · ${s.installments} cuotas`}
+                </Badge>
+              ))
+            ) : (
+              <Badge variant="default">
+                {getPaymentMethodLabel(sale.payment_method)}
+                {sale.payment_method === 'credito' && sale.installments > 1 && ` · ${sale.installments} cuotas`}
+              </Badge>
+            )}
             {customer && (
               <Badge variant="warning">
                 <CreditCard size={11} className="inline mr-1" />
