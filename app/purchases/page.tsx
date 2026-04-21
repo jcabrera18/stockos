@@ -351,6 +351,7 @@ export default function PurchasesPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-[var(--border)]">
+                      <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">N°</th>
                       <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Fecha</th>
                       <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Proveedor</th>
                       <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Estado</th>
@@ -367,6 +368,9 @@ export default function PurchasesPage() {
                           onClick={() => handleDetail(order)}
                           className="hover:bg-[var(--surface2)] transition-colors cursor-pointer"
                         >
+                          <td className="px-4 py-3 mono text-xs font-medium text-[var(--text2)]">
+                            #{order.id.slice(0, 8).toUpperCase()}
+                          </td>
                           <td className="px-4 py-3 text-xs mono text-[var(--text2)]">
                             {formatDate(order.created_at)}
                           </td>
@@ -511,7 +515,12 @@ export default function PurchasesPage() {
         >
           <div className="w-full max-w-lg bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
-              <h2 className="text-base font-semibold text-[var(--text)]">Detalle de orden</h2>
+              <div>
+                <h2 className="text-base font-semibold text-[var(--text)]">Detalle de orden</h2>
+                {detailOrder && (
+                  <p className="text-xs mono text-[var(--text3)] mt-0.5">#{detailOrder.id.slice(0, 8).toUpperCase()}</p>
+                )}
+              </div>
               <button onClick={() => setDetailModal(false)} className="p-1 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)]">✕</button>
             </div>
 

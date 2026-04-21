@@ -49,6 +49,8 @@ interface Invoice {
   afip_requested: boolean
   notes?: string
   created_at: string
+  original_invoice_id?: string
+  original_invoice?: { invoice_type: string; numero: number } | { invoice_type: string; numero: number }[]
   invoice_items: InvoiceItem[]
   sales?: { payment_method: string }
   users?: { full_name: string }
@@ -339,23 +341,23 @@ function InvoicesPageInner() {
       <div style="text-align:center;margin-bottom:2px;">
         <div style="font-size:15px;font-weight:bold;letter-spacing:0.04em;">${biz?.name ?? ''}</div>
         ${biz?.cuit ? `<div>CUIT: ${biz.cuit}</div>` : ''}
-        ${biz?.address ? `<div style="font-size:10px;">${biz.address}</div>` : ''}
-        ${biz?.phone ? `<div style="font-size:10px;">Tel: ${biz.phone}</div>` : ''}
-        ${biz?.iva_condition ? `<div style="font-size:10px;">Cond. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div>` : ''}
+        ${biz?.address ? `<div style="font-size:11px;">${biz.address}</div>` : ''}
+        ${biz?.phone ? `<div style="font-size:11px;">Tel: ${biz.phone}</div>` : ''}
+        ${biz?.iva_condition ? `<div style="font-size:11px;">Cond. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div>` : ''}
       </div>
       ${sep}
       <div style="text-align:center;font-weight:bold;font-size:13px;">${typeLabel.toUpperCase()}</div>
       <div style="text-align:center;">N° ${ptoVenta}-${numero}</div>
       <div style="text-align:center;">Fecha: ${invoice.fecha}</div>
-      ${branchObj?.name ? `<div style="text-align:center;font-size:10px;">Suc: ${branchObj.name}${registerObj?.name ? ` - ${registerObj.name}` : ''}</div>` : ''}
-      ${userObj?.full_name ? `<div style="text-align:center;font-size:10px;">Cajero: ${userObj.full_name}</div>` : ''}
+      ${branchObj?.name ? `<div style="text-align:center;font-size:11px;">Suc: ${branchObj.name}${registerObj?.name ? ` - ${registerObj.name}` : ''}</div>` : ''}
+      ${userObj?.full_name ? `<div style="text-align:center;font-size:11px;">Cajero: ${userObj.full_name}</div>` : ''}
       ${sep}
       <div><strong>Receptor:</strong> ${receptorName}</div>
-      ${invoice.receptor_cuit ? `<div style="font-size:10px;">CUIT: ${invoice.receptor_cuit}</div>` : customersObj?.document ? `<div style="font-size:10px;">Doc: ${customersObj.document}</div>` : ''}
-      ${invoice.receptor_address ? `<div style="font-size:10px;">${invoice.receptor_address}</div>` : ''}
-      <div style="font-size:10px;">Cond. IVA: ${IVA_LABELS[invoice.receptor_iva_condition] ?? invoice.receptor_iva_condition}</div>
+      ${invoice.receptor_cuit ? `<div style="font-size:11px;">CUIT: ${invoice.receptor_cuit}</div>` : customersObj?.document ? `<div style="font-size:11px;">Doc: ${customersObj.document}</div>` : ''}
+      ${invoice.receptor_address ? `<div style="font-size:11px;">${invoice.receptor_address}</div>` : ''}
+      <div style="font-size:11px;">Cond. IVA: ${IVA_LABELS[invoice.receptor_iva_condition] ?? invoice.receptor_iva_condition}</div>
       ${sep}
-      ${row('<span style="font-weight:bold;font-size:10px;">DESCRIPCIÓN</span>', '<span style="font-weight:bold;font-size:10px;">IMPORTE</span>')}
+      ${row('<span style="font-weight:bold;font-size:11px;">DESCRIPCIÓN</span>', '<span style="font-weight:bold;font-size:11px;">IMPORTE</span>')}
       <div style="margin-top:4px;">
         ${invoice.invoice_items.map(item => `
           <div style="margin-bottom:6px;">
@@ -363,7 +365,7 @@ function InvoicesPageInner() {
               `<span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity} ${item.description}</span>`,
               `<span style="flex-shrink:0;">${fmt(item.subtotal)}</span>`
             )}
-            <div style="font-size:10px;color:#555;">  c/u ${fmt(item.unit_price)}</div>
+            <div style="font-size:11px;color:#555;">  c/u ${fmt(item.unit_price)}</div>
           </div>
         `).join('')}
       </div>
@@ -376,17 +378,17 @@ function InvoicesPageInner() {
         <span>TOTAL</span><span>${fmt(invoice.total_amount)}</span>
       </div>
       ${invoice.sales?.payment_method ? `<div style="margin-top:4px;font-size:11px;">Pago: ${PAYMENT_LABELS[invoice.sales.payment_method] ?? invoice.sales.payment_method}</div>` : ''}
-      ${invoice.notes ? `<div style="font-size:10px;color:#555;margin-top:4px;font-style:italic;">${invoice.notes}</div>` : ''}
+      ${invoice.notes ? `<div style="font-size:11px;color:#555;margin-top:4px;font-style:italic;">${invoice.notes}</div>` : ''}
       ${sep}
       ${invoice.afip_cae ? `
         <div style="text-align:center;font-weight:bold;font-size:11px;">COMPROBANTE AUTORIZADO</div>
-        <div style="text-align:center;font-size:10px;">CAE: ${invoice.afip_cae}</div>
-        ${invoice.afip_cae_vto ? `<div style="text-align:center;font-size:10px;">Vto. CAE: ${invoice.afip_cae_vto}</div>` : ''}
+        <div style="text-align:center;font-size:11px;">CAE: ${invoice.afip_cae}</div>
+        ${invoice.afip_cae_vto ? `<div style="text-align:center;font-size:11px;">Vto. CAE: ${invoice.afip_cae_vto}</div>` : ''}
         ${qrDataUrl ? `
           <div style="text-align:center;margin:6px 0;">
             <img src="${qrDataUrl}" style="width:100px;height:100px;" />
           </div>
-          <div style="text-align:center;font-size:9px;color:#555;">Verificar en afip.gob.ar/fe/qr</div>
+          <div style="text-align:center;font-size:10px;color:#555;">Verificar en afip.gob.ar/fe/qr</div>
           <div style="text-align:center;margin:6px 0;">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170 58" width="110" height="38">
               <text x="85" y="38" text-anchor="middle" font-family="Arial Black,Arial" font-size="44" font-weight="900" fill="#4A4A4A">ARCA</text>
@@ -401,7 +403,7 @@ function InvoicesPageInner() {
         </div>
       `}
       ${sep}
-      <div style="text-align:center;font-size:10px;line-height:1.6;">
+      <div style="text-align:center;font-size:11px;line-height:1.6;">
         <div>¡Gracias por su compra!</div>
         <div style="color:#888;">Powered by StockOS</div>
       </div>
@@ -416,10 +418,10 @@ function InvoicesPageInner() {
   <meta charset="utf-8">
   <title>${typeLabel} ${ptoVenta}-${numero}</title>
   <style>
-    @page { size: 80mm auto; margin: 2mm 0; }
+    @page { size: 80mm auto; margin: 3mm 2mm; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 80mm; background: #fff; }
-    body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   </style>
 </head>
 <body><div style="padding:12px 10px;">${html}</div></body>
@@ -748,7 +750,12 @@ function InvoicesPageInner() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs mono text-[var(--text3)] hidden sm:table-cell">
-                      {inv.sale_id ? `#${inv.sale_id.slice(-8).toUpperCase()}` : '—'}
+                      {(() => {
+                        if (inv.sale_id) return `#${inv.sale_id.slice(-8).toUpperCase()}`
+                        const orig = Array.isArray(inv.original_invoice) ? inv.original_invoice[0] : inv.original_invoice
+                        if (orig) return `${TYPE_LABELS[orig.invoice_type] ?? orig.invoice_type} #${String(orig.numero).padStart(8, '0')}`
+                        return '—'
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-xs text-[var(--text2)] hidden md:table-cell">
                       {inv.fecha}
@@ -928,10 +935,10 @@ function InvoicesPageInner() {
               </div>
             </div>
 
-            {/* Botón autorizar en ARCA si está pendiente */}
-            {selectedInvoice.afip_status === 'pending' && (
+            {/* Botón autorizar en ARCA si está pendiente o falló */}
+            {(selectedInvoice.afip_status === 'pending' || selectedInvoice.afip_status === 'rejected') && (
               <Button onClick={() => handleAuthorize(selectedInvoice)} disabled={authorizing} className="w-full">
-                {authorizing ? 'Autorizando en ARCA...' : 'Autorizar en ARCA'}
+                {authorizing ? 'Autorizando en ARCA...' : selectedInvoice.afip_status === 'rejected' ? 'Reintentar autorización en ARCA' : 'Autorizar en ARCA'}
               </Button>
             )}
 

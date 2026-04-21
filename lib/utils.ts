@@ -60,8 +60,9 @@ export function getPaymentMethodLabel(method: string): string {
     transferencia: 'Transferencia',
     debito:        'Débito',
     credito:       'Crédito',
-    qr:            'QR',
-    mixto:         'Mixto',
+    qr:               'QR',
+    mixto:            'Mixto',
+    cuenta_corriente: 'Cuenta corriente',
   }
   return labels[method] ?? method
 }

@@ -14,10 +14,20 @@ import { Select } from '@/components/ui/Select'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDate, formatDateTime, getPeriodDates, getPaymentMethodLabel } from '@/lib/utils'
 import type { FinanceSummary, Expense, Sale, PaginatedResponse, Pagination as PaginationType } from '@/types'
-import { TrendingUp, TrendingDown, DollarSign, Plus } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Plus, FileCheck } from 'lucide-react'
 import { toast } from 'sonner'
 
-type Tab = 'ingresos' | 'gastos' | 'balance'
+type Tab = 'ingresos' | 'gastos' | 'balance' | 'afip'
+
+interface AfipTypeSummary { count: number; total: number; net: number; iva: number }
+interface AfipSummary {
+  by_type: Record<string, AfipTypeSummary>
+  facturas: number
+  nc_total: number
+  nd_total: number
+  total_net: number
+  total_iva: number
+}
 type Period = 'week' | 'month' | 'year'
 
 const EXPENSE_CATEGORIES = [
@@ -45,11 +55,31 @@ export default function FinancesPage() {
   const [income, setIncome] = useState<Sale[]>([])
   const [incomePag, setIncomePag] = useState<PaginationType>({ total: 0, page: 1, limit: 50, pages: 0 })
   const [incomePage, setIncomePage] = useState(1)
+  const [afipSummary, setAfipSummary] = useState<AfipSummary | null>(null)
+  const [afipFrom, setAfipFrom] = useState('')
+  const [afipTo, setAfipTo] = useState('')
+  const [afipLoading, setAfipLoading] = useState(false)
 
   const periodRef = useRef(period)
   const expPageRef = useRef(expPage)
   const incomePageRef = useRef(incomePage)
+  const afipFromRef = useRef(afipFrom)
+  const afipToRef = useRef(afipTo)
   useEffect(() => { periodRef.current = period }, [period])
+  useEffect(() => { afipFromRef.current = afipFrom }, [afipFrom])
+  useEffect(() => { afipToRef.current = afipTo }, [afipTo])
+
+  const fetchAfipSummary = useCallback(async (from: string, to: string) => {
+    setAfipLoading(true)
+    try {
+      const afip = await api.get<AfipSummary>('/api/invoices/summary', { from, to })
+      setAfipSummary(afip)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setAfipLoading(false)
+    }
+  }, [])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -69,12 +99,16 @@ export default function FinancesPage() {
       setExpPag(exp.pagination)
       setIncome(inc.data)
       setIncomePag(inc.pagination)
+      // Solo actualizar AFIP con período global si no hay rango custom
+      if (!afipFromRef.current || !afipToRef.current) {
+        fetchAfipSummary(from, to)
+      }
     } catch (err) {
       console.error(err)
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [fetchAfipSummary])
 
   useEffect(() => {
     expPageRef.current = 1
@@ -95,6 +129,23 @@ export default function FinancesPage() {
     setIncomePage(newPage)
     fetchData()
   }, [fetchData])
+
+  const handleAfipDateFilter = useCallback(() => {
+    const f = afipFromRef.current
+    const t = afipToRef.current
+    if (f && t) {
+      fetchAfipSummary(f + 'T00:00:00.000Z', t + 'T23:59:59.999Z')
+    }
+  }, [fetchAfipSummary])
+
+  const handleAfipClearDates = useCallback(() => {
+    setAfipFrom('')
+    setAfipTo('')
+    afipFromRef.current = ''
+    afipToRef.current = ''
+    const { from, to } = getPeriodDates(periodRef.current)
+    fetchAfipSummary(from, to)
+  }, [fetchAfipSummary])
 
   const handleAddExpense = async () => {
     if (!form.amount || !form.description) return
@@ -126,6 +177,7 @@ export default function FinancesPage() {
     { key: 'balance', label: 'Balance' },
     { key: 'ingresos', label: 'Ingresos' },
     { key: 'gastos', label: 'Gastos' },
+    { key: 'afip', label: 'ARCA / AFIP' },
   ]
 
   return (
@@ -265,6 +317,162 @@ export default function FinancesPage() {
                 </div>
               )
             )}
+
+            {/* Tab: ARCA / AFIP */}
+            {tab === 'afip' && (() => {
+              const isCustomRange = !!(afipFrom && afipTo)
+              const { from: pFrom, to: pTo } = getPeriodDates(period)
+              const displayFrom = isCustomRange ? afipFrom : pFrom.slice(0, 10)
+              const displayTo   = isCustomRange ? afipTo   : pTo.slice(0, 10)
+              const fmtDate = (d: string) =>
+                new Date(d + (d.length === 10 ? 'T12:00:00' : '')).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+              return (
+              <div className="space-y-4">
+                {/* Selector de rango */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-[var(--text3)]">Rango personalizado:</span>
+                  <input
+                    type="date" value={afipFrom} onChange={e => setAfipFrom(e.target.value)}
+                    className="text-xs px-2.5 py-1.5 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                  <span className="text-xs text-[var(--text3)]">→</span>
+                  <input
+                    type="date" value={afipTo} onChange={e => setAfipTo(e.target.value)}
+                    className="text-xs px-2.5 py-1.5 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                  <Button onClick={handleAfipDateFilter} disabled={!afipFrom || !afipTo || afipLoading}>
+                    {afipLoading ? 'Cargando...' : 'Consultar'}
+                  </Button>
+                  {isCustomRange && (
+                    <button onClick={handleAfipClearDates}
+                      className="text-xs text-[var(--text3)] hover:text-[var(--text)] underline">
+                      Limpiar
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-[var(--text3)] -mt-1">
+                  {isCustomRange
+                    ? <>Mostrando rango personalizado: <span className="font-medium text-[var(--text2)]">{fmtDate(displayFrom)} → {fmtDate(displayTo)}</span></>
+                    : <>Período del selector: <span className="font-medium text-[var(--text2)]">{fmtDate(displayFrom)} → {fmtDate(displayTo)}</span></>
+                  }
+                  <span className="ml-2">· Solo comprobantes autorizados con CAE</span>
+                </p>
+
+                {/* Stat cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <StatCard
+                    title="Total facturado"
+                    value={formatCurrency(afipSummary?.facturas ?? 0)}
+                    subtitle="Facturas A+B+C con CAE"
+                    icon={FileCheck}
+                    accent
+                  />
+                  <StatCard
+                    title="Neto gravado"
+                    value={formatCurrency(afipSummary?.total_net ?? 0)}
+                    subtitle="Base imponible"
+                    icon={DollarSign}
+                  />
+                  <StatCard
+                    title="IVA facturado"
+                    value={formatCurrency(afipSummary?.total_iva ?? 0)}
+                    subtitle="IVA 21% acumulado"
+                    icon={TrendingUp}
+                  />
+                  <StatCard
+                    title="NC emitidas"
+                    value={formatCurrency(afipSummary?.nc_total ?? 0)}
+                    subtitle="Notas de crédito"
+                    icon={TrendingDown}
+                  />
+                </div>
+
+                {/* Tabla por tipo */}
+                <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
+                  <div className="px-4 py-3 border-b border-[var(--border)]">
+                    <p className="text-xs font-medium text-[var(--text3)]">Desglose por tipo de comprobante — solo autorizados con CAE</p>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-[var(--border)]">
+                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Tipo</th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Cantidad</th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Total</th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Neto</th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">IVA</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--border)]">
+                      {([
+                        { key: 'A',   label: 'Factura A',       showIva: true  },
+                        { key: 'B',   label: 'Factura B',       showIva: false },
+                        { key: 'C',   label: 'Factura C',       showIva: false },
+                        { key: 'NCA', label: 'Nota de Crédito A', showIva: true  },
+                        { key: 'NCB', label: 'Nota de Crédito B', showIva: false },
+                        { key: 'NCC', label: 'Nota de Crédito C', showIva: false },
+                        { key: 'NDA', label: 'Nota de Débito A',  showIva: true  },
+                        { key: 'NDB', label: 'Nota de Débito B',  showIva: false },
+                        { key: 'NDC', label: 'Nota de Débito C',  showIva: false },
+                      ] as const).map(({ key, label, showIva }) => {
+                        const row = afipSummary?.by_type?.[key]
+                        if (!row || row.count === 0) return null
+                        return (
+                          <tr key={key} className="hover:bg-[var(--surface2)] transition-colors">
+                            <td className="px-4 py-3 text-[var(--text)]">{label}</td>
+                            <td className="px-4 py-3 text-right mono text-[var(--text2)]">{row.count}</td>
+                            <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)]">
+                              {formatCurrency(row.total)}
+                            </td>
+                            <td className="px-4 py-3 text-right mono text-[var(--text2)] hidden md:table-cell">
+                              {showIva ? formatCurrency(row.net) : '—'}
+                            </td>
+                            <td className="px-4 py-3 text-right mono text-[var(--text2)] hidden md:table-cell">
+                              {showIva ? formatCurrency(row.iva) : '—'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      {/* Si no hay nada */}
+                      {!afipSummary || Object.values(afipSummary.by_type).every(r => r.count === 0) ? (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-8 text-center text-sm text-[var(--text3)]">
+                            Sin comprobantes autorizados en el período
+                          </td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                    {/* Totales footer */}
+                    {afipSummary && Object.values(afipSummary.by_type).some(r => r.count > 0) && (
+                      <tfoot>
+                        <tr className="border-t-2 border-[var(--border)] bg-[var(--surface2)]">
+                          <td className="px-4 py-3 text-xs font-semibold text-[var(--text2)]">TOTAL</td>
+                          <td className="px-4 py-3 text-right mono text-xs font-semibold text-[var(--text2)]">
+                            {Object.values(afipSummary.by_type).reduce((s, r) => s + r.count, 0)}
+                          </td>
+                          <td className="px-4 py-3 text-right mono font-bold text-[var(--accent)]">
+                            {formatCurrency(afipSummary.facturas + afipSummary.nd_total - afipSummary.nc_total)}
+                          </td>
+                          <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)] hidden md:table-cell">
+                            {formatCurrency(afipSummary.total_net)}
+                          </td>
+                          <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)] hidden md:table-cell">
+                            {formatCurrency(afipSummary.total_iva)}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+
+                {/* ND info si hay */}
+                {(afipSummary?.nd_total ?? 0) > 0 && (
+                  <p className="text-xs text-[var(--text3)] px-1">
+                    Notas de débito: {formatCurrency(afipSummary!.nd_total)} — incluidas en el total neto.
+                  </p>
+                )}
+              </div>
+              )
+            })()}
 
             {/* Tab: Gastos */}
             {tab === 'gastos' && (

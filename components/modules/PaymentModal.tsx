@@ -113,10 +113,10 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
   <meta charset="utf-8">
   <title>Recibo de pago</title>
   <style>
-    @page { size: 80mm auto; margin: 2mm 0; }
+    @page { size: 80mm auto; margin: 3mm 2mm; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 80mm; background: #fff; }
-    body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   </style>
 </head>
 <body>${content.innerHTML}</body>
@@ -216,8 +216,10 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
             <div
               ref={printRef}
               style={{
-                fontFamily: "'Courier New', Courier, monospace",
-                fontSize: '11px',
+                fontFamily: 'Arial, Helvetica, sans-serif',
+                fontSize: '12px',
+                fontWeight: 500,
+                lineHeight: 1.4,
                 color: '#000',
                 background: '#fff',
                 width: '302px',
@@ -233,10 +235,10 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
                   <div style={{ marginTop: '2px' }}>CUIT: {user.business.cuit}</div>
                 )}
                 {user?.business?.address && (
-                  <div style={{ fontSize: '10px', marginTop: '1px' }}>{user.business.address}</div>
+                  <div style={{ fontSize: '11px', marginTop: '1px' }}>{user.business.address}</div>
                 )}
                 {user?.business?.phone && (
-                  <div style={{ fontSize: '10px' }}>Tel: {user.business.phone}</div>
+                  <div style={{ fontSize: '11px' }}>Tel: {user.business.phone}</div>
                 )}
               </div>
 
@@ -245,7 +247,7 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
               <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '13px', letterSpacing: '0.04em' }}>
                 RECIBO DE PAGO
               </div>
-              <div style={{ textAlign: 'center', fontSize: '10px', marginTop: '2px' }}>
+              <div style={{ textAlign: 'center', fontSize: '11px', marginTop: '2px' }}>
                 Fecha: {formatDateTime(receipt.paidAt)}
               </div>
 
@@ -304,7 +306,7 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
               <div style={{ borderTop: '1px dashed #999', margin: '8px 0' }} />
 
               {/* Footer */}
-              <div style={{ textAlign: 'center', fontSize: '10px', lineHeight: '1.6' }}>
+              <div style={{ textAlign: 'center', fontSize: '11px', lineHeight: '1.6' }}>
                 <div>¡Gracias por su pago!</div>
                 <div style={{ color: '#888' }}>Powered by StockOS</div>
               </div>

@@ -189,20 +189,20 @@ export function POSTicket({
       <div style="text-align:center;margin-bottom:2px;">
         <div style="font-size:15px;font-weight:bold;letter-spacing:0.04em;">${biz?.name ?? ''}</div>
         ${biz?.cuit ? `<div>CUIT: ${biz.cuit}</div>` : ''}
-        ${biz?.address ? `<div style="font-size:10px;">${biz.address}</div>` : ''}
-        ${biz?.phone ? `<div style="font-size:10px;">Tel: ${biz.phone}</div>` : ''}
-        ${biz?.iva_condition ? `<div style="font-size:10px;">Cond. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div>` : ''}
+        ${biz?.address ? `<div style="font-size:11px;">${biz.address}</div>` : ''}
+        ${biz?.phone ? `<div style="font-size:11px;">Tel: ${biz.phone}</div>` : ''}
+        ${biz?.iva_condition ? `<div style="font-size:11px;">Cond. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div>` : ''}
       </div>
       ${sep}
       <div style="text-align:center;font-weight:bold;font-size:13px;">${typeLabel.toUpperCase()}</div>
       <div style="text-align:center;">N° ${ptoVenta}-${numero}</div>
       ${sep}
       <div><strong>Receptor:</strong> ${inv.receptor_name ?? customerName ?? 'Consumidor Final'}</div>
-      ${inv.receptor_cuit ? `<div style="font-size:10px;">CUIT: ${inv.receptor_cuit}</div>` : ''}
-      ${inv.receptor_address ? `<div style="font-size:10px;">${inv.receptor_address}</div>` : ''}
-      <div style="font-size:10px;">Cond. IVA: ${IVA_LABELS[inv.receptor_iva_condition ?? 'CF'] ?? inv.receptor_iva_condition}</div>
+      ${inv.receptor_cuit ? `<div style="font-size:11px;">CUIT: ${inv.receptor_cuit}</div>` : ''}
+      ${inv.receptor_address ? `<div style="font-size:11px;">${inv.receptor_address}</div>` : ''}
+      <div style="font-size:11px;">Cond. IVA: ${IVA_LABELS[inv.receptor_iva_condition ?? 'CF'] ?? inv.receptor_iva_condition}</div>
       ${sep}
-      ${row('<span style="font-weight:bold;font-size:10px;">DESCRIPCIÓN</span>', '<span style="font-weight:bold;font-size:10px;">IMPORTE</span>')}
+      ${row('<span style="font-weight:bold;font-size:11px;">DESCRIPCIÓN</span>', '<span style="font-weight:bold;font-size:11px;">IMPORTE</span>')}
       <div style="margin-top:4px;">
         ${(inv.invoice_items ?? []).map(item => `
           <div style="margin-bottom:6px;">
@@ -210,7 +210,7 @@ export function POSTicket({
               `<span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity} ${item.description}</span>`,
               `<span style="flex-shrink:0;">${fmt(item.subtotal)}</span>`
             )}
-            <div style="font-size:10px;color:#555;">  c/u ${fmt(item.unit_price)}</div>
+            <div style="font-size:11px;color:#555;">  c/u ${fmt(item.unit_price)}</div>
           </div>
         `).join('')}
       </div>
@@ -225,13 +225,13 @@ export function POSTicket({
       ${sep}
       ${cae ? `
         <div style="text-align:center;font-weight:bold;font-size:11px;">COMPROBANTE AUTORIZADO</div>
-        <div style="text-align:center;font-size:10px;">CAE: ${cae}</div>
-        ${inv.afip_cae_vto ?? inv.cae_expiry ? `<div style="text-align:center;font-size:10px;">Vto. CAE: ${inv.afip_cae_vto ?? inv.cae_expiry}</div>` : ''}
+        <div style="text-align:center;font-size:11px;">CAE: ${cae}</div>
+        ${inv.afip_cae_vto ?? inv.cae_expiry ? `<div style="text-align:center;font-size:11px;">Vto. CAE: ${inv.afip_cae_vto ?? inv.cae_expiry}</div>` : ''}
         ${qrDataUrl ? `
           <div style="text-align:center;margin:6px 0;">
             <img src="${qrDataUrl}" style="width:100px;height:100px;" />
           </div>
-          <div style="text-align:center;font-size:9px;color:#555;">Verificar en afip.gob.ar/fe/qr</div>
+          <div style="text-align:center;font-size:10px;color:#555;">Verificar en afip.gob.ar/fe/qr</div>
           <div style="text-align:center;margin:6px 0;">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170 58" width="110" height="38">
               <text x="85" y="38" text-anchor="middle" font-family="Arial Black,Arial" font-size="44" font-weight="900" fill="#4A4A4A">ARCA</text>
@@ -244,7 +244,7 @@ export function POSTicket({
         <div style="text-align:center;font-weight:bold;padding:2px 0;letter-spacing:0.03em;">*** NO VÁLIDO COMO FACTURA ***</div>
       `}
       ${sep}
-      <div style="text-align:center;font-size:10px;line-height:1.6;">
+      <div style="text-align:center;font-size:11px;line-height:1.6;">
         <div>¡Gracias por su compra!</div>
         <div style="color:#888;">Powered by StockOS</div>
       </div>
@@ -255,10 +255,10 @@ export function POSTicket({
     win.document.write(`<!DOCTYPE html><html><head>
       <meta charset="utf-8"><title>${typeLabel} ${ptoVenta}-${numero}</title>
       <style>
-        @page { size: 80mm auto; margin: 2mm 0; }
+        @page { size: 80mm auto; margin: 3mm 2mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 80mm; background: #fff; }
-        body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; }
+        body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       </style>
     </head><body><div style="padding:12px 10px;">${html}</div></body></html>`)
     win.document.close()
@@ -313,10 +313,10 @@ export function POSTicket({
   <meta charset="utf-8">
   <title>Ticket</title>
   <style>
-    @page { size: 80mm auto; margin: 2mm 0; }
+    @page { size: 80mm auto; margin: 3mm 2mm; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 80mm; background: #fff; }
-    body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   </style>
 </head>
 <body>${content.innerHTML}</body>
@@ -453,8 +453,10 @@ export function POSTicket({
             <div
               ref={printRef}
               style={{
-                fontFamily: "'Courier New', Courier, monospace",
-                fontSize: '11px',
+                fontFamily: 'Arial, Helvetica, sans-serif',
+                fontSize: '12px',
+                fontWeight: 500,
+                lineHeight: 1.4,
                 color: '#000',
                 background: '#fff',
                 width: '302px',
@@ -468,8 +470,8 @@ export function POSTicket({
                   {business?.name}
                 </div>
                 {business?.cuit && <div style={{ marginTop: '2px' }}>CUIT: {business.cuit}</div>}
-                {business?.address && <div style={{ fontSize: '10px', marginTop: '1px' }}>{business.address}</div>}
-                {business?.phone && <div style={{ fontSize: '10px' }}>Tel: {business.phone}</div>}
+                {business?.address && <div style={{ fontSize: '11px', marginTop: '1px' }}>{business.address}</div>}
+                {business?.phone && <div style={{ fontSize: '11px' }}>Tel: {business.phone}</div>}
               </div>
 
               <div style={sep} />
@@ -488,7 +490,7 @@ export function POSTicket({
               <div style={sep} />
 
               {/* Encabezado columnas */}
-              <div style={{ ...row, fontWeight: 'bold', fontSize: '10px', marginBottom: '6px' }}>
+              <div style={{ ...row, fontWeight: 'bold', fontSize: '11px', marginBottom: '6px' }}>
                 <span>DESCRIPCIÓN</span>
                 <span>IMPORTE</span>
               </div>
@@ -504,7 +506,7 @@ export function POSTicket({
                       </span>
                       <span style={{ flexShrink: 0 }}>{formatCurrency(lineTotal)}</span>
                     </div>
-                    <div style={{ fontSize: '10px', color: '#555' }}>
+                    <div style={{ fontSize: '11px', color: '#555' }}>
                       {'  '}c/u {formatCurrency(item.unit_price)}
                       {item.discount > 0 && <span> − dto {formatCurrency(item.discount)}</span>}
                     </div>
@@ -574,7 +576,7 @@ export function POSTicket({
               <div style={sep} />
 
               {/* Footer */}
-              <div style={{ textAlign: 'center', fontSize: '10px', lineHeight: '1.6' }}>
+              <div style={{ textAlign: 'center', fontSize: '11px', lineHeight: '1.6' }}>
                 <div>¡Gracias por su compra!</div>
                 <div style={{ color: '#888' }}>Powered by StockOS</div>
               </div>

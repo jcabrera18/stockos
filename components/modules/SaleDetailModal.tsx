@@ -115,6 +115,7 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
   const [receptorAddress, setReceptorAddress] = useState('')
   const [receptorIva, setReceptorIva] = useState('CF')
   const [converting, setConverting] = useState(false)
+  const [authorizing, setAuthorizing] = useState(false)
 
   useEffect(() => {
     if (!open || !saleId) return
@@ -202,7 +203,7 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
             <span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity} ${item.products.unit} ${item.products.name}</span>
             <span style="flex-shrink:0;">${formatCurrency(lineTotal)}</span>
           </div>
-          <div style="font-size:10px;color:#555;">
+          <div style="font-size:11px;color:#555;">
             &nbsp;&nbsp;c/u ${formatCurrency(item.unit_price)}${item.discount > 0 ? ` &minus; dto ${formatCurrency(item.discount)}` : ''}
           </div>
         </div>`
@@ -213,25 +214,25 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
       <style>
         @page { size: 80mm auto; margin: 3mm 2mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; background: #fff; }
+        body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #000; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       </style>
     </head><body>
       <div style="padding:14px 12px;">
         <div style="text-align:center;margin-bottom:2px;">
           <div style="font-size:15px;font-weight:bold;letter-spacing:0.04em;">${user?.business?.name ?? 'StockOS'}</div>
           ${user?.business?.cuit ? `<div>CUIT: ${user.business.cuit}</div>` : ''}
-          ${user?.business?.address ? `<div style="font-size:10px;margin-top:1px;">${user.business.address}</div>` : ''}
-          ${user?.business?.phone ? `<div style="font-size:10px;">Tel: ${user.business.phone}</div>` : ''}
+          ${user?.business?.address ? `<div style="font-size:11px;margin-top:1px;">${user.business.address}</div>` : ''}
+          ${user?.business?.phone ? `<div style="font-size:11px;">Tel: ${user.business.phone}</div>` : ''}
         </div>
         ${sep}
-        <div style="font-size:11px;line-height:1.5;">
+        <div style="font-size:12px;line-height:1.5;">
           <div>Fecha: ${formatDateTime(sale.created_at)}</div>
           <div>N&#176; Ticket: #${sale.id.slice(-8).toUpperCase()}</div>
           ${sale.users ? `<div>Cajero: ${sale.users.full_name}</div>` : ''}
           ${customer ? `<div>Cliente: ${customer.full_name}</div>` : ''}
         </div>
         ${sep}
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;font-weight:bold;font-size:10px;margin-bottom:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;font-weight:bold;font-size:11px;margin-bottom:6px;">
           <span>DESCRIPCIÓN</span><span>IMPORTE</span>
         </div>
         ${itemsHtml}
@@ -269,7 +270,7 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
         </div>` : `
         <div style="text-align:center;font-weight:bold;padding:2px 0;letter-spacing:0.03em;">*** NO VALIDO COMO FACTURA ***</div>`}
         ${sep}
-        <div style="text-align:center;font-size:10px;line-height:1.6;">
+        <div style="text-align:center;font-size:11px;line-height:1.6;">
           <div>&#161;Gracias por su compra!</div>
           <div style="color:#888;">Powered by StockOS</div>
         </div>
@@ -306,9 +307,9 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
       <div style="text-align:center;margin-bottom:2px;">
         <div style="font-size:15px;font-weight:bold;letter-spacing:0.04em;">${biz?.name ?? ''}</div>
         ${biz?.cuit ? `<div>CUIT: ${biz.cuit}</div>` : ''}
-        ${biz?.address ? `<div style="font-size:10px;">${biz.address}</div>` : ''}
-        ${biz?.phone ? `<div style="font-size:10px;">Tel: ${biz.phone}</div>` : ''}
-        ${biz?.iva_condition ? `<div style="font-size:10px;">Cond. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div>` : ''}
+        ${biz?.address ? `<div style="font-size:11px;">${biz.address}</div>` : ''}
+        ${biz?.phone ? `<div style="font-size:11px;">Tel: ${biz.phone}</div>` : ''}
+        ${biz?.iva_condition ? `<div style="font-size:11px;">Cond. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div>` : ''}
       </div>
       ${sep}
       <div style="text-align:center;font-weight:bold;font-size:13px;">${typeLabel.toUpperCase()}</div>
@@ -316,11 +317,11 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
       <div style="text-align:center;">Fecha: ${inv.fecha}</div>
       ${sep}
       <div><strong>Receptor:</strong> ${inv.receptor_name ?? customer?.full_name ?? 'Consumidor Final'}</div>
-      ${inv.receptor_cuit ? `<div style="font-size:10px;">CUIT: ${inv.receptor_cuit}</div>` : ''}
-      ${inv.receptor_address ? `<div style="font-size:10px;">${inv.receptor_address}</div>` : ''}
-      <div style="font-size:10px;">Cond. IVA: ${IVA_LABELS[inv.receptor_iva_condition] ?? inv.receptor_iva_condition}</div>
+      ${inv.receptor_cuit ? `<div style="font-size:11px;">CUIT: ${inv.receptor_cuit}</div>` : ''}
+      ${inv.receptor_address ? `<div style="font-size:11px;">${inv.receptor_address}</div>` : ''}
+      <div style="font-size:11px;">Cond. IVA: ${IVA_LABELS[inv.receptor_iva_condition] ?? inv.receptor_iva_condition}</div>
       ${sep}
-      ${row('<span style="font-weight:bold;font-size:10px;">DESCRIPCIÓN</span>', '<span style="font-weight:bold;font-size:10px;">IMPORTE</span>')}
+      ${row('<span style="font-weight:bold;font-size:11px;">DESCRIPCIÓN</span>', '<span style="font-weight:bold;font-size:11px;">IMPORTE</span>')}
       <div style="margin-top:4px;">
         ${(inv.invoice_items ?? []).map(item => `
           <div style="margin-bottom:6px;">
@@ -328,7 +329,7 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
               `<span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity} ${item.description}</span>`,
               `<span style="flex-shrink:0;">${fmt(item.subtotal)}</span>`
             )}
-            <div style="font-size:10px;color:#555;">  c/u ${fmt(item.unit_price)}</div>
+            <div style="font-size:11px;color:#555;">  c/u ${fmt(item.unit_price)}</div>
           </div>
         `).join('')}
       </div>
@@ -343,13 +344,13 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
       ${sep}
       ${cae ? `
         <div style="text-align:center;font-weight:bold;font-size:11px;">COMPROBANTE AUTORIZADO</div>
-        <div style="text-align:center;font-size:10px;">CAE: ${cae}</div>
-        ${inv.afip_cae_vto ? `<div style="text-align:center;font-size:10px;">Vto. CAE: ${inv.afip_cae_vto}</div>` : ''}
+        <div style="text-align:center;font-size:11px;">CAE: ${cae}</div>
+        ${inv.afip_cae_vto ? `<div style="text-align:center;font-size:11px;">Vto. CAE: ${inv.afip_cae_vto}</div>` : ''}
         ${qrDataUrl ? `
           <div style="text-align:center;margin:6px 0;">
             <img src="${qrDataUrl}" style="width:100px;height:100px;" />
           </div>
-          <div style="text-align:center;font-size:9px;color:#555;">Verificar en afip.gob.ar/fe/qr</div>
+          <div style="text-align:center;font-size:10px;color:#555;">Verificar en afip.gob.ar/fe/qr</div>
           <div style="text-align:center;margin:6px 0;">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170 58" width="110" height="38">
               <text x="85" y="38" text-anchor="middle" font-family="Arial Black,Arial" font-size="44" font-weight="900" fill="#4A4A4A">ARCA</text>
@@ -362,7 +363,7 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
         <div style="text-align:center;font-weight:bold;padding:2px 0;letter-spacing:0.03em;">*** NO VÁLIDO COMO FACTURA ***</div>
       `}
       ${sep}
-      <div style="text-align:center;font-size:10px;line-height:1.6;">
+      <div style="text-align:center;font-size:11px;line-height:1.6;">
         <div>¡Gracias por su compra!</div>
         <div style="color:#888;">Powered by StockOS</div>
       </div>
@@ -373,10 +374,10 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
     win.document.write(`<!DOCTYPE html><html><head>
       <meta charset="utf-8"><title>${typeLabel} ${ptoVenta}-${numero}</title>
       <style>
-        @page { size: 80mm auto; margin: 2mm 0; }
+        @page { size: 80mm auto; margin: 3mm 2mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 80mm; background: #fff; }
-        body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; }
+        body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       </style>
     </head><body><div style="padding:12px 10px;">${html}</div></body></html>`)
     win.document.close()
@@ -460,6 +461,18 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
     win.document.close()
     win.focus()
     setTimeout(() => { win.print(); win.close() }, 400)
+  }
+
+  const handleAuthorize = async () => {
+    if (!invoice) return
+    setAuthorizing(true)
+    try {
+      const authorized = await api.post<InvoiceSummary>(`/api/invoices/${invoice.id}/authorize`, {})
+      toast.success(`CAE obtenido: ${authorized.afip_cae ?? authorized.cae}`)
+      setInvoice({ ...authorized, invoice_items: authorized.invoice_items ?? invoice.invoice_items })
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al autorizar en ARCA')
+    } finally { setAuthorizing(false) }
   }
 
   const handleConvert = async () => {
@@ -676,6 +689,12 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
                     <Receipt size={15} />
                     Facturar
                     <kbd className="ml-1 text-[10px] bg-[var(--surface3)] px-1.5 py-0.5 rounded font-sans">F</kbd>
+                  </Button>
+                )}
+                {invoice && invoice.invoice_type !== 'X' && (invoice.afip_status === 'pending' || invoice.afip_status === 'rejected') && (
+                  <Button variant="secondary" onClick={handleAuthorize} disabled={authorizing}>
+                    <Receipt size={15} />
+                    {authorizing ? 'Autorizando...' : 'Reintentar ARCA'}
                   </Button>
                 )}
                 <Button variant="secondary" onClick={onClose}>Cerrar</Button>

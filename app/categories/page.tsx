@@ -193,8 +193,9 @@ export default function CategoriesPage() {
   const renderCategory = (cat: CategoryWithChildren, depth = 0) => (
     <div key={cat.id}>
       <div
-        className="flex items-center justify-between hover:bg-[var(--surface2)] transition-colors group border-b border-[var(--border)] last:border-0"
+        className="flex items-center justify-between hover:bg-[var(--surface2)] transition-colors group border-b border-[var(--border)] last:border-0 cursor-pointer"
         style={{ paddingLeft: `${16 + depth * 20}px`, paddingRight: '16px', paddingTop: '10px', paddingBottom: '10px' }}
+        onClick={() => openEdit(cat)}
       >
         <div className="flex items-center gap-2 min-w-0">
           {depth > 0 && (
@@ -224,24 +225,24 @@ export default function CategoriesPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+        <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex-shrink-0">
           {/* Agregar subcategoría — disponible en todos los niveles */}
           <button
-            onClick={() => openCreate(cat.id)}
+            onClick={e => { e.stopPropagation(); openCreate(cat.id) }}
             title="Agregar subcategoría"
             className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
           >
             <Plus size={13} />
           </button>
           <button
-            onClick={() => openEdit(cat)}
+            onClick={e => { e.stopPropagation(); openEdit(cat) }}
             title="Editar"
             className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
           >
             <Pencil size={13} />
           </button>
           <button
-            onClick={() => { setDeleteCat(cat); setDeleteModal(true) }}
+            onClick={e => { e.stopPropagation(); setDeleteCat(cat); setDeleteModal(true) }}
             title="Eliminar"
             className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors"
           >
@@ -318,7 +319,8 @@ export default function CategoriesPage() {
                 return (
                   <div
                     key={cat.id}
-                    className={`flex items-center justify-between px-4 py-3 hover:bg-[var(--surface2)] transition-colors group ${!isLast ? 'border-b border-[var(--border)]' : ''}`}
+                    className={`flex items-center justify-between px-4 py-3 hover:bg-[var(--surface2)] transition-colors group cursor-pointer ${!isLast ? 'border-b border-[var(--border)]' : ''}`}
+                    onClick={() => openEdit(cat)}
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <Tag size={13} className="flex-shrink-0 text-[var(--accent)]" />
@@ -350,23 +352,23 @@ export default function CategoriesPage() {
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                    <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex-shrink-0">
                       <button
-                        onClick={() => openCreate(cat.id)}
+                        onClick={e => { e.stopPropagation(); openCreate(cat.id) }}
                         title="Agregar subcategoría"
                         className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
                       >
                         <Plus size={13} />
                       </button>
                       <button
-                        onClick={() => openEdit(cat)}
+                        onClick={e => { e.stopPropagation(); openEdit(cat) }}
                         title="Editar"
                         className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
                       >
                         <Pencil size={13} />
                       </button>
                       <button
-                        onClick={() => { setDeleteCat(cat); setDeleteModal(true) }}
+                        onClick={e => { e.stopPropagation(); setDeleteCat(cat); setDeleteModal(true) }}
                         title="Eliminar"
                         className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors"
                       >

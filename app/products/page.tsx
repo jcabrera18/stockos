@@ -9,12 +9,11 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { TableSkeleton } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useProductModal } from '@/contexts/ProductModalContext'
-import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
 import { api } from '@/lib/api'
 import { formatCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
 import type { StockSummary, Product, Category, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import {
-  Plus, Search, Package, Pencil, Trash2, SlidersHorizontal,
+  Plus, Search, Package, Pencil, Trash2,
   Tag, Filter, X, ChevronUp, ChevronDown, ArrowUpDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -76,9 +75,7 @@ export default function ProductsPage() {
   const [showFilters, setShowFilters] = useState(false)
 
   // Modales
-  const [adjustModal, setAdjustModal] = useState(false)
-  const [adjustProduct, setAdjustProduct] = useState<Product | null>(null)
-  const [deleteModal, setDeleteModal] = useState(false)
+const [deleteModal, setDeleteModal] = useState(false)
   const [deleteProduct, setDeleteProduct] = useState<StockSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -273,12 +270,7 @@ export default function ProductsPage() {
     }
   }
 
-  const handleAdjust = (item: StockSummary) => {
-    setAdjustProduct(item as unknown as Product)
-    setAdjustModal(true)
-  }
-
-  const handleDelete = async () => {
+const handleDelete = async () => {
     if (!deleteProduct) return
     setDeleting(true)
     try {
@@ -529,13 +521,6 @@ export default function ProductsPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                           <button
-                            onClick={e => { e.stopPropagation(); handleAdjust(product) }}
-                            title="Ajustar stock"
-                            className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
-                          >
-                            <SlidersHorizontal size={14} />
-                          </button>
-                          <button
                             onClick={e => { e.stopPropagation(); handleEdit(product) }}
                             title="Editar"
                             className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
@@ -573,14 +558,7 @@ export default function ProductsPage() {
         )}
       </div>
 
-      <AdjustStockModal
-        open={adjustModal}
-        onClose={() => { setAdjustModal(false); setAdjustProduct(null) }}
-        onSaved={fetchProducts}
-        product={adjustProduct}
-      />
-
-      <ConfirmDialog
+<ConfirmDialog
         open={deleteModal}
         onClose={() => { setDeleteModal(false); setDeleteProduct(null) }}
         onConfirm={handleDelete}

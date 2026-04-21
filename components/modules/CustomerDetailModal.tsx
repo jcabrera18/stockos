@@ -70,10 +70,10 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
   <meta charset="utf-8">
   <title>Recibo</title>
   <style>
-    @page { size: 80mm auto; margin: 2mm 0; }
+    @page { size: 80mm auto; margin: 3mm 2mm; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 80mm; background: #fff; }
-    body { font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   </style>
 </head>
 <body>${content.innerHTML}</body>
@@ -190,8 +190,10 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
           <div
             ref={printRef}
             style={{
-              fontFamily: "'Courier New', Courier, monospace",
-              fontSize: '11px',
+              fontFamily: 'Arial, Helvetica, sans-serif',
+              fontSize: '12px',
+              fontWeight: 500,
+              lineHeight: 1.4,
               color: '#000',
               background: '#fff',
               width: '302px',
@@ -207,10 +209,10 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
                 <div style={{ marginTop: '2px' }}>CUIT: {user.business.cuit}</div>
               )}
               {user?.business?.address && (
-                <div style={{ fontSize: '10px', marginTop: '1px' }}>{user.business.address}</div>
+                <div style={{ fontSize: '11px', marginTop: '1px' }}>{user.business.address}</div>
               )}
               {user?.business?.phone && (
-                <div style={{ fontSize: '10px' }}>Tel: {user.business.phone}</div>
+                <div style={{ fontSize: '11px' }}>Tel: {user.business.phone}</div>
               )}
             </div>
 
@@ -220,7 +222,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
             <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '13px', letterSpacing: '0.04em' }}>
               ESTADO DE CUENTA CORRIENTE
             </div>
-            <div style={{ textAlign: 'center', fontSize: '10px', marginTop: '2px' }}>
+            <div style={{ textAlign: 'center', fontSize: '11px', marginTop: '2px' }}>
               Fecha: {new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })} {new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}
             </div>
 
@@ -233,7 +235,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
                 <div>{customer.document_type ?? 'Doc'}: {customer.document}</div>
               )}
               {customer.phone && <div>Tel: {customer.phone}</div>}
-              {customer.address && <div style={{ fontSize: '10px' }}>{customer.address}</div>}
+              {customer.address && <div style={{ fontSize: '11px' }}>{customer.address}</div>}
             </div>
 
             <div style={sep} />
@@ -244,7 +246,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
               <span>{formatCurrency(customer.current_balance)}</span>
             </div>
             {customer.credit_limit > 0 && (
-              <div style={{ fontSize: '10px', marginTop: '4px', lineHeight: '1.5' }}>
+              <div style={{ fontSize: '11px', marginTop: '4px', lineHeight: '1.5' }}>
                 <div style={row}>
                   <span>Límite de crédito</span>
                   <span>{formatCurrency(customer.credit_limit)}</span>
@@ -259,11 +261,11 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
             <div style={sep} />
 
             {/* Movimientos */}
-            <div style={{ fontWeight: 'bold', fontSize: '10px', marginBottom: '4px' }}>
+            <div style={{ fontWeight: 'bold', fontSize: '11px', marginBottom: '4px' }}>
               ÚLTIMOS MOVIMIENTOS
             </div>
             {movements.slice(0, 10).map((mov) => (
-              <div key={mov.id} style={{ marginBottom: '5px', fontSize: '10px' }}>
+              <div key={mov.id} style={{ marginBottom: '5px', fontSize: '11px' }}>
                 <div style={row}>
                   <span style={{ flex: 1, paddingRight: '6px', wordBreak: 'break-word' }}>
                     {mov.type === 'sale' ? 'Venta' : mov.type === 'payment' ? 'Pago' : 'Ajuste'} — {mov.description}
@@ -278,7 +280,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
               </div>
             ))}
             {movements.length > 10 && (
-              <div style={{ textAlign: 'center', fontSize: '10px', color: '#888', marginTop: '2px' }}>
+              <div style={{ textAlign: 'center', fontSize: '11px', color: '#888', marginTop: '2px' }}>
                 ... {movements.length - 10} movimientos anteriores no mostrados
               </div>
             )}
@@ -286,7 +288,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
             <div style={sep} />
 
             {/* Footer */}
-            <div style={{ textAlign: 'center', fontSize: '10px', lineHeight: '1.6' }}>
+            <div style={{ textAlign: 'center', fontSize: '11px', lineHeight: '1.6' }}>
               <div>¡Gracias por su confianza!</div>
               <div style={{ color: '#888' }}>Powered by StockOS</div>
             </div>

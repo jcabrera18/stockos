@@ -106,22 +106,20 @@ export function computeLocalPrice(
     return { price: product.sell_price, list_name: 'Precio fijo', margin_pct: 0, rule_source: 'fixed' }
   }
 
-  const list = selectBestPriceList(quantity)
-
-  if (list) {
-    // ¿Hay una regla específica del producto para esta lista + cantidad?
-    const productRules = rulesMemory.get(product.id)
-    if (productRules) {
-      const rule = productRules.find(
-        r => r.price_list_id === list.id && r.min_quantity <= quantity,
-      )
-      if (rule) {
-        const price = Math.round(product.cost_price * (1 + rule.margin_pct / 100) * 100) / 100
-        return { price, list_name: rule.list_name, margin_pct: rule.margin_pct, rule_source: 'rule' }
-      }
+  // Primero: reglas específicas del producto (independiente de la lista global)
+  // Ordenadas DESC por min_quantity → el find retorna la más específica aplicable
+  const productRules = rulesMemory.get(product.id)
+  if (productRules) {
+    const rule = productRules.find(r => r.min_quantity <= quantity)
+    if (rule) {
+      const price = Math.round(product.cost_price * (1 + rule.margin_pct / 100) * 100) / 100
+      return { price, list_name: rule.list_name, margin_pct: rule.margin_pct, rule_source: 'rule' }
     }
+  }
 
-    // Sin regla específica → margen global de la lista
+  // Sin regla de producto → selección global por cantidad
+  const list = selectBestPriceList(quantity)
+  if (list) {
     const price = Math.round(product.cost_price * (1 + list.margin_pct / 100) * 100) / 100
     return { price, list_name: list.name, margin_pct: list.margin_pct, rule_source: 'list' }
   }
@@ -170,6 +168,16 @@ export async function searchProductsLocal(query: string, limit = 8): Promise<Pro
             (p.sku ?? '').toLowerCase().includes(q)),
       )
       .limit(limit)
+      .toArray()
+  } catch {
+    return []
+  }
+}
+
+export async function getVariablePriceProducts(): Promise<Product[]> {
+  try {
+    return posDB.products
+      .filter(p => p.is_active !== false && p.price_mode === 'custom')
       .toArray()
   } catch {
     return []

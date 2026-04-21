@@ -147,6 +147,11 @@ export default function POSPage() {
   const [shippingEnabled, setShippingEnabled] = useState(false)
   const [shippingAmount, setShippingAmount] = useState(0)
 
+  const [f3PickerOpen, setF3PickerOpen] = useState(false)
+  const [variableProducts, setVariableProducts] = useState<Product[]>([])
+  const [variableProductsLoading, setVariableProductsLoading] = useState(false)
+  const [f3ActiveIndex, setF3ActiveIndex] = useState(0)
+
   const [cajaWarning, setCajaWarning] = useState(false)
   const [invoiceModal, setInvoiceModal] = useState(false)
   const [mobileView, setMobileView] = useState<'search' | 'cart'>('search')
@@ -163,12 +168,21 @@ export default function POSPage() {
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
   const [pendingCount, setPendingCount] = useState(0)
 
+  const refreshVariableProducts = useCallback(async () => {
+    setVariableProductsLoading(true)
+    try {
+      const res = await api.get<{ data: Product[] }>('/api/products', { price_mode: 'custom', limit: 100 })
+      setVariableProducts(res.data)
+    } catch { } finally { setVariableProductsLoading(false) }
+  }, [])
+
   // Leer timestamp de última sync desde IndexedDB cuando el cache esté listo
   useEffect(() => {
     if (!cacheReady) return
     getLastSyncTime().then(t => setLastSyncedAt(t)).catch(() => {})
     getPendingSalesCount().then(setPendingCount).catch(() => {})
-  }, [cacheReady])
+    refreshVariableProducts().catch(() => {})
+  }, [cacheReady, refreshVariableProducts])
 
   // Sincronizar ventas offline cuando se recupera la conexión
   useEffect(() => {
@@ -327,6 +341,45 @@ export default function POSPage() {
       const inSearch = active === searchRef.current
       const inInput = active?.tagName === 'INPUT' || active?.tagName === 'SELECT' || active?.tagName === 'TEXTAREA'
 
+      // F3: picker de productos precio libre
+      if (e.key === 'F3') {
+        e.preventDefault()
+        setF3PickerOpen(v => {
+          if (!v) { refreshVariableProducts(); setF3ActiveIndex(0) }
+          return !v
+        })
+        return
+      }
+
+      // Navegación del picker F3
+      if (f3PickerOpen) {
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          setF3PickerOpen(false)
+          return
+        }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          setF3ActiveIndex(i => Math.min(i + 1, variableProducts.length - 1))
+          return
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          setF3ActiveIndex(i => Math.max(i - 1, 0))
+          return
+        }
+        if (e.key === 'Enter' && variableProducts.length > 0) {
+          e.preventDefault()
+          const picked = variableProducts[f3ActiveIndex]
+          if (picked) {
+            setF3PickerOpen(false)
+            addToCart(picked, pendingQtyRef.current)
+          }
+          return
+        }
+        return
+      }
+
       // F2: enter cart navigation from anywhere
       if (e.key === 'F2') {
         e.preventDefault()
@@ -445,6 +498,12 @@ export default function POSPage() {
           if (existingItem) {
             const qty    = pendingQtyRef.current
             const newQty = existingItem.quantity + qty
+            if (existingItem.product.price_mode !== 'custom' && newQty > (existingItem.product.stock_current ?? 0)) {
+              toast.error(`Stock máximo: ${existingItem.product.stock_current ?? 0}`)
+              setPendingQty(1); pendingQtyRef.current = 1
+              setQuery(''); setResults([])
+              return
+            }
             setCart(prev => prev.map(i => i.product.id === knownProductId ? { ...i, quantity: newQty } : i))
             setPendingQty(1); pendingQtyRef.current = 1
             setQuery(''); setResults([])
@@ -479,7 +538,9 @@ export default function POSPage() {
         // Buscar en cache local — sub-5ms si el catálogo está cargado
         const localResult = await resolveBarcode(trimmed, pendingQtyRef.current)
         if (localResult) {
-          if (localResult.product.price_mode !== 'custom' && (localResult.product.stock_current ?? 0) <= 0) {
+          const isCustomLocal = localResult.product.price_mode === 'custom'
+          const stockLocal = localResult.product.stock_current ?? 0
+          if (!isCustomLocal && stockLocal <= 0) {
             toast.error(`${localResult.product.name} sin stock`)
             setPendingQty(1); pendingQtyRef.current = 1
             setQuery(''); setResults([])
@@ -490,6 +551,12 @@ export default function POSPage() {
           const qty = pendingQtyRef.current
           if (existingLocal) {
             const newQty = existingLocal.quantity + qty
+            if (!isCustomLocal && newQty > stockLocal) {
+              toast.error(`Stock máximo: ${stockLocal}`)
+              setPendingQty(1); pendingQtyRef.current = 1
+              setQuery(''); setResults([])
+              return
+            }
             const promo = evaluatePromo(localResult.product as Parameters<typeof evaluatePromo>[0], newQty, localResult.pricing.price, promotionsRef.current)
             setCart(prev => prev.map(i =>
               i.product.id === localResult.product.id
@@ -717,7 +784,8 @@ export default function POSPage() {
   const handleSync = useCallback(async () => {
     await Promise.all([loadPromotions(), forceSync()])
     getLastSyncTime().then(t => setLastSyncedAt(t)).catch(() => {})
-  }, [loadPromotions, forceSync])
+    refreshVariableProducts().catch(() => {})
+  }, [loadPromotions, forceSync, refreshVariableProducts])
 
   const relativeTime = (date: Date): string => {
     const min = Math.floor((Date.now() - date.getTime()) / 60_000)
@@ -815,7 +883,7 @@ export default function POSPage() {
         return
       }
 
-      if ((ev.key === '+' || ev.key === 'n' || ev.key === 'N') && remaining > 0.01) {
+      if (ev.key === '+' || ev.key === 'n' || ev.key === 'N') {
         ev.preventDefault()
         addSplit()
       }
@@ -886,7 +954,7 @@ export default function POSPage() {
             }
           }
           sale = await api.post<CompletedSale>('/api/sales', payload)
-          await api.post(`/api/customers/${selectedCustomer.id}/charge`, { sale_id: sale.id, amount: ccSplit.amount })
+          await api.post(`/api/customers/${selectedCustomer.id}/charge`, { sale_id: sale.id, amount: ccSplit.amount, ticket_code: sale.ticket_code ?? null })
           toast.success(isSingleSplit ? 'Venta registrada y cargada a cuenta corriente' : 'Venta registrada')
         } catch (err) {
           if (!isNetworkError(err)) throw err
@@ -1125,7 +1193,9 @@ export default function POSPage() {
                         // Buscar en cache local antes de crear temp item
                         const localResultEnter = await resolveBarcode(trimmedQ, pendingQtyRef.current)
                         if (localResultEnter) {
-                          if (localResultEnter.product.price_mode !== 'custom' && (localResultEnter.product.stock_current ?? 0) <= 0) {
+                          const isCustomLocalEnter = localResultEnter.product.price_mode === 'custom'
+                          const stockLocalEnter = localResultEnter.product.stock_current ?? 0
+                          if (!isCustomLocalEnter && stockLocalEnter <= 0) {
                             toast.error(`${localResultEnter.product.name} sin stock`)
                             setPendingQty(1); pendingQtyRef.current = 1; setQuery('')
                             return
@@ -1135,6 +1205,11 @@ export default function POSPage() {
                           const qtyLocal = pendingQtyRef.current
                           if (existingLocalEnter) {
                             const newQtyLocal = existingLocalEnter.quantity + qtyLocal
+                            if (!isCustomLocalEnter && newQtyLocal > stockLocalEnter) {
+                              toast.error(`Stock máximo: ${stockLocalEnter}`)
+                              setPendingQty(1); pendingQtyRef.current = 1; setQuery('')
+                              return
+                            }
                             const promoLocal = evaluatePromo(localResultEnter.product as Parameters<typeof evaluatePromo>[0], newQtyLocal, localResultEnter.pricing.price, promotionsRef.current)
                             setCart(prev => prev.map(i =>
                               i.product.id === localResultEnter.product.id
@@ -1216,7 +1291,7 @@ export default function POSPage() {
               <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">Espacio</kbd> cantidad ·{' '}
               <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">↓</kbd> ir al carrito ·{' '}
               <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">F2</kbd> carrito ·{' '}
-              <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">F5</kbd> cobrar
+              <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">F3</kbd> precio libre
             </p>
           )}
         </div>
@@ -1228,7 +1303,7 @@ export default function POSPage() {
               {results.map((product, index) => (
                 <button key={product.id}
                   onClick={() => { addToCart(product, pendingQtyRef.current); setActiveResultIndex(-1) }}
-                  disabled={product.stock_current <= 0}
+                  disabled={product.price_mode !== 'custom' && product.stock_current <= 0}
                   className={`w-full flex items-center justify-between px-4 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group ${index === activeResultIndex ? 'ring-2 ring-[var(--accent)] border-[var(--accent)]' : 'border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]'}`}>
                   <div>
                     <p className="text-sm font-medium text-[var(--text)] group-hover:text-[var(--accent)]">{product.name}</p>
@@ -1642,12 +1717,13 @@ export default function POSPage() {
                 </div>
 
                 {/* Monto */}
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-[var(--text3)] flex-shrink-0">
-                    ${isActive && split.method === 'efectivo' && (
-                      <kbd className="ml-1 text-[9px] font-mono bg-[var(--surface3)] text-[var(--text3)] px-1 py-0.5 rounded align-middle">R→recibido</kbd>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-[var(--text3)]">Monto</span>
+                    {isActive && (
+                      <kbd className="text-[9px] font-mono bg-[var(--surface3)] border border-[var(--border)] px-1 py-0.5 rounded text-[var(--text3)]">M</kbd>
                     )}
-                  </span>
+                  </div>
                   <input
                     ref={el => { amountInputRefs.current[i] = el }}
                     type="number" min="0" step="0.01"
@@ -1655,7 +1731,7 @@ export default function POSPage() {
                     onFocus={() => setActiveSplitIndex(i)}
                     onChange={e => updateSplitAmount(i, e.target.value)}
                     onKeyDown={e => handleAmountKeyDown(e, i, split.method === 'efectivo')}
-                    className="flex-1 px-3 py-2.5 text-xl mono font-bold rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                    className="w-full px-3 py-2.5 text-xl mono font-bold rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
                   />
                 </div>
 
@@ -1692,8 +1768,11 @@ export default function POSPage() {
                       ))}
                     </div>
                     {/* Input recibido */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-[var(--text3)] flex-shrink-0 w-16">Recibido</span>
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-medium text-[var(--text3)]">Recibido</span>
+                        <kbd className="text-[9px] font-mono bg-[var(--surface3)] border border-[var(--border)] px-1 py-0.5 rounded text-[var(--text3)]">R</kbd>
+                      </div>
                       <input
                         ref={el => { receivedInputRefs.current[i] = el }}
                         type="number" min={split.amount} step="1"
@@ -1701,11 +1780,11 @@ export default function POSPage() {
                         onChange={e => updateSplitReceived(i, Number(e.target.value))}
                         onKeyDown={e => {
                           if (e.key === 'Enter' && canConfirm && !processing) { e.preventDefault(); handleConfirm() }
-                          if (e.key === 'Escape') { e.preventDefault(); amountInputRefs.current[i]?.focus() }
+                          if (e.key === 'Escape' || e.key === 'm' || e.key === 'M') { e.preventDefault(); amountInputRefs.current[i]?.focus() }
                         }}
                         placeholder={String(Math.ceil(split.amount))}
                         onClick={e => e.stopPropagation()}
-                        className={`flex-1 px-3 py-2 text-base mono rounded-[var(--radius-md)] bg-[var(--surface2)] border text-[var(--text)] focus:outline-none ${(split.received ?? 0) > 0 && (split.received ?? 0) < split.amount ? 'border-[var(--danger)] focus:border-[var(--danger)]' : 'border-[var(--border)] focus:border-[var(--accent)]'}`}
+                        className={`w-full px-3 py-2 text-base mono rounded-[var(--radius-md)] bg-[var(--surface2)] border text-[var(--text)] focus:outline-none ${(split.received ?? 0) > 0 && (split.received ?? 0) < split.amount ? 'border-[var(--danger)] focus:border-[var(--danger)]' : 'border-[var(--border)] focus:border-[var(--accent)]'}`}
                       />
                     </div>
                     {/* Vuelto — redondeado a favor del consumidor */}
@@ -1732,13 +1811,18 @@ export default function POSPage() {
           )}
 
           {/* Agregar medio de pago */}
-          {remaining > 0.01 && (
+          <div className="space-y-1.5">
+            {paymentSplits.length === 1 && (
+              <p className="text-xs text-[var(--text3)] text-center">
+                Para pago mixto: modificá el monto del primer medio y agregá otro.
+              </p>
+            )}
             <button onClick={addSplit}
               className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-[var(--border)] rounded-[var(--radius-md)] text-sm text-[var(--text3)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors">
-              <Plus size={14} /> Dividir en otro medio
+              <Plus size={14} /> Agregar otro medio de pago
               <kbd className="text-[10px] font-mono bg-[var(--surface2)] border border-[var(--border)] px-1.5 py-0.5 rounded">N</kbd>
             </button>
-          )}
+          </div>
 
           {/* Búsqueda de cliente para Cta. Cte. */}
           {paymentSplits.some(s => s.method === 'cuenta_corriente') && (
@@ -1928,6 +2012,60 @@ export default function POSPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Picker F3 — productos precio libre */}
+      {f3PickerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setF3PickerOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl overflow-hidden"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
+              <h3 className="text-sm font-semibold text-[var(--text)]">Precio libre</h3>
+              <div className="flex items-center gap-1.5 text-[10px] text-[var(--text3)] font-mono">
+                <kbd className="px-1.5 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded">↑↓</kbd>
+                <kbd className="px-1.5 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded">↵</kbd>
+                <kbd className="px-1.5 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded">Esc</kbd>
+              </div>
+            </div>
+            {variableProductsLoading ? (
+              <div className="flex justify-center py-8">
+                <div className="w-5 h-5 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
+              </div>
+            ) : variableProducts.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-[var(--text3)]">
+                No hay productos de precio libre.<br />
+                <span className="text-xs">Activá "Precio libre por venta" en el catálogo.</span>
+              </div>
+            ) : (
+              <div className="p-2 flex flex-col gap-1 max-h-72 overflow-y-auto">
+                {variableProducts.map((product, idx) => (
+                  <button
+                    key={product.id}
+                    onClick={() => {
+                      setF3PickerOpen(false)
+                      addToCart(product, pendingQtyRef.current)
+                    }}
+                    onMouseEnter={() => setF3ActiveIndex(idx)}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-[var(--radius-md)] text-left transition-colors ${
+                      idx === f3ActiveIndex
+                        ? 'bg-[var(--accent)] text-white'
+                        : 'hover:bg-[var(--accent-subtle)]'
+                    }`}
+                  >
+                    <span className={`text-sm font-medium ${idx === f3ActiveIndex ? 'text-white' : 'text-[var(--text)]'}`}>{product.name}</span>
+                    <span className={`text-xs ${idx === f3ActiveIndex ? 'text-white/70' : 'text-[var(--text3)]'}`}>precio libre</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <POSTicket
         open={step === 'ticket' && !!completedSale}

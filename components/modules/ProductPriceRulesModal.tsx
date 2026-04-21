@@ -237,7 +237,7 @@ export function ProductPriceRulesModal({ open, onClose, product }: ProductPriceR
           })()}
         </div>
 
-        <div className="flex justify-end">
+        <div className="flex justify-end pt-2 pb-1">
           <Button variant="secondary" onClick={onClose}>Cerrar</Button>
         </div>
 
