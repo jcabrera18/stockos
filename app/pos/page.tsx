@@ -79,6 +79,7 @@ interface CompletedSale {
   items: CartItem[]
   created_at: string
   invoice_id?: string
+  ticket_code?: string | null
 }
 
 const PAYMENT_METHODS = [
