@@ -207,10 +207,10 @@ export function POSTicket({
         ${(inv.invoice_items ?? []).map(item => `
           <div style="margin-bottom:6px;">
             ${row(
-              `<span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity} ${item.description}</span>`,
+              `<span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity}x ${item.description}</span>`,
               `<span style="flex-shrink:0;">${fmt(item.subtotal)}</span>`
             )}
-            <div style="font-size:11px;color:#555;">  c/u ${fmt(item.unit_price)}</div>
+            <div style="font-size:11px;color:#333;font-weight:600;">  c/u ${fmt(item.unit_price)}</div>
           </div>
         `).join('')}
       </div>
@@ -246,7 +246,7 @@ export function POSTicket({
       ${sep}
       <div style="text-align:center;font-size:11px;line-height:1.6;">
         <div>¡Gracias por su compra!</div>
-        <div style="color:#888;">Powered by StockOS</div>
+        <div style="color:#444;font-weight:700;">Powered by StockOS</div>
       </div>
     `
 
@@ -255,12 +255,12 @@ export function POSTicket({
     win.document.write(`<!DOCTYPE html><html><head>
       <meta charset="utf-8"><title>${typeLabel} ${ptoVenta}-${numero}</title>
       <style>
-        @page { size: 80mm auto; margin: 3mm 2mm; }
+        @page { size: 80mm auto; margin: 0mm 2mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 80mm; background: #fff; }
         body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       </style>
-    </head><body><div style="padding:12px 10px;">${html}</div></body></html>`)
+    </head><body><div style="padding:4px 10px 12px;">${html}</div></body></html>`)
     win.document.close()
     win.focus()
     setTimeout(() => { win.print(); win.close() }, 400)
@@ -460,7 +460,7 @@ export function POSTicket({
                 color: '#000',
                 background: '#fff',
                 width: '302px',
-                padding: '12px 10px',
+                padding: '4px 10px 12px',
                 boxShadow: '0 1px 6px rgba(0,0,0,0.15)',
               }}
             >
@@ -502,11 +502,11 @@ export function POSTicket({
                   <div key={i} style={{ marginBottom: '6px' }}>
                     <div style={row}>
                       <span style={{ flex: 1, paddingRight: '8px', wordBreak: 'break-word' }}>
-                        {item.quantity} {item.product.unit} {item.product.name}
+                        {item.quantity}x {item.product.name}
                       </span>
                       <span style={{ flexShrink: 0 }}>{formatCurrency(lineTotal)}</span>
                     </div>
-                    <div style={{ fontSize: '11px', color: '#555' }}>
+                    <div style={{ fontSize: '11px', color: '#333', fontWeight: 600 }}>
                       {'  '}c/u {formatCurrency(item.unit_price)}
                       {item.discount > 0 && <span> − dto {formatCurrency(item.discount)}</span>}
                     </div>
@@ -578,7 +578,7 @@ export function POSTicket({
               {/* Footer */}
               <div style={{ textAlign: 'center', fontSize: '11px', lineHeight: '1.6' }}>
                 <div>¡Gracias por su compra!</div>
-                <div style={{ color: '#888' }}>Powered by StockOS</div>
+                <div style={{ color: '#444', fontWeight: 700 }}>Powered by StockOS</div>
               </div>
             </div>
           </div>
