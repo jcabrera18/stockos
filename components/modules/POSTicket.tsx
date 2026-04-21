@@ -79,6 +79,8 @@ const IVA_LABELS: Record<string, string> = {
 
 const TYPE_LABELS: Record<string, string> = {
   X: 'Ticket X', A: 'Factura A', B: 'Factura B', C: 'Factura C', R: 'Remito',
+  NCA: 'NOTA DE CRÉDITO A', NCB: 'NOTA DE CRÉDITO B', NCC: 'NOTA DE CRÉDITO C',
+  NDA: 'NOTA DE DÉBITO A', NDB: 'NOTA DE DÉBITO B', NDC: 'NOTA DE DÉBITO C',
 }
 
 function buildAfipQrUrl(invoice: InvoiceInfo, cuit: string, ptoVta: number): string {
