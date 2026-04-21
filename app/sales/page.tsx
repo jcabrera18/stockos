@@ -14,7 +14,7 @@ import { Plus, ShoppingCart } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 
-type Period = 'today' | 'week' | 'month'
+type Period = 'today' | 'week' | 'month' | 'all'
 
 export default function SalesPage() {
   const [data, setData] = useState<Sale[]>([])
@@ -67,11 +67,14 @@ export default function SalesPage() {
   const fetchSales = useCallback(async () => {
     setLoading(true)
     try {
-      const { from, to } = getPeriodDates(periodRef.current)
       const params: Record<string, string | number | undefined> = {
-        from, to,
         page: pageRef.current,
         limit: 20,
+      }
+      if (periodRef.current !== 'all') {
+        const { from, to } = getPeriodDates(periodRef.current)
+        params.from = from
+        params.to = to
       }
       if (paymentRef.current) params.payment_method = paymentRef.current
       if (minAmountRef.current) params.min_amount = Number(minAmountRef.current)
@@ -122,6 +125,7 @@ export default function SalesPage() {
     { key: 'today', label: 'Hoy' },
     { key: 'week', label: 'Semana' },
     { key: 'month', label: 'Mes' },
+    { key: 'all', label: 'Todas' },
   ]
 
   const router = useRouter()

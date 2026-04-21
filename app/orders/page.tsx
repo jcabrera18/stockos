@@ -124,6 +124,7 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<OrderStatus | ''>('')
   const [search, setSearch] = useState('')
+  const [idSearch, setIdSearch] = useState('')
 
   // Detalle
   const [detailModal, setDetailModal] = useState(false)
@@ -814,6 +815,13 @@ export default function OrdersPage() {
               className="pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
+          <div className="relative">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
+            <input value={idSearch} onChange={e => setIdSearch(e.target.value)}
+              placeholder="N° remito..."
+              className="pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] w-32 font-mono"
+            />
+          </div>
         </div>
 
         {/* Tabla */}
@@ -828,6 +836,7 @@ export default function OrdersPage() {
             <table className="w-full text-sm min-w-[640px]">
               <thead>
                 <tr className="border-b border-[var(--border)]">
+                  <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">N° Remito</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Cliente</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Vendedor</th>
                   <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Depósito</th>
@@ -839,12 +848,15 @@ export default function OrdersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
-                {orders.map(order => {
+                {orders.filter(o => !idSearch || o.id.slice(0, 8).toUpperCase().includes(idSearch.toUpperCase())).map(order => {
                   const actions = getActions(order)
                   return (
                     <tr key={order.id}
                       onClick={() => openDetail(order.id)}
                       className="hover:bg-[var(--surface2)] transition-colors cursor-pointer group">
+                      <td className="px-4 py-3 hidden sm:table-cell">
+                        <span className="font-mono text-xs text-[var(--text2)] tracking-wider">{order.id.slice(0, 8).toUpperCase()}</span>
+                      </td>
                       <td className="px-4 py-3">
                         <p className="font-medium text-[var(--text)]">{order.customer_name}</p>
                         {order.customer_address && (
@@ -994,6 +1006,7 @@ export default function OrdersPage() {
               {detail.seller_name && <span>Vendedor: <strong>{detail.seller_name}</strong></span>}
               {detail.warehouse_name && <span>· Depósito: <strong>{detail.warehouse_name}</strong></span>}
               <span>· {formatDateTime(detail.created_at)}</span>
+              <span>· Remito: <strong className="mono">{detail.id.slice(0, 8).toUpperCase()}</strong></span>
               {detail.sale_id && (
                 <span>· Venta: <strong className="text-[var(--accent)]">#{detail.sale_id.slice(0, 8).toUpperCase()}</strong></span>
               )}
@@ -1096,7 +1109,7 @@ export default function OrdersPage() {
                   )}
                   {detailInvoice && (
                     <button
-                      onClick={() => router.push(`/invoices`)}
+                      onClick={() => router.push(`/invoices?open=${detailInvoice.id}`)}
                       className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors border border-[var(--border)]">
                       <FileText size={14} /> Comprobante {detailInvoice.invoice_type}-{String(detailInvoice.numero).padStart(5, '0')}
                     </button>
@@ -1703,6 +1716,7 @@ export default function OrdersPage() {
         open={!!saleDetailId}
         onClose={() => setSaleDetailId(null)}
         saleId={saleDetailId}
+        orderId={detail?.id}
       />
 
       {/* ── Confirmación cancelación ── */}

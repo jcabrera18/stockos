@@ -256,22 +256,39 @@ function InvoicesPageInner() {
   // Reset página al cambiar filtros
   useEffect(() => { setPage(1) }, [typeFilter, from, to, debouncedTicket])
 
+  const pendingOpenRef = useRef<string | null>(null)
+
   // Capturar param ?facturar al montar — solo una vez
   useEffect(() => {
     const facturarId = searchParams.get('facturar')
+    const openId = searchParams.get('open')
     if (facturarId) {
       pendingFacturarRef.current = facturarId
+      router.replace('/invoices')
+    }
+    if (openId) {
+      pendingOpenRef.current = openId
       router.replace('/invoices')
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Abrir modal cuando los datos están listos
   useEffect(() => {
-    if (!pendingFacturarRef.current || data.length === 0) return
-    const found = data.find(i => i.id === pendingFacturarRef.current)
-    if (found) {
-      pendingFacturarRef.current = null
-      if (found.invoice_type === 'X') openConvert(found)
+    if (data.length === 0) return
+    if (pendingFacturarRef.current) {
+      const found = data.find(i => i.id === pendingFacturarRef.current)
+      if (found) {
+        pendingFacturarRef.current = null
+        if (found.invoice_type === 'X') openConvert(found)
+      }
+    }
+    if (pendingOpenRef.current) {
+      const found = data.find(i => i.id === pendingOpenRef.current)
+      if (found) {
+        pendingOpenRef.current = null
+        setSelectedInvoice(found)
+        setDetailModal(true)
+      }
     }
   }, [data])
 

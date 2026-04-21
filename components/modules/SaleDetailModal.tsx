@@ -77,6 +77,7 @@ interface SaleDetailModalProps {
   open: boolean
   onClose: () => void
   saleId: string | null
+  orderId?: string
 }
 
 function buildAfipQrUrl(invoice: InvoiceSummary, cuit: string, ptoVta: number): string {
@@ -99,7 +100,7 @@ function buildAfipQrUrl(invoice: InvoiceSummary, cuit: string, ptoVta: number): 
   return `https://www.afip.gob.ar/fe/qr/?p=${btoa(JSON.stringify(payload))}`
 }
 
-export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps) {
+export function SaleDetailModal({ open, onClose, saleId, orderId }: SaleDetailModalProps) {
   const [sale, setSale] = useState<SaleDetail | null>(null)
   const [customer, setCustomer] = useState<CustomerInfo | null>(null)
   const [invoice, setInvoice] = useState<InvoiceSummary | null>(null)
@@ -537,6 +538,13 @@ export function SaleDetailModal({ open, onClose, saleId }: SaleDetailModalProps)
                   <span className="text-[var(--text3)]">N° Ticket:</span>
                   <span className="mono font-semibold">#{sale.id.slice(-8).toUpperCase()}</span>
                 </div>
+                {orderId && (
+                  <div className="flex items-center gap-1.5 text-xs text-[var(--text2)]">
+                    <Receipt size={11} className="text-[var(--text3)]" />
+                    <span className="text-[var(--text3)]">N° Remito:</span>
+                    <span className="mono font-semibold">{orderId.slice(0, 8).toUpperCase()}</span>
+                  </div>
+                )}
                 {sale.users && (
                   <div className="flex items-center gap-1.5 text-xs text-[var(--text2)]">
                     <User size={11} className="text-[var(--text3)]" />

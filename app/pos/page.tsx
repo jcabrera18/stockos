@@ -6,7 +6,7 @@ import { formatCurrency } from '@/lib/utils'
 import type { Product } from '@/types'
 import type { CustomerSummary } from '@/app/customers/page'
 import type { PriceList } from '@/app/price-lists/page'
-import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle, RefreshCw, Truck } from 'lucide-react'
+import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle, RefreshCw, Truck, Banknote, CreditCard, ArrowRightLeft, QrCode, BookOpen } from 'lucide-react'
 import { toast } from 'sonner'
 import { POSTicket } from '@/components/modules/POSTicket'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
@@ -83,12 +83,12 @@ interface CompletedSale {
 }
 
 const PAYMENT_METHODS = [
-  { value: 'efectivo', label: 'Efectivo', icon: '💵' },
-  { value: 'debito', label: 'Débito', icon: '💳' },
-  { value: 'credito', label: 'Crédito', icon: '💳' },
-  { value: 'transferencia', label: 'Transferencia', icon: '🏦' },
-  { value: 'qr', label: 'QR', icon: '📱' },
-  { value: 'cuenta_corriente', label: 'Cta. Cte.', icon: '📒' },
+  { value: 'efectivo', label: 'Efectivo', Icon: Banknote },
+  { value: 'debito', label: 'Débito', Icon: CreditCard },
+  { value: 'credito', label: 'Crédito', Icon: CreditCard },
+  { value: 'transferencia', label: 'Transferencia', Icon: ArrowRightLeft },
+  { value: 'qr', label: 'QR', Icon: QrCode },
+  { value: 'cuenta_corriente', label: 'Cta. Cte.', Icon: BookOpen },
 ]
 
 
@@ -144,6 +144,8 @@ export default function POSPage() {
 
   const [warehouses, setWarehouses] = useState<{ id: string; name: string; is_default: boolean }[]>([])
   const [selectedWarehouse, setSelectedWarehouse] = useState<{ id: string; name: string } | null>(null)
+  const selectedWarehouseRef = useRef<{ id: string; name: string } | null>(null)
+  useEffect(() => { selectedWarehouseRef.current = selectedWarehouse }, [selectedWarehouse])
 
   const [shippingEnabled, setShippingEnabled] = useState(false)
   const [shippingAmount, setShippingAmount] = useState(0)
@@ -639,22 +641,25 @@ export default function POSPage() {
         return
       }
 
-      const localResults = await searchProductsLocal(trimmed)
-      if (localResults.length > 0) {
-        setResults(localResults)
-        setActiveResultIndex(0)
-      } else {
-        setSearching(true)
-        try {
-          const res = await api.get<{ data: Product[] }>('/api/products', {
-            search: trimmed, limit: 8,
-            ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}),
-          })
-          setResults(res.data)
-          setActiveResultIndex(res.data.length > 0 ? 0 : -1)
-        } catch { setResults([]); setActiveResultIndex(-1) }
-        finally { setSearching(false) }
+      const currentWarehouse = selectedWarehouseRef.current
+      if (!currentWarehouse) {
+        const localResults = await searchProductsLocal(trimmed)
+        if (localResults.length > 0) {
+          setResults(localResults)
+          setActiveResultIndex(0)
+          return
+        }
       }
+      setSearching(true)
+      try {
+        const res = await api.get<{ data: Product[] }>('/api/products', {
+          search: trimmed, limit: 8,
+          ...(currentWarehouse?.id ? { warehouse_id: currentWarehouse.id } : {}),
+        })
+        setResults(res.data)
+        setActiveResultIndex(res.data.length > 0 ? 0 : -1)
+      } catch { setResults([]); setActiveResultIndex(-1) }
+      finally { setSearching(false) }
     }, isBarcode ? 0 : 300)
 
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
@@ -1264,18 +1269,21 @@ export default function POSPage() {
                           .catch(() => { pendingBarcodesRef.current.delete(trimmedQ); setCart(prev => prev.map(i => i.product.id === tempIdEnter ? { ...i, status: 'error' } : i)) })
                         return
                       }
-                      const localSearchResults = await searchProductsLocal(trimmedQ)
-                      if (localSearchResults.length > 0) {
-                        setResults(localSearchResults)
-                        if (localSearchResults.length === 1) addToCart(localSearchResults[0], pendingQtyRef.current)
-                      } else {
-                        setSearching(true)
-                        try {
-                          const res = await api.get<{ data: Product[] }>('/api/products', { search: trimmedQ, limit: 8, ...(selectedWarehouse?.id ? { warehouse_id: selectedWarehouse.id } : {}) })
-                          setResults(res.data)
-                          if (res.data.length === 1) addToCart(res.data[0], pendingQtyRef.current)
-                        } catch { setResults([]) } finally { setSearching(false) }
+                      const currentWarehouseEnter = selectedWarehouseRef.current
+                      if (!currentWarehouseEnter) {
+                        const localSearchResults = await searchProductsLocal(trimmedQ)
+                        if (localSearchResults.length > 0) {
+                          setResults(localSearchResults)
+                          if (localSearchResults.length === 1) addToCart(localSearchResults[0], pendingQtyRef.current)
+                          return
+                        }
                       }
+                      setSearching(true)
+                      try {
+                        const res = await api.get<{ data: Product[] }>('/api/products', { search: trimmedQ, limit: 8, ...(currentWarehouseEnter?.id ? { warehouse_id: currentWarehouseEnter.id } : {}) })
+                        setResults(res.data)
+                        if (res.data.length === 1) addToCart(res.data[0], pendingQtyRef.current)
+                      } catch { setResults([]) } finally { setSearching(false) }
                     }
                   }
                 }}
@@ -1711,7 +1719,7 @@ export default function POSPage() {
                           {KEY_HINT[m.value]}
                         </kbd>
                       )}
-                      <span className="text-sm flex-shrink-0">{m.icon}</span>
+                      <m.Icon size={14} className="flex-shrink-0" />
                       <span className="truncate">{m.label}</span>
                     </button>
                   ))}
