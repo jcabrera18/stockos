@@ -166,20 +166,48 @@ function InvoicesPageInner() {
   const [noteReason, setNoteReason] = useState('')
   const [noteAmount, setNoteAmount] = useState('')
   const [creatingNote, setCreatingNote] = useState(false)
+
+  interface NoteItem {
+    id: string
+    description: string
+    originalQty: number
+    quantity: number
+    unit_price: number
+    selected: boolean
+  }
+  const [noteItems, setNoteItems] = useState<NoteItem[]>([])
   const searchParams = useSearchParams()
 
   const handleCreateNote = async () => {
     if (!noteTarget) return
     if (!noteReason.trim()) { toast.error('El motivo es obligatorio'); return }
-    if (!noteAmount || Number(noteAmount) <= 0) { toast.error('El monto debe ser mayor a 0'); return }
+
+    const selectedNoteItems = noteType === 'NC' ? noteItems.filter(i => i.selected && i.quantity > 0) : []
+    const computedAmount = noteType === 'NC' && selectedNoteItems.length > 0
+      ? selectedNoteItems.reduce((s, i) => s + i.quantity * i.unit_price, 0)
+      : Number(noteAmount)
+
+    if (!computedAmount || computedAmount <= 0) { toast.error('El monto debe ser mayor a 0'); return }
+    if (noteType === 'NC' && noteItems.length > 0 && selectedNoteItems.length === 0) {
+      toast.error('Seleccioná al menos un ítem a devolver'); return
+    }
+
     setCreatingNote(true)
     try {
-      await api.post('/api/invoices/note', {
+      const payload: Record<string, unknown> = {
         original_invoice_id: noteTarget.id,
         note_type: noteType,
         reason: noteReason.trim(),
-        amount: Number(noteAmount),
-      })
+        amount: computedAmount,
+      }
+      if (selectedNoteItems.length > 0) {
+        payload.items = selectedNoteItems.map(i => ({
+          description: i.description,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+        }))
+      }
+      await api.post('/api/invoices/note', payload)
       toast.success(`Nota de ${noteType === 'NC' ? 'Crédito' : 'Débito'} creada`)
       setNoteModal(false)
       fetchInvoices()
@@ -958,6 +986,14 @@ function InvoicesPageInner() {
                     setNoteType('NC')
                     setNoteReason('')
                     setNoteAmount(String(selectedInvoice.total_amount))
+                    setNoteItems((selectedInvoice.invoice_items ?? []).map(item => ({
+                      id: item.id,
+                      description: item.description,
+                      originalQty: item.quantity,
+                      quantity: item.quantity,
+                      unit_price: item.unit_price,
+                      selected: true,
+                    })))
                     setDetailModal(false)
                     setNoteModal(true)
                   }}>
@@ -969,6 +1005,7 @@ function InvoicesPageInner() {
                     setNoteType('ND')
                     setNoteReason('')
                     setNoteAmount('')
+                    setNoteItems([])
                     setDetailModal(false)
                     setNoteModal(true)
                   }}>
@@ -1027,11 +1064,69 @@ function InvoicesPageInner() {
             onChange={e => setNoteReason(e.target.value)}
             placeholder="Ej: Devolución parcial de mercadería" />
 
-          <Input label="Monto *" type="number" min="0" step="0.01"
-            value={noteAmount}
-            onChange={e => setNoteAmount(e.target.value)}
-            placeholder="0.00"
-            hint={noteTarget?.invoice_type === 'A' ? 'Ingresá el monto total con IVA incluido' : ''} />
+          {/* Items a devolver — solo para NC */}
+          {noteType === 'NC' && noteItems.length > 0 && (
+            <div>
+              <p className="text-sm font-medium text-[var(--text2)] mb-2">Ítems a devolver</p>
+              <div className="border border-[var(--border)] rounded-[var(--radius-md)] overflow-hidden divide-y divide-[var(--border)]">
+                {noteItems.map((item, idx) => (
+                  <div key={item.id}
+                    className={`flex items-center gap-3 px-3 py-2.5 transition-colors ${item.selected ? 'bg-[var(--surface)]' : 'bg-[var(--surface2)] opacity-50'}`}>
+                    <input
+                      type="checkbox"
+                      checked={item.selected}
+                      onChange={e => {
+                        const updated = [...noteItems]
+                        updated[idx] = { ...updated[idx], selected: e.target.checked }
+                        setNoteItems(updated)
+                      }}
+                      className="shrink-0 accent-[var(--accent)] w-4 h-4 cursor-pointer"
+                    />
+                    <span className="flex-1 text-xs text-[var(--text)] leading-tight">{item.description}</span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <input
+                        type="number"
+                        min={1}
+                        max={item.originalQty}
+                        value={item.quantity}
+                        disabled={!item.selected}
+                        onChange={e => {
+                          const v = Math.min(item.originalQty, Math.max(1, Number(e.target.value) || 1))
+                          const updated = [...noteItems]
+                          updated[idx] = { ...updated[idx], quantity: v }
+                          setNoteItems(updated)
+                        }}
+                        className="w-14 text-center text-xs px-2 py-1 rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-40"
+                      />
+                      <span className="text-xs text-[var(--text3)] w-4 text-center">/</span>
+                      <span className="text-xs text-[var(--text3)] w-4">{item.originalQty}</span>
+                    </div>
+                    <span className="text-xs mono text-[var(--text2)] shrink-0 w-20 text-right">
+                      {formatCurrency(item.quantity * item.unit_price)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {(() => {
+                const total = noteItems.filter(i => i.selected).reduce((s, i) => s + i.quantity * i.unit_price, 0)
+                return total > 0 ? (
+                  <div className="flex justify-between items-center mt-2 px-1">
+                    <span className="text-xs text-[var(--text3)]">Total a acreditar</span>
+                    <span className="text-sm font-bold mono text-[var(--accent)]">{formatCurrency(total)}</span>
+                  </div>
+                ) : null
+              })()}
+            </div>
+          )}
+
+          {/* Monto manual — solo para ND o si no hay items */}
+          {(noteType === 'ND' || noteItems.length === 0) && (
+            <Input label="Monto *" type="number" min="0" step="0.01"
+              value={noteAmount}
+              onChange={e => setNoteAmount(e.target.value)}
+              placeholder="0.00"
+              hint={noteTarget?.invoice_type === 'A' ? 'Ingresá el monto total con IVA incluido' : ''} />
+          )}
 
           <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 border-t border-[var(--border)]">
             <div className="flex justify-end gap-2">

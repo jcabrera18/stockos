@@ -328,6 +328,92 @@ export default function OrdersPage() {
     setTimeout(() => win.print(), 300)
   }
 
+  const printRemito = (d: OrderDetail) => {
+    const win = window.open('', '_blank', 'width=750,height=700')
+    if (!win) return
+    const date = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const biz = authUser?.business
+    const rows = (d.order_items ?? []).map(i =>
+      `<tr>
+        <td>${i.products.name}${i.products.barcode ? `<br><span class="small">${i.products.barcode}</span>` : ''}</td>
+        <td class="center">${i.quantity}</td>
+        <td class="center">${i.products.unit}</td>
+      </tr>`
+    ).join('')
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito</title>
+    <style>
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:Arial,sans-serif;padding:32px;color:#111;font-size:13px}
+      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:16px;border-bottom:2px solid #111}
+      .biz-name{font-size:20px;font-weight:700}
+      .biz-info{font-size:11px;color:#444;margin-top:4px;line-height:1.6}
+      .remito-box{text-align:right}
+      .remito-title{font-size:22px;font-weight:700;text-transform:uppercase;letter-spacing:1px}
+      .remito-num{font-size:12px;color:#555;margin-top:4px}
+      .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+      .box{border:1px solid #ccc;border-radius:4px;padding:12px}
+      .box .label{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:700}
+      .box p{font-size:13px}
+      .box .sub{font-size:12px;color:#555;margin-top:3px}
+      table{width:100%;border-collapse:collapse;margin-bottom:24px}
+      th{background:#f0f0f0;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;color:#555;border:1px solid #ccc}
+      td{padding:9px 10px;border:1px solid #ddd;font-size:13px;vertical-align:top}
+      .center{text-align:center}
+      .small{font-size:11px;color:#888}
+      .footer{margin-top:48px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:32px}
+      .sign{border-top:1px solid #aaa;padding-top:8px;font-size:11px;color:#666;text-align:center}
+      .note{font-size:10px;color:#888;text-align:center;margin-top:40px}
+      @media print{body{padding:20px}}
+    </style></head><body>
+    <div class="header">
+      <div>
+        <div class="biz-name">${biz?.name ?? ''}</div>
+        <div class="biz-info">
+          ${biz?.cuit ? `CUIT: ${biz.cuit}<br>` : ''}
+          ${biz?.address ? `${biz.address}<br>` : ''}
+          ${biz?.phone ? `Tel: ${biz.phone}` : ''}
+        </div>
+      </div>
+      <div class="remito-box">
+        <div class="remito-title">Remito</div>
+        <div class="remito-num">N° ${d.id.slice(0, 8).toUpperCase()}<br>${date}</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="box">
+        <div class="label">Destinatario</div>
+        <p>${d.customer_name}</p>
+        ${d.customers?.document ? `<div class="sub">DNI/CUIT: ${d.customers.document}</div>` : ''}
+        ${d.customer_address ? `<div class="sub">${d.customer_address}</div>` : ''}
+        ${(d.customer_phone || d.customers?.phone) ? `<div class="sub">Tel: ${d.customer_phone || d.customers?.phone}</div>` : ''}
+      </div>
+      <div class="box">
+        <div class="label">Detalle</div>
+        ${d.warehouse_name ? `<div class="sub">Depósito: ${d.warehouse_name}</div>` : ''}
+        ${d.seller_name ? `<div class="sub">Vendedor: ${d.seller_name}</div>` : ''}
+        <div class="sub">Pedido: ${d.id.slice(0, 8).toUpperCase()}</div>
+      </div>
+    </div>
+
+    <table>
+      <thead><tr><th>Producto</th><th class="center">Cantidad</th><th class="center">Unidad</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+
+    ${d.notes ? `<p style="font-size:12px;color:#555;margin-bottom:20px"><em>Observaciones: ${d.notes}</em></p>` : ''}
+
+    <div class="footer">
+      <div class="sign">Firma y aclaración<br>Transportista</div>
+      <div class="sign">Firma y aclaración<br>Receptor</div>
+      <div class="sign">Sello y firma<br>Empresa</div>
+    </div>
+    <div class="note">Documento no válido como factura · ${biz?.name ?? ''}</div>
+    </body></html>`)
+    win.document.close()
+    setTimeout(() => win.print(), 300)
+  }
+
   const printOrder = (d: OrderDetail) => {
     const win = window.open('', '_blank', 'width=750,height=700')
     if (!win) return
@@ -995,6 +1081,11 @@ export default function OrdersPage() {
                     onClick={() => printOrder(detail)}
                     className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors border border-[var(--border)]">
                     <Printer size={14} /> Imprimir
+                  </button>
+                  <button
+                    onClick={() => printRemito(detail)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors border border-[var(--border)]">
+                    <FileText size={14} /> Remito
                   </button>
                   {detail.sale_id && (
                     <button
