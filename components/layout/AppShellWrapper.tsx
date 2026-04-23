@@ -7,6 +7,7 @@ import { ShoppingCart } from 'lucide-react'
 import { AuthProvider, useAuthContext } from '@/contexts/AuthContext'
 import { ProductModalProvider, useProductModal } from '@/contexts/ProductModalContext'
 import { ProductModal } from '@/components/modules/ProductModal'
+import { SubscriptionBanner } from './SubscriptionBanner'
 
 // Rutas que manejan su propio layout full-screen (no necesitan shell)
 const NO_SHELL = ['/login', '/register', '/pos', '/home']
@@ -89,6 +90,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
         <BottomNav />
         <POSBadge />
         <GlobalProductModal />
+        <SubscriptionBanner />
       </div>
     </ProductModalProvider>
   )

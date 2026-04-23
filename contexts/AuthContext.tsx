@@ -22,6 +22,14 @@ interface UserProfile {
     afip_punto_venta:       number | null
     afip_environment:       string
     stock_enabled:          boolean
+    subscription: {
+      plan:               string
+      billing_cycle:      string | null
+      status:             'trialing' | 'active' | 'grace' | 'past_due' | 'canceled'
+      trial_ends_at:      string | null
+      grace_ends_at:      string | null
+      current_period_end: string | null
+    }
   } | null
 }
 

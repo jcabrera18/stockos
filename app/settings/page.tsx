@@ -11,7 +11,7 @@ import { useTheme } from '@/hooks/useTheme'
 import { getRoleLabel } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
-import { Sun, Moon, Shield, Truck, Building2, Receipt } from 'lucide-react'
+import { Sun, Moon, Shield, Truck, Building2, Receipt, CreditCard, MessageCircle } from 'lucide-react'
 import { Toggle } from '@/components/ui/Toggle'
 
 // const ROLE_OPTIONS = [
@@ -324,6 +324,131 @@ export default function SettingsPage() {
                 </div>
               </div>
             </Card>
+
+            {/* Suscripción */}
+            {isOwnerAdmin && (() => {
+              const sub = user?.business?.subscription
+              if (!sub) return null
+
+              const PLAN_LABELS: Record<string, string> = {
+                trial:   'Prueba gratuita',
+                local:   'Local',
+                negocio: 'Negocio',
+                cadena:  'Cadena',
+              }
+              const CYCLE_LABELS: Record<string, string> = {
+                monthly: 'Mensual',
+                annual:  'Anual',
+              }
+              const STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+                trialing: { label: 'En prueba',  color: 'text-blue-400 bg-blue-400/10 border-blue-400/20' },
+                active:   { label: 'Activa',     color: 'text-[var(--accent)] bg-[var(--accent)]/10 border-[var(--accent)]/20' },
+                grace:    { label: 'Por vencer', color: 'text-amber-400 bg-amber-400/10 border-amber-400/20' },
+                past_due: { label: 'Pausada',    color: 'text-red-400 bg-red-400/10 border-red-400/20' },
+                canceled: { label: 'Cancelada',  color: 'text-[var(--text3)] bg-[var(--surface2)] border-[var(--border)]' },
+              }
+
+              const statusCfg = STATUS_CONFIG[sub.status] ?? STATUS_CONFIG.trialing
+
+              const formatDate = (d: string | null) =>
+                d ? new Date(d).toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' }) : null
+
+              const isGrandfathered = sub.current_period_end?.startsWith('2099')
+              const renewalDate = (sub.status === 'active' || sub.status === 'past_due')
+                ? (isGrandfathered ? null : formatDate(sub.current_period_end))
+                : null
+
+              const trialDate   = (sub.status === 'trialing') ? formatDate(sub.trial_ends_at) : null
+              const graceDate   = (sub.status === 'grace')    ? formatDate(sub.grace_ends_at)  : null
+
+              const daysLeft = (dateStr: string | null) => {
+                if (!dateStr) return null
+                const diff = Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000)
+                return diff > 0 ? diff : 0
+              }
+
+              return (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <CreditCard size={15} className="text-[var(--accent)]" />
+                      Suscripción
+                    </CardTitle>
+                  </CardHeader>
+                  <div className="space-y-3">
+
+                    {/* Plan + status */}
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-xs text-[var(--text3)] mb-0.5">Plan</p>
+                        <p className="text-sm font-semibold text-[var(--text)]">
+                          {PLAN_LABELS[sub.plan] ?? sub.plan}
+                          {sub.billing_cycle && (
+                            <span className="text-xs font-normal text-[var(--text3)] ml-1.5">
+                              · {CYCLE_LABELS[sub.billing_cycle]}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full border ${statusCfg.color}`}>
+                        {statusCfg.label}
+                      </span>
+                    </div>
+
+                    {/* Fechas según estado */}
+                    {sub.status === 'trialing' && daysLeft(sub.trial_ends_at) !== null && (
+                      <div>
+                        <p className="text-xs text-[var(--text3)] mb-0.5">Prueba gratuita</p>
+                        <p className="text-sm text-blue-400 font-medium">{daysLeft(sub.trial_ends_at)} días restantes</p>
+                      </div>
+                    )}
+
+                    {sub.status === 'grace' && daysLeft(sub.grace_ends_at) !== null && (
+                      <div>
+                        <p className="text-xs text-[var(--text3)] mb-0.5">Acceso extendido</p>
+                        <p className="text-sm text-amber-400 font-medium">{daysLeft(sub.grace_ends_at)} días restantes</p>
+                      </div>
+                    )}
+
+                    {(sub.status === 'active' || sub.status === 'past_due') && (
+                      <div>
+                        <p className="text-xs text-[var(--text3)] mb-0.5">Vencimiento</p>
+                        {renewalDate ? (
+                          <p className="text-sm text-[var(--text)]">
+                            {renewalDate}
+                            <span className="text-xs text-[var(--text3)] ml-2">
+                              ({daysLeft(sub.current_period_end)} días restantes)
+                            </span>
+                          </p>
+                        ) : (
+                          <p className="text-sm text-[var(--text)]">Sin vencimiento</p>
+                        )}
+                      </div>
+                    )}
+
+                    {sub.status === 'past_due' && (
+                      <p className="text-xs text-red-400/80 bg-red-400/8 border border-red-400/15 rounded-[var(--radius-md)] px-3 py-2">
+                        Tu sistema está pausado. Contactanos para reactivar tu cuenta.
+                      </p>
+                    )}
+
+                    {/* CTA */}
+                    {sub.status !== 'active' && (
+                      <a
+                        href="https://wa.me/5493438445203"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-2 w-full py-2.5 rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold transition-colors"
+                      >
+                        <MessageCircle size={14} />
+                        {sub.status === 'past_due' ? 'Reactivar cuenta' : 'Contratar plan'}
+                      </a>
+                    )}
+
+                  </div>
+                </Card>
+              )
+            })()}
 
             {/* Apariencia */}
             <Card>
