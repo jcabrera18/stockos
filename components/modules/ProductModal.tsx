@@ -63,6 +63,7 @@ const emptyForm = {
   brand_id: '',
   cost_price: '',
   sell_price: '',
+  initial_stock: '',
   use_fixed_sell_price: false,
   unit: 'unidad',
   price_mode: 'fixed' as 'fixed' | 'custom',
@@ -328,7 +329,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         cost_price: costPrice,
         sell_price: sellPrice,
         use_fixed_sell_price: form.use_fixed_sell_price,
-        stock_current: form.price_mode === 'custom' ? 999999 : 0,
+        initial_stock: Number(form.initial_stock) || 0,
         stock_min: 0,
         stock_max: form.price_mode === 'custom' ? 999999 : 9999,
         unit: form.unit,
@@ -398,7 +399,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         cost_price: costPrice,
         sell_price: sellPrice,
         use_fixed_sell_price: form.use_fixed_sell_price,
-        stock_current: form.price_mode === 'custom' ? 999999 : 0,
+        initial_stock: Number(form.initial_stock) || 0,
         stock_min: 0,
         stock_max: form.price_mode === 'custom' ? 999999 : 9999,
         unit: form.unit,
@@ -677,6 +678,19 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
             </div>
           )}
         </div>
+
+        {/* Stock inicial — solo al crear */}
+        {!isEdit && (
+          <Input
+            label="Stock inicial"
+            type="number"
+            min="0"
+            step="1"
+            value={form.initial_stock}
+            onChange={set('initial_stock')}
+            placeholder="0"
+          />
+        )}
 
         {/* Preview listas de precio — modo express */}
         {expressMode && !isEdit && !form.use_fixed_sell_price && form.cost_price && Number(form.cost_price) > 0 && priceLists.length > 0 && (

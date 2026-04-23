@@ -487,6 +487,7 @@ const handleDelete = async () => {
                         <SortIcon field="sell_price" sortBy={sortBy} sortDir={sortDir} />
                       </div>
                     </th>
+                    <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Stock</th>
                     <th className="px-4 py-3" />
                   </tr>
                 </thead>
@@ -517,6 +518,13 @@ const handleDelete = async () => {
                       </td>
                       <td className="px-4 py-3 text-right mono font-medium text-[var(--text)]">
                         {formatCurrency(product.use_fixed_sell_price ? product.sell_price : (product.default_list_price ?? product.sell_price))}
+                      </td>
+                      <td className="px-4 py-3 text-right hidden sm:table-cell">
+                        {(() => {
+                          const available = product.stock_available ?? (product.stock_current - (product.stock_reserved ?? 0))
+                          const color = available <= 0 ? 'text-[var(--danger,#ef4444)]' : available <= 5 ? 'text-[var(--warning,#f59e0b)]' : 'text-[var(--text)]'
+                          return <span className={`mono font-medium text-sm ${color}`}>{available}</span>
+                        })()}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
