@@ -270,6 +270,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         brand_id: (product as Product & { brand_id?: string }).brand_id ?? '',
         cost_price: String(product.cost_price),
         sell_price: product.use_fixed_sell_price ? String(product.sell_price) : '',
+        initial_stock: '',
         use_fixed_sell_price: product.use_fixed_sell_price ?? false,
         unit: product.unit,
         price_mode: product.price_mode ?? 'fixed',
