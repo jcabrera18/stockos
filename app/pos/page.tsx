@@ -166,6 +166,9 @@ export default function POSPage() {
 
   const { workstation, setWorkstation, loaded } = useWorkstation()
   const { user } = useAuth()
+  const stockEnabled    = user?.business?.stock_enabled ?? false
+  const stockEnabledRef = useRef(stockEnabled)
+  useEffect(() => { stockEnabledRef.current = user?.business?.stock_enabled ?? false }, [user?.business?.stock_enabled])
   const { cacheReady, syncing: cacheSyncing, forceSync } = usePOSSync(selectedWarehouse?.id)
 
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
@@ -501,7 +504,7 @@ export default function POSPage() {
           if (existingItem) {
             const qty    = pendingQtyRef.current
             const newQty = existingItem.quantity + qty
-            if (existingItem.product.price_mode !== 'custom' && newQty > (existingItem.product.stock_current ?? 0)) {
+            if (existingItem.product.price_mode !== 'custom' && stockEnabledRef.current && newQty > (existingItem.product.stock_current ?? 0)) {
               toast.error(`Stock máximo: ${existingItem.product.stock_current ?? 0}`)
               setPendingQty(1); pendingQtyRef.current = 1
               setQuery(''); setResults([])
@@ -543,7 +546,7 @@ export default function POSPage() {
         if (localResult) {
           const isCustomLocal = localResult.product.price_mode === 'custom'
           const stockLocal = localResult.product.stock_current ?? 0
-          if (!isCustomLocal && stockLocal <= 0) {
+          if (stockEnabledRef.current && !isCustomLocal && stockLocal <= 0) {
             toast.error(`${localResult.product.name} sin stock`)
             setPendingQty(1); pendingQtyRef.current = 1
             setQuery(''); setResults([])
@@ -554,7 +557,7 @@ export default function POSPage() {
           const qty = pendingQtyRef.current
           if (existingLocal) {
             const newQty = existingLocal.quantity + qty
-            if (!isCustomLocal && newQty > stockLocal) {
+            if (stockEnabledRef.current && !isCustomLocal && newQty > stockLocal) {
               toast.error(`Stock máximo: ${stockLocal}`)
               setPendingQty(1); pendingQtyRef.current = 1
               setQuery(''); setResults([])
@@ -609,7 +612,7 @@ export default function POSPage() {
           barcodeMapRef.current.set(trimmed, result.product.id)
           pendingBarcodesRef.current.delete(trimmed)
           cacheProductFromScan(result.product)
-          if (result.product.price_mode !== 'custom' && (result.product.stock_current ?? 0) <= 0) {
+          if (stockEnabledRef.current && result.product.price_mode !== 'custom' && (result.product.stock_current ?? 0) <= 0) {
             toast.error(`${result.product.name} sin stock`)
             setCart(prev => prev.filter(i => i.product.id !== tempId))
             return
@@ -690,7 +693,7 @@ export default function POSPage() {
     const isCustomPrice  = product.price_mode === 'custom'
     const stockAvailable = product.stock_current ?? 0
 
-    if (!isCustomPrice && stockAvailable <= 0) {
+    if (stockEnabledRef.current && !isCustomPrice && stockAvailable <= 0) {
       toast.error(`${product.name} sin stock`)
       isAddingRef.current = false
       return
@@ -699,7 +702,7 @@ export default function POSPage() {
     const existing = cartRef.current.find(i => i.product.id === product.id)
     const newQty   = existing ? existing.quantity + quantity : quantity
 
-    if (!isCustomPrice && newQty > stockAvailable) {
+    if (stockEnabledRef.current && !isCustomPrice && newQty > stockAvailable) {
       toast.error(`Stock máximo: ${stockAvailable}`)
       isAddingRef.current = false
       return
@@ -1201,7 +1204,7 @@ export default function POSPage() {
                         if (localResultEnter) {
                           const isCustomLocalEnter = localResultEnter.product.price_mode === 'custom'
                           const stockLocalEnter = localResultEnter.product.stock_current ?? 0
-                          if (!isCustomLocalEnter && stockLocalEnter <= 0) {
+                          if (stockEnabledRef.current && !isCustomLocalEnter && stockLocalEnter <= 0) {
                             toast.error(`${localResultEnter.product.name} sin stock`)
                             setPendingQty(1); pendingQtyRef.current = 1; setQuery('')
                             return
@@ -1211,7 +1214,7 @@ export default function POSPage() {
                           const qtyLocal = pendingQtyRef.current
                           if (existingLocalEnter) {
                             const newQtyLocal = existingLocalEnter.quantity + qtyLocal
-                            if (!isCustomLocalEnter && newQtyLocal > stockLocalEnter) {
+                            if (stockEnabledRef.current && !isCustomLocalEnter && newQtyLocal > stockLocalEnter) {
                               toast.error(`Stock máximo: ${stockLocalEnter}`)
                               setPendingQty(1); pendingQtyRef.current = 1; setQuery('')
                               return
@@ -1254,7 +1257,7 @@ export default function POSPage() {
                             barcodeMapRef.current.set(trimmedQ, result.product.id)
                             pendingBarcodesRef.current.delete(trimmedQ)
                             cacheProductFromScan(result.product)
-                            if (result.product.price_mode !== 'custom' && (result.product.stock_current ?? 0) <= 0) {
+                            if (stockEnabledRef.current && result.product.price_mode !== 'custom' && (result.product.stock_current ?? 0) <= 0) {
                               toast.error(`${result.product.name} sin stock`)
                               setCart(prev => prev.filter(i => i.product.id !== tempIdEnter))
                               return
@@ -1312,7 +1315,7 @@ export default function POSPage() {
               {results.map((product, index) => (
                 <button key={product.id}
                   onClick={() => { addToCart(product, pendingQtyRef.current); setActiveResultIndex(-1) }}
-                  disabled={product.price_mode !== 'custom' && product.stock_current <= 0}
+                  disabled={stockEnabled && product.price_mode !== 'custom' && product.stock_current <= 0}
                   className={`w-full flex items-center justify-between px-4 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group ${index === activeResultIndex ? 'ring-2 ring-[var(--accent)] border-[var(--accent)]' : 'border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]'}`}>
                   <div>
                     <p className="text-sm font-medium text-[var(--text)] group-hover:text-[var(--accent)]">{product.name}</p>

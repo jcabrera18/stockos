@@ -21,13 +21,15 @@ interface UserProfile {
     iva_condition:          string
     afip_punto_venta:       number | null
     afip_environment:       string
+    stock_enabled:          boolean
   } | null
 }
 
 interface AuthContextValue {
-  user:    UserProfile | null
-  loading: boolean
-  signOut: () => Promise<void>
+  user:          UserProfile | null
+  loading:       boolean
+  signOut:       () => Promise<void>
+  refreshUser:   () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -80,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signOut, refreshUser: loadProfile }}>
       {children}
     </AuthContext.Provider>
   )

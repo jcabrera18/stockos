@@ -12,6 +12,7 @@ import { getRoleLabel } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import { Sun, Moon, Shield, Truck, Building2, Receipt } from 'lucide-react'
+import { Toggle } from '@/components/ui/Toggle'
 
 // const ROLE_OPTIONS = [
 //   { value: 'cashier', label: 'Cajero' },
@@ -34,16 +35,17 @@ const ENV_OPTIONS = [
 // interface Branch { id: string; name: string }
 
 export default function SettingsPage() {
-  const { user, signOut } = useAuth()
+  const { user, signOut, refreshUser } = useAuth()
   const role = user?.role ?? ''
   const { theme, toggle } = useTheme()
 
   // Datos del negocio
-  const [bizName, setBizName]       = useState('')
-  const [bizCuit, setBizCuit]       = useState('')
-  const [bizAddress, setBizAddress] = useState('')
-  const [bizPhone, setBizPhone]     = useState('')
-  const [savingBiz, setSavingBiz]   = useState(false)
+  const [bizName, setBizName]           = useState('')
+  const [bizCuit, setBizCuit]           = useState('')
+  const [bizAddress, setBizAddress]     = useState('')
+  const [bizPhone, setBizPhone]         = useState('')
+  const [stockEnabled, setStockEnabled] = useState(false)
+  const [savingBiz, setSavingBiz]       = useState(false)
 
   // Ventas
   const [shippingDefault, setShippingDefault] = useState('')
@@ -69,6 +71,7 @@ export default function SettingsPage() {
     setBizCuit(user.business?.cuit ?? '')
     setBizAddress(user.business?.address ?? '')
     setBizPhone(user.business?.phone ?? '')
+    setStockEnabled(user.business?.stock_enabled ?? false)
     if (user.business?.shipping_price_default !== undefined) {
       setShippingDefault(String(user.business.shipping_price_default))
     }
@@ -89,12 +92,14 @@ export default function SettingsPage() {
     setSavingBiz(true)
     try {
       await api.patch('/api/auth/business-settings', {
-        name:    bizName || undefined,
-        cuit:    bizCuit || null,
-        address: bizAddress || null,
-        phone:   bizPhone || null,
+        name:          bizName || undefined,
+        cuit:          bizCuit || null,
+        address:       bizAddress || null,
+        phone:         bizPhone || null,
+        stock_enabled: stockEnabled,
       })
       toast.success('Datos del negocio actualizados')
+      await refreshUser()
     } catch {
       toast.error('Error al guardar')
     } finally {
@@ -109,6 +114,7 @@ export default function SettingsPage() {
         shipping_price_default: Number(shippingDefault) || 0,
       })
       toast.success('Precio de envío actualizado')
+      await refreshUser()
     } catch {
       toast.error('Error al guardar')
     } finally {
@@ -129,6 +135,7 @@ export default function SettingsPage() {
 
       await api.patch('/api/auth/business-settings', payload)
       toast.success('Configuración ARCA guardada')
+      await refreshUser()
       setAfipCert('')
       setAfipKey('')
     } catch {
@@ -195,6 +202,15 @@ export default function SettingsPage() {
                         placeholder="+54 11 1234-5678"
                       />
                     </div>
+                  </div>
+                  <div className="flex items-center justify-between py-1">
+                    <div>
+                      <p className="text-sm text-[var(--text)]">Manejo de stock</p>
+                      <p className="text-xs text-[var(--text3)] mt-0.5">
+                        Activá si querés controlar inventario y cantidades
+                      </p>
+                    </div>
+                    <Toggle checked={stockEnabled} onChange={setStockEnabled} disabled={savingBiz} />
                   </div>
                   <Button onClick={handleSaveBiz} disabled={savingBiz}>
                     {savingBiz ? 'Guardando...' : 'Guardar datos'}

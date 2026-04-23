@@ -115,6 +115,7 @@ const PAYMENT_METHODS = [
 export default function OrdersPage() {
   const router = useRouter()
   const { user: authUser } = useAuth()
+  const stockEnabled      = authUser?.business?.stock_enabled ?? false
   const sellerWarehouseId = authUser?.role === 'seller' ? (authUser.warehouse_id ?? null) : null
 
   // Lista
@@ -770,7 +771,7 @@ export default function OrdersPage() {
     setSelectedCustomerBalance(0); setSelectedCustomerCreditLimit(0)
   }
 
-  const cartStockIssues = cart.filter(i => i.quantity > (i.product.stock_current ?? 0))
+  const cartStockIssues = stockEnabled ? cart.filter(i => i.quantity > (i.product.stock_current ?? 0)) : []
 
   const handleCreateOrder = async () => {
     if (!selectedCustomerId) { toast.error('Seleccioná un cliente de la lista'); return }
@@ -1416,7 +1417,7 @@ export default function OrdersPage() {
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
                   {cart.map(item => {
-                    const hasStockIssue = item.quantity > (item.product.stock_current ?? 0)
+                    const hasStockIssue = stockEnabled && item.quantity > (item.product.stock_current ?? 0)
                     return (
                       <tr key={item.product.id} className={hasStockIssue ? 'bg-[var(--danger-subtle)]' : ''}>
                         <td className="px-3 py-2">
