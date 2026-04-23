@@ -1,5 +1,6 @@
 'use client'
 import { cn } from '@/lib/utils'
+import { forwardRef } from 'react'
 import type { InputHTMLAttributes } from 'react'
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
@@ -8,7 +9,8 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   hint?: string
 }
 
-export function Input({ label, error, hint, className, id, ...props }: InputProps) {
+export const Input = forwardRef<HTMLInputElement, InputProps>(
+function Input({ label, error, hint, className, id, ...props }, ref) {
   const inputId = id ?? label?.toLowerCase().replace(/\s+/g, '-')
 
   return (
@@ -22,6 +24,7 @@ export function Input({ label, error, hint, className, id, ...props }: InputProp
         </label>
       )}
       <input
+        ref={ref}
         id={inputId}
         className={cn(
           'w-full px-3 py-2 text-sm rounded-md',
@@ -38,4 +41,4 @@ export function Input({ label, error, hint, className, id, ...props }: InputProp
       {hint && !error && <span className="text-xs text-[var(--text3)]">{hint}</span>}
     </div>
   )
-}
+})

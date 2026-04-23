@@ -189,14 +189,14 @@ export function POSTicket({
 
     const html = `
       <div style="text-align:center;margin-bottom:4px;">
-        <div style="font-size:17px;font-weight:900;letter-spacing:0.05em;text-transform:uppercase;">${biz?.name ?? ''}</div>
+        <div style="font-size:16px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;">${biz?.name ?? ''}</div>
         ${biz?.cuit ? `<div style="font-weight:700;margin-top:3px;">CUIT: ${biz.cuit}</div>` : ''}
         ${biz?.address ? `<div style="font-weight:700;">${biz.address}</div>` : ''}
         ${biz?.phone ? `<div style="font-weight:700;">Tel: ${biz.phone}</div>` : ''}
         ${biz?.iva_condition ? `<div style="font-weight:700;">COND. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div>` : ''}
       </div>
       ${sep}
-      <div style="text-align:center;font-weight:900;font-size:15px;letter-spacing:0.05em;">${typeLabel.toUpperCase()}</div>
+      <div style="text-align:center;font-weight:700;font-size:14px;letter-spacing:0.04em;">${typeLabel.toUpperCase()}</div>
       <div style="text-align:center;font-weight:700;margin-top:2px;">N° ${ptoVenta}-${numero}</div>
       ${sep}
       <div style="font-weight:700;line-height:1.6;">
@@ -224,12 +224,12 @@ export function POSTicket({
         ${row('<span style="font-weight:700;">IVA 21%</span>', `<span style="font-weight:700;">${fmt(inv.iva_amount ?? 0)}</span>`)}
         <div style="border-top:1.5px solid #000;margin:5px 0;"></div>
       ` : ''}
-      <div style="display:flex;justify-content:space-between;font-weight:900;font-size:16px;margin-top:2px;">
+      <div style="display:flex;justify-content:space-between;font-weight:700;font-size:15px;margin-top:2px;">
         <span>TOTAL</span><span>${fmt(inv.total_amount ?? 0)}</span>
       </div>
       ${sep}
       ${cae ? `
-        <div style="text-align:center;font-weight:900;font-size:12px;letter-spacing:0.04em;">COMPROBANTE AUTORIZADO</div>
+        <div style="text-align:center;font-weight:700;font-size:12px;letter-spacing:0.03em;">COMPROBANTE AUTORIZADO</div>
         <div style="text-align:center;font-weight:700;margin-top:2px;">CAE: ${cae}</div>
         ${inv.afip_cae_vto ?? inv.cae_expiry ? `<div style="text-align:center;font-weight:700;">VTO. CAE: ${inv.afip_cae_vto ?? inv.cae_expiry}</div>` : ''}
         ${qrDataUrl ? `
@@ -246,12 +246,12 @@ export function POSTicket({
           </div>
         ` : ''}
       ` : `
-        <div style="text-align:center;font-weight:900;padding:2px 0;letter-spacing:0.05em;font-size:12px;">*** NO VALIDO COMO FACTURA ***</div>
+        <div style="text-align:center;font-weight:700;padding:2px 0;letter-spacing:0.03em;font-size:12px;">*** NO VALIDO COMO FACTURA ***</div>
       `}
       ${sep}
       <div style="text-align:center;font-weight:700;font-size:12px;line-height:1.7;">
         <div>GRACIAS POR SU COMPRA!</div>
-        <div style="font-weight:900;">Powered by StockOS</div>
+        <div style="font-weight:700;">Powered by StockOS</div>
       </div>
     `
 
@@ -263,7 +263,7 @@ export function POSTicket({
         @page { size: 80mm auto; margin: 0mm 2mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 80mm; background: #fff; }
-        body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; line-height: 1.5; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        body { font-family: 'Courier New', Courier, monospace; font-size: 13px; font-weight: 700; line-height: 1.5; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       </style>
     </head><body><div style="padding:8px 12px 16px;">${html}</div></body></html>`)
     win.document.close()
@@ -321,7 +321,7 @@ export function POSTicket({
     @page { size: 80mm auto; margin: 3mm 2mm; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 80mm; background: #fff; }
-    body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; line-height: 1.5; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: 'Courier New', Courier, monospace; font-size: 13px; font-weight: 700; line-height: 1.5; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   </style>
 </head>
 <body>${content.innerHTML}</body>
@@ -458,7 +458,7 @@ export function POSTicket({
             <div
               ref={printRef}
               style={{
-                fontFamily: 'Arial, Helvetica, sans-serif',
+                fontFamily: "'Courier New', Courier, monospace",
                 fontSize: '13px',
                 fontWeight: 700,
                 lineHeight: 1.5,
@@ -471,7 +471,7 @@ export function POSTicket({
             >
               {/* Encabezado del negocio */}
               <div style={{ textAlign: 'center', marginBottom: '4px' }}>
-                <div style={{ fontSize: '17px', fontWeight: 900, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                <div style={{ fontSize: '16px', fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
                   {business?.name}
                 </div>
                 {business?.cuit && <div style={{ marginTop: '3px', fontWeight: 700 }}>CUIT: {business.cuit}</div>}
@@ -500,7 +500,7 @@ export function POSTicket({
               <div style={sep} />
 
               {/* Encabezado columnas */}
-              <div style={{ ...row, fontWeight: 900, fontSize: '12px', marginBottom: '6px' }}>
+              <div style={{ ...row, fontWeight: 700, fontSize: '12px', marginBottom: '6px' }}>
                 <span>DESCRIPCION</span>
                 <span>IMPORTE</span>
               </div>
@@ -537,7 +537,7 @@ export function POSTicket({
                 {(sale.shipping_amount ?? 0) > 0 && (
                   <div style={row}><span>ENVIO</span><span>+{formatCurrency(sale.shipping_amount!)}</span></div>
                 )}
-                <div style={{ ...row, fontWeight: 900, fontSize: '16px', marginTop: '4px', borderTop: '1.5px solid #000', paddingTop: '5px' }}>
+                <div style={{ ...row, fontWeight: 700, fontSize: '15px', marginTop: '4px', borderTop: '1.5px solid #000', paddingTop: '5px' }}>
                   <span>TOTAL</span>
                   <span>{formatCurrency(sale.total)}</span>
                 </div>
@@ -564,7 +564,7 @@ export function POSTicket({
               {/* Estado de facturación */}
               {isInvoiced && invoice ? (
                 <div style={{ textAlign: 'center', fontSize: '12px', fontWeight: 700, lineHeight: '1.6' }}>
-                  <div style={{ fontWeight: 900, fontSize: '13px', letterSpacing: '0.03em' }}>
+                  <div style={{ fontWeight: 700, fontSize: '13px', letterSpacing: '0.03em' }}>
                     {invoiceTypeLabel(invoice.invoice_type)}
                   </div>
                   {invoice.numero !== undefined && (
@@ -578,7 +578,7 @@ export function POSTicket({
                   {invoice.receptor_cuit && <div>CUIT: {invoice.receptor_cuit}</div>}
                 </div>
               ) : (
-                <div style={{ textAlign: 'center', fontWeight: 900, padding: '2px 0', letterSpacing: '0.05em', fontSize: '12px' }}>
+                <div style={{ textAlign: 'center', fontWeight: 700, padding: '2px 0', letterSpacing: '0.03em', fontSize: '12px' }}>
                   *** NO VALIDO COMO FACTURA ***
                 </div>
               )}
@@ -588,7 +588,7 @@ export function POSTicket({
               {/* Footer */}
               <div style={{ textAlign: 'center', fontSize: '12px', fontWeight: 700, lineHeight: '1.7' }}>
                 <div>GRACIAS POR SU COMPRA!</div>
-                <div style={{ fontWeight: 900 }}>Powered by StockOS</div>
+                <div>Powered by StockOS</div>
               </div>
             </div>
           </div>

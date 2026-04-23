@@ -168,6 +168,9 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const [newBarcode, setNewBarcode] = useState('')
   const [selectedBarcodeIdx, setSelectedBarcodeIdx] = useState<number>(0)
   const newBarcodeRef = useRef<HTMLInputElement>(null)
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const costPriceRef = useRef<HTMLInputElement>(null)
+  const sellPriceRef = useRef<HTMLInputElement>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([])
@@ -188,13 +191,37 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const [costHistoryLoading, setCostHistoryLoading] = useState(false)
 
   const [minimized, setMinimized] = useState(false)
+  const [expressMode, setExpressMode] = useState(true)
   const isEdit = !!product
+
+  // Alt+F para toggle precio fijo (solo cuando el modal está abierto)
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.altKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        setForm(f => ({
+          ...f,
+          use_fixed_sell_price: !f.use_fixed_sell_price,
+          sell_price: f.use_fixed_sell_price ? '' : f.sell_price,
+        }))
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [open])
 
   // Restaurar al abrir / limpiar historial al cerrar
   useEffect(() => {
-    if (open) { setMinimized(false) }
-    else { setCostHistoryOpen(false); setCostHistory([]) }
-  }, [open])
+    if (open) {
+      setMinimized(false)
+      // Modo express solo para crear; edición siempre muestra todo
+      setExpressMode(!product)
+    } else {
+      setCostHistoryOpen(false)
+      setCostHistory([])
+    }
+  }, [open, product])
 
   const handleCostHistoryToggle = async () => {
     if (costHistoryOpen) { setCostHistoryOpen(false); return }
@@ -253,13 +280,70 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     setErrors({})
   }, [product, open])
 
-  const addBarcode = () => {
-    const val = newBarcode.trim()
+  const addBarcode = (overrideVal?: string) => {
+    const val = (overrideVal ?? newBarcode).trim()
     if (!val) return
     if (barcodes.includes(val)) { toast.error('Ese código ya está cargado'); return }
     setBarcodes(prev => [...prev, val])
     setNewBarcode('')
     newBarcodeRef.current?.focus()
+  }
+
+  const handleBarcodePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData('text').trim()
+    if (!pasted) return
+    e.preventDefault()
+    addBarcode(pasted)
+    // Saltar al nombre para que el usuario lo complete
+    setTimeout(() => nameInputRef.current?.focus(), 30)
+  }
+
+  const handleSaveAndNew = async () => {
+    const errs = validate()
+    if (Object.keys(errs).length > 0) { setErrors(errs); return }
+    setSaving(true)
+    try {
+      const costPrice = Number(form.cost_price) || 0
+      let sellPrice: number
+      if (form.use_fixed_sell_price && Number(form.sell_price) > 0) {
+        sellPrice = Number(form.sell_price)
+      } else {
+        const defaultList = priceLists.find(l => l.is_default) ?? priceLists[0]
+        sellPrice = defaultList
+          ? Math.round(costPrice * (1 + defaultList.margin_pct / 100) * 100) / 100
+          : costPrice
+      }
+      const payload = {
+        name: form.name.trim(),
+        barcodes,
+        sku: form.sku.trim() || null,
+        description: form.description.trim() || null,
+        category_id: form.category_id || null,
+        supplier_id: form.supplier_id || null,
+        brand_id: form.brand_id || null,
+        cost_price: costPrice,
+        sell_price: sellPrice,
+        use_fixed_sell_price: form.use_fixed_sell_price,
+        stock_current: form.price_mode === 'custom' ? 999999 : 0,
+        stock_min: 0,
+        stock_max: form.price_mode === 'custom' ? 999999 : 9999,
+        unit: form.unit,
+        price_mode: form.price_mode,
+      }
+      await api.post('/api/products', payload)
+      toast.success('Producto creado')
+      onSaved()
+      // Resetear para el siguiente
+      setForm(emptyForm)
+      setBarcodes([])
+      setNewBarcode('')
+      setErrors({})
+      setTimeout(() => newBarcodeRef.current?.focus(), 50)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al guardar')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const removeBarcode = (idx: number) => {
@@ -414,29 +498,28 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     >
       <div className="space-y-5">
 
-        {/* Fila 1: Nombre + Unidad */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="col-span-2">
-            <Input
-              label="Nombre *"
-              value={form.name}
-              onChange={set('name')}
-              placeholder="Ej: Coca Cola 500ml"
-              error={errors.name}
-            />
+        {/* Hint modo express */}
+        {!isEdit && (
+          <div className="flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)]">
+            <p className="text-xs text-[var(--text2)]">
+              {expressMode
+                ? 'Modo express — escaneá el código, completá el nombre y guardá.'
+                : 'Modo completo — todos los campos disponibles.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => setExpressMode(v => !v)}
+              className="text-xs text-[var(--accent)] hover:opacity-80 transition-opacity flex-shrink-0 ml-3"
+            >
+              {expressMode ? 'Ver más campos' : 'Modo express'}
+            </button>
           </div>
-          <Select
-            label="Unidad"
-            options={UNITS}
-            value={form.unit}
-            onChange={set('unit')}
-          />
-        </div>
+        )}
 
-        {/* Fila 2: Códigos de barras + SKU */}
-        <div className="grid grid-cols-2 gap-3">
+        {/* ── Bloque de código de barras ── */}
+        <div className={expressMode && !isEdit ? '' : 'grid grid-cols-2 gap-3'}>
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-[var(--text2)]">Códigos de barras (EAN)</label>
+            <label className="text-sm font-medium text-[var(--text2)]">Código de barras (EAN)</label>
             {barcodes.length > 0 && (
               <div className="flex gap-1 mb-1">
                 <select
@@ -462,111 +545,180 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
               <input
                 ref={newBarcodeRef}
                 type="text"
+                autoFocus={!isEdit}
                 value={newBarcode}
                 onChange={e => setNewBarcode(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addBarcode() } }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    addBarcode()
+                    if (expressMode && !isEdit) setTimeout(() => nameInputRef.current?.focus(), 30)
+                  }
+                }}
+                onPaste={handleBarcodePaste}
                 placeholder="7790895000152"
                 className="flex-1 min-w-0 px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] transition-colors mono"
               />
               <button
                 type="button"
-                onClick={addBarcode}
+                onClick={() => addBarcode()}
                 className="flex-shrink-0 px-2 py-2 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors"
                 title="Agregar código"
               >
                 <Plus size={14} />
               </button>
             </div>
-            <p className="text-xs text-[var(--text3)]">Presioná Enter o + para agregar cada código</p>
+            <p className="text-xs text-[var(--text3)]">Escaneá o pegá el código</p>
           </div>
-          <Input
-            label="SKU interno"
-            value={form.sku}
-            onChange={set('sku')}
-            placeholder="COC-500"
-          />
+          {(!expressMode || isEdit) && (
+            <Input
+              label="SKU interno"
+              value={form.sku}
+              onChange={set('sku')}
+              placeholder="COC-500"
+            />
+          )}
         </div>
 
-        {/* Fila 3: Categoría — árbol navegable */}
-        {(() => {
-          return (
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-[var(--text2)]">Categoría</label>
-                <button
-                  type="button"
-                  onClick={() => { setNewCatName(''); setNewCatParent(form.category_id); setCategorySubModal(true) }}
-                  title="Crear categoría"
-                  className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
-                >
-                  <Plus size={12} /> Nueva
-                </button>
-              </div>
-              <CategoryTreePicker
-                categoryMap={categoryMap}
-                childrenMap={childrenMap}
-                value={form.category_id}
-                onChange={id => { setForm(f => ({ ...f, category_id: id })); setErrors(er => ({ ...er, category_id: '' })) }}
-                selectClass={selectClass}
-              />
-            </div>
-          )
-        })()}
+        {/* ── Nombre + Unidad ── */}
+        <div className={expressMode && !isEdit ? '' : 'grid grid-cols-3 gap-3'}>
+          <div className={expressMode && !isEdit ? '' : 'col-span-2'}>
+            <Input
+              ref={nameInputRef}
+              label="Nombre *"
+              value={form.name}
+              onChange={set('name')}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && expressMode && !isEdit) {
+                  e.preventDefault()
+                  costPriceRef.current?.focus()
+                }
+              }}
+              placeholder="Ej: Coca Cola 500ml"
+              error={errors.name}
+              autoFocus={isEdit}
+            />
+          </div>
+          {(!expressMode || isEdit) && (
+            <Select
+              label="Unidad"
+              options={UNITS}
+              value={form.unit}
+              onChange={set('unit')}
+            />
+          )}
+        </div>
 
-        {/* Fila 4: Precio + Proveedor + Marca */}
-        <div className="grid grid-cols-3 gap-3">
+        {/* Fila 3: Precios — siempre visible */}
+        <div className={expressMode && !isEdit ? 'grid grid-cols-1 gap-3' : 'grid grid-cols-3 gap-3'}>
           <Input
+            ref={costPriceRef}
             label="Precio de costo"
             type="number"
             min="0"
             step="0.01"
             value={form.cost_price}
             onChange={set('cost_price')}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && expressMode && !isEdit) {
+                e.preventDefault()
+                if (form.use_fixed_sell_price) sellPriceRef.current?.focus()
+                else handleSave()
+              }
+            }}
             placeholder="0.00"
             error={errors.cost_price}
           />
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-[var(--text2)]">Proveedor</label>
-              <button
-                type="button"
-                onClick={() => setSupplierSubModal(true)}
-                title="Crear proveedor"
-                className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
-              >
-                <Plus size={12} /> Nuevo
-              </button>
+          {(!expressMode || isEdit) && (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-[var(--text2)]">Proveedor</label>
+                <button
+                  type="button"
+                  onClick={() => setSupplierSubModal(true)}
+                  title="Crear proveedor"
+                  className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+                >
+                  <Plus size={12} /> Nuevo
+                </button>
+              </div>
+              <Select
+                options={supplierOptions}
+                value={form.supplier_id}
+                onChange={set('supplier_id')}
+                placeholder="Sin proveedor"
+              />
             </div>
-            <Select
-              options={supplierOptions}
-              value={form.supplier_id}
-              onChange={set('supplier_id')}
-              placeholder="Sin proveedor"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-[var(--text2)]">Marca</label>
-              <button
-                type="button"
-                onClick={() => { setNewBrandName(''); setBrandSubModal(true) }}
-                title="Crear marca"
-                className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
-              >
-                <Plus size={12} /> Nueva
-              </button>
+          )}
+          {(!expressMode || isEdit) && (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-[var(--text2)]">Marca</label>
+                <button
+                  type="button"
+                  onClick={() => { setNewBrandName(''); setBrandSubModal(true) }}
+                  title="Crear marca"
+                  className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+                >
+                  <Plus size={12} /> Nueva
+                </button>
+              </div>
+              <Select
+                options={brandOptions}
+                value={form.brand_id}
+                onChange={set('brand_id')}
+                placeholder="Sin marca"
+              />
             </div>
-            <Select
-              options={brandOptions}
-              value={form.brand_id}
-              onChange={set('brand_id')}
-              placeholder="Sin marca"
-            />
-          </div>
+          )}
         </div>
 
-        {/* Precio de venta fijo */}
-        {form.price_mode === 'fixed' && (
+        {/* Precio de venta fijo — modo express: sección propia bien alineada */}
+        {expressMode && !isEdit && form.price_mode === 'fixed' && (
+          <div className="space-y-3">
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <div className="relative flex-shrink-0">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={form.use_fixed_sell_price}
+                  onChange={e => setForm(f => ({ ...f, use_fixed_sell_price: e.target.checked, sell_price: e.target.checked ? f.sell_price : '' }))}
+                />
+                <div className="w-9 h-5 rounded-full bg-[var(--border)] peer-checked:bg-[var(--accent)] transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4" />
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium text-[var(--text)]">Precio de venta fijo</p>
+                  <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text3)]">Alt+F</kbd>
+                </div>
+                <p className="text-xs text-[var(--text3)]">Ideal cuando no usás márgenes.</p>
+              </div>
+            </label>
+            {form.use_fixed_sell_price && (
+              <Input
+                ref={sellPriceRef}
+                label="Precio de venta"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.sell_price}
+                onChange={set('sell_price')}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && expressMode && !isEdit) {
+                    e.preventDefault()
+                    handleSave()
+                  }
+                }}
+                placeholder="0.00"
+                error={errors.sell_price}
+                autoFocus
+              />
+            )}
+          </div>
+        )}
+
+        {/* Precio de venta fijo — modo completo */}
+        {(!expressMode || isEdit) && form.price_mode === 'fixed' && (
           <div className="space-y-2">
             <label className="flex items-center gap-3 cursor-pointer select-none">
               <div className="relative flex-shrink-0">
@@ -622,34 +774,61 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
           </div>
         )}
 
-        {/* Precio libre toggle */}
-        <label className="flex items-center gap-3 cursor-pointer select-none">
-          <div className="relative flex-shrink-0">
-            <input
-              type="checkbox"
-              className="sr-only peer"
-              checked={form.price_mode === 'custom'}
-              onChange={e => setForm(f => ({ ...f, price_mode: e.target.checked ? 'custom' : 'fixed', use_fixed_sell_price: e.target.checked ? false : f.use_fixed_sell_price }))}
-            />
-            <div className="w-9 h-5 rounded-full bg-[var(--border)] peer-checked:bg-[var(--accent)] transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4" />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-[var(--text)]">Precio libre por venta</p>
-            <p className="text-xs text-[var(--text3)]">El cajero ingresa el precio en cada venta (ej: verdura, carne por peso)</p>
-          </div>
-        </label>
+        {/* Campos opcionales — solo en modo completo */}
+        {(!expressMode || isEdit) && (
+          <>
+            {/* Categoría — árbol navegable */}
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-[var(--text2)]">Categoría</label>
+                <button
+                  type="button"
+                  onClick={() => { setNewCatName(''); setNewCatParent(form.category_id); setCategorySubModal(true) }}
+                  title="Crear categoría"
+                  className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+                >
+                  <Plus size={12} /> Nueva
+                </button>
+              </div>
+              <CategoryTreePicker
+                categoryMap={categoryMap}
+                childrenMap={childrenMap}
+                value={form.category_id}
+                onChange={id => { setForm(f => ({ ...f, category_id: id })); setErrors(er => ({ ...er, category_id: '' })) }}
+                selectClass={selectClass}
+              />
+            </div>
 
-        {/* Descripción */}
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-[var(--text2)]">Descripción</label>
-          <textarea
-            value={form.description}
-            onChange={set('description')}
-            placeholder="Descripción opcional del producto..."
-            rows={2}
-            className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] transition-colors resize-none"
-          />
-        </div>
+            {/* Precio libre toggle */}
+            <label className="flex items-center gap-3 cursor-pointer select-none">
+              <div className="relative flex-shrink-0">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={form.price_mode === 'custom'}
+                  onChange={e => setForm(f => ({ ...f, price_mode: e.target.checked ? 'custom' : 'fixed', use_fixed_sell_price: e.target.checked ? false : f.use_fixed_sell_price }))}
+                />
+                <div className="w-9 h-5 rounded-full bg-[var(--border)] peer-checked:bg-[var(--accent)] transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-[var(--text)]">Precio libre por venta</p>
+                <p className="text-xs text-[var(--text3)]">El cajero ingresa el precio en cada venta (ej: verdura, carne por peso)</p>
+              </div>
+            </label>
+
+            {/* Descripción */}
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-[var(--text2)]">Descripción</label>
+              <textarea
+                value={form.description}
+                onChange={set('description')}
+                placeholder="Descripción opcional del producto..."
+                rows={2}
+                className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] transition-colors resize-none"
+              />
+            </div>
+          </>
+        )}
 
         {/* Historial de costos — solo en edición */}
         {isEdit && (
@@ -710,6 +889,11 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
+            {expressMode && !isEdit && (
+              <Button variant="secondary" onClick={handleSaveAndNew} loading={saving}>
+                Guardar y agregar otro
+              </Button>
+            )}
             <Button onClick={handleSave} loading={saving}>
               {isEdit ? 'Guardar cambios' : 'Crear producto'}
             </Button>
