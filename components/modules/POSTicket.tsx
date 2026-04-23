@@ -183,72 +183,75 @@ export function POSTicket({
       } catch { }
     }
 
-    const sep = `<div style="border-top:1px dashed #999;margin:8px 0;"></div>`
+    const sep = `<div style="border-top:1.5px solid #000;margin:9px 0;"></div>`
     const row = (left: string, right: string) =>
       `<div style="display:flex;justify-content:space-between;">${left}${right}</div>`
 
     const html = `
-      <div style="text-align:center;margin-bottom:2px;">
-        <div style="font-size:15px;font-weight:bold;letter-spacing:0.04em;">${biz?.name ?? ''}</div>
-        ${biz?.cuit ? `<div>CUIT: ${biz.cuit}</div>` : ''}
-        ${biz?.address ? `<div style="font-size:11px;">${biz.address}</div>` : ''}
-        ${biz?.phone ? `<div style="font-size:11px;">Tel: ${biz.phone}</div>` : ''}
-        ${biz?.iva_condition ? `<div style="font-size:11px;">Cond. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div>` : ''}
+      <div style="text-align:center;margin-bottom:4px;">
+        <div style="font-size:17px;font-weight:900;letter-spacing:0.05em;text-transform:uppercase;">${biz?.name ?? ''}</div>
+        ${biz?.cuit ? `<div style="font-weight:700;margin-top:3px;">CUIT: ${biz.cuit}</div>` : ''}
+        ${biz?.address ? `<div style="font-weight:700;">${biz.address}</div>` : ''}
+        ${biz?.phone ? `<div style="font-weight:700;">Tel: ${biz.phone}</div>` : ''}
+        ${biz?.iva_condition ? `<div style="font-weight:700;">COND. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div>` : ''}
       </div>
       ${sep}
-      <div style="text-align:center;font-weight:bold;font-size:13px;">${typeLabel.toUpperCase()}</div>
-      <div style="text-align:center;">N° ${ptoVenta}-${numero}</div>
+      <div style="text-align:center;font-weight:900;font-size:15px;letter-spacing:0.05em;">${typeLabel.toUpperCase()}</div>
+      <div style="text-align:center;font-weight:700;margin-top:2px;">N° ${ptoVenta}-${numero}</div>
       ${sep}
-      <div><strong>Receptor:</strong> ${inv.receptor_name ?? customerName ?? 'Consumidor Final'}</div>
-      ${inv.receptor_cuit ? `<div style="font-size:11px;">CUIT: ${inv.receptor_cuit}</div>` : ''}
-      ${inv.receptor_address ? `<div style="font-size:11px;">${inv.receptor_address}</div>` : ''}
-      <div style="font-size:11px;">Cond. IVA: ${IVA_LABELS[inv.receptor_iva_condition ?? 'CF'] ?? inv.receptor_iva_condition}</div>
+      <div style="font-weight:700;line-height:1.6;">
+        <div>RECEPTOR: ${inv.receptor_name ?? customerName ?? 'Consumidor Final'}</div>
+        ${inv.receptor_cuit ? `<div>CUIT: ${inv.receptor_cuit}</div>` : ''}
+        ${inv.receptor_address ? `<div>${inv.receptor_address}</div>` : ''}
+        <div>COND. IVA: ${IVA_LABELS[inv.receptor_iva_condition ?? 'CF'] ?? inv.receptor_iva_condition}</div>
+      </div>
       ${sep}
-      ${row('<span style="font-weight:bold;font-size:11px;">DESCRIPCIÓN</span>', '<span style="font-weight:bold;font-size:11px;">IMPORTE</span>')}
-      <div style="margin-top:4px;">
+      ${row('<span style="font-weight:900;font-size:12px;">DESCRIPCION</span>', '<span style="font-weight:900;font-size:12px;">IMPORTE</span>')}
+      <div style="margin-top:6px;">
         ${(inv.invoice_items ?? []).map(item => `
-          <div style="margin-bottom:6px;">
+          <div style="margin-bottom:8px;">
             ${row(
-              `<span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity}x ${item.description}</span>`,
-              `<span style="flex-shrink:0;">${fmt(item.subtotal)}</span>`
+              `<span style="flex:1;padding-right:8px;word-break:break-word;font-weight:700;">${item.quantity}x ${item.description}</span>`,
+              `<span style="flex-shrink:0;font-weight:700;">${fmt(item.subtotal)}</span>`
             )}
-            <div style="font-size:11px;color:#333;font-weight:600;">  c/u ${fmt(item.unit_price)}</div>
+            <div style="font-size:12px;font-weight:700;padding-left:4px;">c/u ${fmt(item.unit_price)}</div>
           </div>
         `).join('')}
       </div>
       ${sep}
       ${isA ? `
-        ${row('<span>Neto gravado</span>', `<span>${fmt(inv.net_amount ?? 0)}</span>`)}
-        ${row('<span>IVA 21%</span>', `<span>${fmt(inv.iva_amount ?? 0)}</span>`)}
+        ${row('<span style="font-weight:700;">NETO GRAVADO</span>', `<span style="font-weight:700;">${fmt(inv.net_amount ?? 0)}</span>`)}
+        ${row('<span style="font-weight:700;">IVA 21%</span>', `<span style="font-weight:700;">${fmt(inv.iva_amount ?? 0)}</span>`)}
+        <div style="border-top:1.5px solid #000;margin:5px 0;"></div>
       ` : ''}
-      <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;margin-top:2px;">
+      <div style="display:flex;justify-content:space-between;font-weight:900;font-size:16px;margin-top:2px;">
         <span>TOTAL</span><span>${fmt(inv.total_amount ?? 0)}</span>
       </div>
       ${sep}
       ${cae ? `
-        <div style="text-align:center;font-weight:bold;font-size:11px;">COMPROBANTE AUTORIZADO</div>
-        <div style="text-align:center;font-size:11px;">CAE: ${cae}</div>
-        ${inv.afip_cae_vto ?? inv.cae_expiry ? `<div style="text-align:center;font-size:11px;">Vto. CAE: ${inv.afip_cae_vto ?? inv.cae_expiry}</div>` : ''}
+        <div style="text-align:center;font-weight:900;font-size:12px;letter-spacing:0.04em;">COMPROBANTE AUTORIZADO</div>
+        <div style="text-align:center;font-weight:700;margin-top:2px;">CAE: ${cae}</div>
+        ${inv.afip_cae_vto ?? inv.cae_expiry ? `<div style="text-align:center;font-weight:700;">VTO. CAE: ${inv.afip_cae_vto ?? inv.cae_expiry}</div>` : ''}
         ${qrDataUrl ? `
-          <div style="text-align:center;margin:6px 0;">
-            <img src="${qrDataUrl}" style="width:100px;height:100px;" />
+          <div style="text-align:center;margin:8px 0 4px;">
+            <img src="${qrDataUrl}" style="width:110px;height:110px;" />
           </div>
-          <div style="text-align:center;font-size:10px;color:#555;">Verificar en afip.gob.ar/fe/qr</div>
+          <div style="text-align:center;font-size:11px;font-weight:700;">Verificar en afip.gob.ar/fe/qr</div>
           <div style="text-align:center;margin:6px 0;">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170 58" width="110" height="38">
-              <text x="85" y="38" text-anchor="middle" font-family="Arial Black,Arial" font-size="44" font-weight="900" fill="#4A4A4A">ARCA</text>
-              <text x="85" y="49" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#666" letter-spacing="1">AGENCIA DE RECAUDACIÓN</text>
-              <text x="85" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#666" letter-spacing="1">Y CONTROL ADUANERO</text>
+              <text x="85" y="38" text-anchor="middle" font-family="Arial Black,Arial" font-size="44" font-weight="900" fill="#000">ARCA</text>
+              <text x="85" y="49" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#000" letter-spacing="1">AGENCIA DE RECAUDACION</text>
+              <text x="85" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#000" letter-spacing="1">Y CONTROL ADUANERO</text>
             </svg>
           </div>
         ` : ''}
       ` : `
-        <div style="text-align:center;font-weight:bold;padding:2px 0;letter-spacing:0.03em;">*** NO VÁLIDO COMO FACTURA ***</div>
+        <div style="text-align:center;font-weight:900;padding:2px 0;letter-spacing:0.05em;font-size:12px;">*** NO VALIDO COMO FACTURA ***</div>
       `}
       ${sep}
-      <div style="text-align:center;font-size:11px;line-height:1.6;">
-        <div>¡Gracias por su compra!</div>
-        <div style="color:#444;font-weight:700;">Powered by StockOS</div>
+      <div style="text-align:center;font-weight:700;font-size:12px;line-height:1.7;">
+        <div>GRACIAS POR SU COMPRA!</div>
+        <div style="font-weight:900;">Powered by StockOS</div>
       </div>
     `
 
@@ -260,9 +263,9 @@ export function POSTicket({
         @page { size: 80mm auto; margin: 0mm 2mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 80mm; background: #fff; }
-        body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; line-height: 1.5; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
       </style>
-    </head><body><div style="padding:4px 10px 12px;">${html}</div></body></html>`)
+    </head><body><div style="padding:8px 12px 16px;">${html}</div></body></html>`)
     win.document.close()
     win.focus()
     setTimeout(() => { win.print(); win.close() }, 400)
@@ -318,7 +321,7 @@ export function POSTicket({
     @page { size: 80mm auto; margin: 3mm 2mm; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 80mm; background: #fff; }
-    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; font-weight: 700; line-height: 1.5; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   </style>
 </head>
 <body>${content.innerHTML}</body>
@@ -362,7 +365,7 @@ export function POSTicket({
   }
 
   // Styles shared between screen and print
-  const sep: React.CSSProperties = { borderTop: '1px dashed #999', margin: '8px 0' }
+  const sep: React.CSSProperties = { borderTop: '1.5px solid #000', margin: '9px 0' }
   const row: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }
 
   const invoiceTypeLabel = (type: string) => {
@@ -456,44 +459,49 @@ export function POSTicket({
               ref={printRef}
               style={{
                 fontFamily: 'Arial, Helvetica, sans-serif',
-                fontSize: '12px',
-                fontWeight: 500,
-                lineHeight: 1.4,
+                fontSize: '13px',
+                fontWeight: 700,
+                lineHeight: 1.5,
                 color: '#000',
                 background: '#fff',
                 width: '302px',
-                padding: '4px 10px 12px',
+                padding: '8px 12px 16px',
                 boxShadow: '0 1px 6px rgba(0,0,0,0.15)',
               }}
             >
               {/* Encabezado del negocio */}
-              <div style={{ textAlign: 'center', marginBottom: '2px' }}>
-                <div style={{ fontSize: '15px', fontWeight: 'bold', letterSpacing: '0.04em' }}>
+              <div style={{ textAlign: 'center', marginBottom: '4px' }}>
+                <div style={{ fontSize: '17px', fontWeight: 900, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                   {business?.name}
                 </div>
-                {business?.cuit && <div style={{ marginTop: '2px' }}>CUIT: {business.cuit}</div>}
-                {business?.address && <div style={{ fontSize: '11px', marginTop: '1px' }}>{business.address}</div>}
-                {business?.phone && <div style={{ fontSize: '11px' }}>Tel: {business.phone}</div>}
+                {business?.cuit && <div style={{ marginTop: '3px', fontWeight: 700 }}>CUIT: {business.cuit}</div>}
+                {business?.iva_condition && (
+                  <div style={{ fontWeight: 700 }}>
+                    {IVA_LABELS[business.iva_condition] ?? business.iva_condition}
+                  </div>
+                )}
+                {business?.address && <div style={{ marginTop: '2px', fontWeight: 700 }}>{business.address}</div>}
+                {business?.phone && <div style={{ fontWeight: 700 }}>Tel: {business.phone}</div>}
               </div>
 
               <div style={sep} />
 
               {/* Sucursal / Caja / Cajero / Fecha */}
-              <div style={{ fontSize: '11px', lineHeight: '1.5' }}>
+              <div style={{ fontSize: '12px', fontWeight: 700, lineHeight: '1.6' }}>
                 {(branchName || registerName) && (
-                  <div>Suc: {branchName ?? ''}{registerName ? ` - ${registerName}` : ''}</div>
+                  <div>SUC: {branchName ?? ''}{registerName ? ` — ${registerName}` : ''}</div>
                 )}
-                {sellerName && <div>Cajero: {sellerName}</div>}
-                <div>Fecha: {formatDateTime(sale.created_at)}</div>
-                <div>N° Ticket: #{sale.id.slice(-8).toUpperCase()}</div>
-                {customerName && <div>Cliente: {customerName}</div>}
+                {sellerName && <div>CAJERO: {sellerName}</div>}
+                <div>FECHA: {formatDateTime(sale.created_at)}</div>
+                <div>N° TICKET: #{sale.id.slice(-8).toUpperCase()}</div>
+                {customerName && <div>CLIENTE: {customerName}</div>}
               </div>
 
               <div style={sep} />
 
               {/* Encabezado columnas */}
-              <div style={{ ...row, fontWeight: 'bold', fontSize: '11px', marginBottom: '6px' }}>
-                <span>DESCRIPCIÓN</span>
+              <div style={{ ...row, fontWeight: 900, fontSize: '12px', marginBottom: '6px' }}>
+                <span>DESCRIPCION</span>
                 <span>IMPORTE</span>
               </div>
 
@@ -501,16 +509,16 @@ export function POSTicket({
               {sale.items.map((item, i) => {
                 const lineTotal = item.unit_price * item.quantity - item.discount
                 return (
-                  <div key={i} style={{ marginBottom: '6px' }}>
+                  <div key={i} style={{ marginBottom: '8px' }}>
                     <div style={row}>
-                      <span style={{ flex: 1, paddingRight: '8px', wordBreak: 'break-word' }}>
+                      <span style={{ flex: 1, paddingRight: '8px', wordBreak: 'break-word', fontWeight: 700 }}>
                         {item.quantity}x {item.product.name}
                       </span>
-                      <span style={{ flexShrink: 0 }}>{formatCurrency(lineTotal)}</span>
+                      <span style={{ flexShrink: 0, fontWeight: 700 }}>{formatCurrency(lineTotal)}</span>
                     </div>
-                    <div style={{ fontSize: '11px', color: '#333', fontWeight: 600 }}>
-                      {'  '}c/u {formatCurrency(item.unit_price)}
-                      {item.discount > 0 && <span> − dto {formatCurrency(item.discount)}</span>}
+                    <div style={{ fontSize: '12px', fontWeight: 700, paddingLeft: '4px' }}>
+                      c/u {formatCurrency(item.unit_price)}
+                      {item.discount > 0 && <span>  dto -{formatCurrency(item.discount)}</span>}
                     </div>
                   </div>
                 )
@@ -519,32 +527,32 @@ export function POSTicket({
               <div style={sep} />
 
               {/* Totales */}
-              <div style={{ lineHeight: '1.6' }}>
+              <div style={{ fontSize: '13px', fontWeight: 700, lineHeight: '1.7' }}>
                 {(sale.discount > 0 || (sale.shipping_amount ?? 0) > 0) && (
-                  <div style={row}><span>Subtotal</span><span>{formatCurrency(itemsSubtotal)}</span></div>
+                  <div style={row}><span>SUBTOTAL</span><span>{formatCurrency(itemsSubtotal)}</span></div>
                 )}
                 {sale.discount > 0 && (
-                  <div style={row}><span>Descuento</span><span>-{formatCurrency(sale.discount)}</span></div>
+                  <div style={row}><span>DESCUENTO</span><span>-{formatCurrency(sale.discount)}</span></div>
                 )}
                 {(sale.shipping_amount ?? 0) > 0 && (
-                  <div style={row}><span>Envío</span><span>+{formatCurrency(sale.shipping_amount!)}</span></div>
+                  <div style={row}><span>ENVIO</span><span>+{formatCurrency(sale.shipping_amount!)}</span></div>
                 )}
-                <div style={{ ...row, fontWeight: 'bold', fontSize: '14px', marginTop: '2px' }}>
+                <div style={{ ...row, fontWeight: 900, fontSize: '16px', marginTop: '4px', borderTop: '1.5px solid #000', paddingTop: '5px' }}>
                   <span>TOTAL</span>
                   <span>{formatCurrency(sale.total)}</span>
                 </div>
                 {sale.payment_splits && sale.payment_splits.length > 1 ? (
-                  <div style={{ marginTop: '4px', fontSize: '11px' }}>
+                  <div style={{ marginTop: '4px', fontSize: '12px', fontWeight: 700 }}>
                     {sale.payment_splits.map((s, i) => (
-                      <div key={i}>
-                        {getPaymentMethodLabel(s.method)}: {formatCurrency(s.amount)}
-                        {s.method === 'credito' && (s.installments ?? 1) > 1 && ` (${s.installments} cuotas)`}
+                      <div key={i} style={row}>
+                        <span>{getPaymentMethodLabel(s.method)}</span>
+                        <span>{formatCurrency(s.amount)}{s.method === 'credito' && (s.installments ?? 1) > 1 && ` (${s.installments} ctas)`}</span>
                       </div>
                     ))}
                   </div>
                 ) : (
-                  <div style={{ marginTop: '4px', fontSize: '11px' }}>
-                    Pago: {getPaymentMethodLabel(sale.payment_method)}
+                  <div style={{ marginTop: '4px', fontSize: '12px', fontWeight: 700 }}>
+                    PAGO: {getPaymentMethodLabel(sale.payment_method).toUpperCase()}
                     {sale.payment_method === 'credito' && sale.installments > 1
                       && ` (${sale.installments} cuotas)`}
                   </div>
@@ -555,8 +563,8 @@ export function POSTicket({
 
               {/* Estado de facturación */}
               {isInvoiced && invoice ? (
-                <div style={{ textAlign: 'center', lineHeight: '1.6' }}>
-                  <div style={{ fontWeight: 'bold', fontSize: '12px' }}>
+                <div style={{ textAlign: 'center', fontSize: '12px', fontWeight: 700, lineHeight: '1.6' }}>
+                  <div style={{ fontWeight: 900, fontSize: '13px', letterSpacing: '0.03em' }}>
                     {invoiceTypeLabel(invoice.invoice_type)}
                   </div>
                   {invoice.numero !== undefined && (
@@ -564,13 +572,13 @@ export function POSTicket({
                   )}
                   <div>CAE: {invoice.afip_cae ?? invoice.cae}</div>
                   {(invoice.afip_cae_vto ?? invoice.cae_expiry) && (
-                    <div>Vto. CAE: {invoice.afip_cae_vto ?? invoice.cae_expiry}</div>
+                    <div>VTO. CAE: {invoice.afip_cae_vto ?? invoice.cae_expiry}</div>
                   )}
-                  {invoice.receptor_name && <div>Receptor: {invoice.receptor_name}</div>}
-                  {invoice.receptor_cuit && <div>CUIT Rec.: {invoice.receptor_cuit}</div>}
+                  {invoice.receptor_name && <div>RECEPTOR: {invoice.receptor_name}</div>}
+                  {invoice.receptor_cuit && <div>CUIT: {invoice.receptor_cuit}</div>}
                 </div>
               ) : (
-                <div style={{ textAlign: 'center', fontWeight: 'bold', padding: '2px 0', letterSpacing: '0.03em' }}>
+                <div style={{ textAlign: 'center', fontWeight: 900, padding: '2px 0', letterSpacing: '0.05em', fontSize: '12px' }}>
                   *** NO VALIDO COMO FACTURA ***
                 </div>
               )}
@@ -578,9 +586,9 @@ export function POSTicket({
               <div style={sep} />
 
               {/* Footer */}
-              <div style={{ textAlign: 'center', fontSize: '11px', lineHeight: '1.6' }}>
-                <div>¡Gracias por su compra!</div>
-                <div style={{ color: '#444', fontWeight: 700 }}>Powered by StockOS</div>
+              <div style={{ textAlign: 'center', fontSize: '12px', fontWeight: 700, lineHeight: '1.7' }}>
+                <div>GRACIAS POR SU COMPRA!</div>
+                <div style={{ fontWeight: 900 }}>Powered by StockOS</div>
               </div>
             </div>
           </div>

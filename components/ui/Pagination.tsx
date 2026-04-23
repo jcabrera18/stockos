@@ -1,4 +1,5 @@
 'use client'
+import { useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import type { Pagination as PaginationType } from '@/types'
 
@@ -22,11 +23,22 @@ function getPageNumbers(page: number, pages: number): (number | '...')[] {
 
 export function Pagination({ pagination, onPageChange, onLimitChange }: PaginationProps) {
   const { page, pages, total, limit } = pagination
+  const [jumpInput, setJumpInput] = useState('')
+
   if (total === 0) return null
 
   const from = (page - 1) * limit + 1
   const to   = Math.min(page * limit, total)
   const pageNums = getPageNumbers(page, pages)
+
+  function handleJump(e: React.FormEvent) {
+    e.preventDefault()
+    const n = parseInt(jumpInput, 10)
+    if (!isNaN(n) && n >= 1 && n <= pages && n !== page) {
+      onPageChange(n)
+    }
+    setJumpInput('')
+  }
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-t border-[var(--border)]">
@@ -80,6 +92,19 @@ export function Pagination({ pagination, onPageChange, onLimitChange }: Paginati
           >
             <ChevronRight size={14} />
           </button>
+          {pages > 7 && (
+            <form onSubmit={handleJump} className="flex items-center gap-1 ml-1">
+              <input
+                type="number"
+                min={1}
+                max={pages}
+                value={jumpInput}
+                onChange={e => setJumpInput(e.target.value)}
+                placeholder="Ir a..."
+                className="w-16 text-xs px-2 py-1 rounded-[var(--radius-sm)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text2)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+            </form>
+          )}
         </div>
       )}
     </div>
