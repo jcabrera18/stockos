@@ -182,7 +182,7 @@ export default function OrdersPage() {
   // Lista de carga (picking)
   interface PickingItem {
     product_id: string; name: string; barcode?: string; unit: string; total_qty: number
-    orders: { id: string; customer_name: string; status: string; quantity: number }[]
+    orders: { id: string; customer_name: string; status: string; quantity: number; customer_address?: string; customer_locality?: string; customer_province?: string }[]
   }
   const [pickingModal, setPickingModal] = useState(false)
   const [byClientModal, setByClientModal] = useState(false)
@@ -190,6 +190,14 @@ export default function OrdersPage() {
   const [loadingPicking, setLoadingPicking] = useState(false)
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set())
   const [pickingWarehouseId, setPickingWarehouseId] = useState('')
+  const [remitoFormOpen, setRemitoFormOpen] = useState(false)
+  const [remitoTransport, setRemitoTransport] = useState<{ patente: string; conductor: string; dni: string }>(() => {
+    if (typeof window === 'undefined') return { patente: '', conductor: '', dni: '' }
+    try {
+      const s = localStorage.getItem('stockos_remito_transport')
+      return s ? JSON.parse(s) : { patente: '', conductor: '', dni: '' }
+    } catch { return { patente: '', conductor: '', dni: '' } }
+  })
 
   const fetchPickingList = async (wid: string) => {
     setLoadingPicking(true)
@@ -218,59 +226,163 @@ export default function OrdersPage() {
     fetchPickingList(wid)
   }
 
-  const printPickingList = () => {
+  const printRemitoTraslado = (transport: { patente: string; conductor: string; dni: string }) => {
+    localStorage.setItem('stockos_remito_transport', JSON.stringify(transport))
     const win = window.open('', '_blank', 'width=820,height=1000')
     if (!win) return
-    const date = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    const totalOrders = new Set(pickingItems.flatMap(i => i.orders.map(o => o.id))).size
-    const rows = pickingItems.map((item, idx) =>
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const dateStr = now.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}hs`
+    const docNumber = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+    const biz = authUser?.business
+    const totalUnits = pickingItems.reduce((s, i) => s + i.total_qty, 0)
+
+    // Unique orders → grouped by customer
+    const uniqueOrders = new Map<string, { customer_name: string; customer_address?: string; customer_locality?: string; customer_province?: string }>()
+    for (const item of pickingItems) {
+      for (const o of item.orders) {
+        if (!uniqueOrders.has(o.id)) {
+          uniqueOrders.set(o.id, { customer_name: o.customer_name, customer_address: o.customer_address, customer_locality: o.customer_locality, customer_province: o.customer_province })
+        }
+      }
+    }
+    const customerRows = new Map<string, { address_line: string; order_ids: string[] }>()
+    for (const [orderId, info] of uniqueOrders) {
+      if (!customerRows.has(info.customer_name)) {
+        const addr = [info.customer_address, info.customer_locality, info.customer_province].filter(Boolean).join(', ')
+        customerRows.set(info.customer_name, { address_line: addr, order_ids: [] })
+      }
+      customerRows.get(info.customer_name)!.order_ids.push(orderId.slice(0, 8).toUpperCase())
+    }
+    const allOrderRefs = Array.from(uniqueOrders.keys()).map(id => id.slice(0, 8).toUpperCase()).join(' · ')
+
+    const productRows = pickingItems.map((item, idx) =>
       `<tr>
-        <td class="num">${idx + 1}</td>
+        <td class="col-num">${idx + 1}</td>
         <td>
           <strong>${item.name}</strong>
-          ${item.barcode ? `<br><span class="small">${item.barcode}</span>` : ''}
+          ${item.barcode ? `<br><span class="col-barcode">${item.barcode}</span>` : ''}
         </td>
-        <td class="orders">${item.orders.map(o => `<span>${o.customer_name} <span class="qty">×${o.quantity}</span></span>`).join('')}</td>
-        <td class="total">${item.total_qty} <span class="unit">${item.unit}</span></td>
+        <td class="col-clients">${item.orders.map(o => `${o.customer_name} <span class="qty-tag">×${o.quantity}</span>`).join('<br>')}</td>
+        <td class="col-qty">${item.total_qty}</td>
+        <td class="col-unit">${item.unit}</td>
       </tr>`
     ).join('')
+
+    const destRows = Array.from(customerRows.entries()).map(([name, info]) =>
+      `<tr>
+        <td class="dest-name">${name}</td>
+        <td class="dest-addr">${info.address_line || '<span style="color:#ccc">—</span>'}</td>
+        <td class="dest-orders">${info.order_ids.join(', ')}</td>
+      </tr>`
+    ).join('')
+
     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-      <title>Lista de carga</title>
+      <title>Remito de Traslado ${docNumber}</title>
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0 }
-        body { font-family: Arial, sans-serif; padding: 24px 28px; color: #111; font-size: 12px }
-        @page { size: A4 portrait; margin: 15mm }
-        h1 { font-size: 20px; font-weight: 700; margin-bottom: 3px }
-        .meta { font-size: 11px; color: #666; margin-bottom: 18px }
+        body { font-family: Arial, sans-serif; padding: 20px 24px; color: #111; font-size: 11px }
+        @page { size: A4 portrait; margin: 12mm }
+        .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 12px }
+        .biz-name { font-size: 17px; font-weight: 700; margin-bottom: 4px }
+        .biz-info { font-size: 10px; color: #444; line-height: 1.7 }
+        .doc-box { text-align: right }
+        .doc-title { font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px }
+        .doc-letra { display: inline-block; border: 2px solid #111; padding: 0 7px; font-size: 15px; font-weight: 700; margin-left: 6px; vertical-align: middle }
+        .doc-sub { font-size: 10px; color: #666; margin-top: 4px; line-height: 1.8 }
+        .section { margin-bottom: 11px }
+        .section-title { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .7px; color: #999; padding-bottom: 3px; border-bottom: 1px solid #e0e0e0; margin-bottom: 7px }
+        .transport-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 28px }
+        .t-row { display: flex; align-items: baseline; gap: 6px; padding: 2px 0 }
+        .t-label { font-size: 9.5px; color: #888; white-space: nowrap; width: 66px; flex-shrink: 0 }
+        .t-value { font-size: 10px; font-weight: 600 }
         table { width: 100%; border-collapse: collapse }
-        th { background: #f0f0f0; text-align: left; padding: 7px 10px; font-size: 10px; text-transform: uppercase; color: #444; border-bottom: 2px solid #ccc; letter-spacing: .4px }
-        td { padding: 7px 10px; border-bottom: 1px solid #eee; vertical-align: top }
+        th { background: #f0f0f0; text-align: left; padding: 5px 7px; font-size: 8.5px; text-transform: uppercase; color: #555; border-bottom: 2px solid #ccc; letter-spacing: .3px }
+        td { padding: 5px 7px; border-bottom: 1px solid #eee; vertical-align: top; font-size: 10px }
         tr:nth-child(even) td { background: #fafafa }
-        .num { color: #bbb; width: 28px; font-size: 11px }
-        .orders { font-size: 10px; color: #555; display: flex; flex-direction: column; gap: 2px }
-        .orders span { display: block }
-        .qty { color: #1a56db; font-weight: 600 }
-        .total { text-align: right; font-size: 18px; font-weight: 700; color: #1a56db; white-space: nowrap; width: 70px }
-        .unit { font-size: 10px; color: #888; font-weight: 400 }
-        .small { font-size: 10px; color: #aaa }
-        .footer { margin-top: 20px; font-size: 10px; color: #bbb; text-align: right; border-top: 1px solid #eee; padding-top: 8px }
-        @media print { .footer { position: fixed; bottom: 10mm; width: 100% } }
+        .col-num { color: #ccc; width: 20px; font-size: 10px }
+        .col-barcode { font-size: 9px; color: #bbb; font-family: monospace; display: block; margin-top: 1px }
+        .col-clients { font-size: 9px; color: #666; line-height: 1.7 }
+        .qty-tag { color: #1a56db; font-weight: 700 }
+        .col-qty { text-align: right; font-size: 14px; font-weight: 700; color: #1a56db; width: 46px }
+        .col-unit { font-size: 9px; color: #999; white-space: nowrap; width: 44px }
+        .dest-name { font-weight: 600; font-size: 10.5px }
+        .dest-addr { font-size: 9.5px; color: #666 }
+        .dest-orders { font-size: 9px; color: #999; font-family: monospace; white-space: nowrap }
+        .totals-bar { display: flex; justify-content: flex-end; gap: 20px; margin-top: 5px; padding: 5px 8px; background: #f5f5f5; border-radius: 3px; font-size: 10px }
+        .totals-bar .lbl { color: #777 }
+        .totals-bar .val { font-weight: 700; color: #111; margin-left: 4px }
+        .ref-bar { font-size: 9px; color: #aaa; margin-top: 6px; padding: 4px 8px; background: #fafafa; border: 1px solid #eee; border-radius: 3px }
+        .signatures { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 28px }
+        .sign-box { border-top: 1px solid #aaa; padding-top: 6px; text-align: center; font-size: 9px; color: #666; line-height: 1.6 }
+        .footer { margin-top: 10px; font-size: 9px; color: #ccc; text-align: center; border-top: 1px solid #f0f0f0; padding-top: 6px }
+        @media print { body { padding: 0 } }
       </style>
     </head><body>
-      <h1>Lista de carga</h1>
-      <p class="meta">${date} &nbsp;·&nbsp; ${pickingItems.length} productos &nbsp;·&nbsp; ${totalOrders} pedidos confirmados</p>
+
+    <div class="header">
+      <div>
+        <div class="biz-name">${biz?.name ?? ''}</div>
+        <div class="biz-info">
+          ${biz?.cuit ? `CUIT: ${biz.cuit}<br>` : ''}
+          ${biz?.address ? `${biz.address}<br>` : ''}
+          ${biz?.iva_condition ? `Cond. IVA: ${biz.iva_condition}` : ''}
+        </div>
+      </div>
+      <div class="doc-box">
+        <div class="doc-title">Remito de Traslado <span class="doc-letra">X</span></div>
+        <div class="doc-sub">
+          Pto. Venta 0001 &nbsp;·&nbsp; N° ${docNumber}<br>
+          ${dateStr} &nbsp;·&nbsp; ${timeStr}
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Datos del traslado</div>
+      <div class="transport-grid">
+        <div class="t-row"><span class="t-label">Origen:</span><span class="t-value">${biz?.address ?? '—'}</span></div>
+        <div class="t-row"><span class="t-label">Destino:</span><span class="t-value">Varios destinos según detalle</span></div>
+        <div class="t-row"><span class="t-label">Patente:</span><span class="t-value">${transport.patente || '—'}</span></div>
+        <div class="t-row"><span class="t-label">Conductor:</span><span class="t-value">${transport.conductor || '—'}</span></div>
+        <div class="t-row"></div>
+        <div class="t-row"><span class="t-label">DNI:</span><span class="t-value">${transport.dni || '—'}</span></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Mercadería a transportar</div>
       <table>
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Producto</th>
-            <th>Pedidos</th>
-            <th style="text-align:right">Total</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
+        <thead><tr>
+          <th>#</th><th>Descripción</th><th>Pedidos</th>
+          <th style="text-align:right">Cant.</th><th>Unidad</th>
+        </tr></thead>
+        <tbody>${productRows}</tbody>
       </table>
-      <div class="footer">Impreso el ${date} &nbsp;·&nbsp; StockOS</div>
+      <div class="totals-bar">
+        <span><span class="lbl">Productos:</span><span class="val">${pickingItems.length}</span></span>
+        <span><span class="lbl">Total unidades:</span><span class="val">${totalUnits}</span></span>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Destinos</div>
+      <table>
+        <thead><tr><th>Cliente</th><th>Dirección</th><th>Pedido(s)</th></tr></thead>
+        <tbody>${destRows}</tbody>
+      </table>
+    </div>
+
+    <div class="ref-bar">Pedidos incluidos: ${allOrderRefs}</div>
+
+    <div class="signatures">
+      <div class="sign-box">Firma y aclaración<br>Transportista</div>
+      <div class="sign-box">Firma y aclaración<br>Receptor</div>
+      <div class="sign-box">Sello y firma<br>Empresa</div>
+    </div>
+
+    <div class="footer">Documento no válido como factura &nbsp;·&nbsp; ${biz?.name ?? ''} &nbsp;·&nbsp; StockOS</div>
     </body></html>`)
     win.document.close()
     setTimeout(() => win.print(), 300)
@@ -293,7 +405,7 @@ export default function OrdersPage() {
         <table>
           <thead><tr><th>Producto</th><th style="text-align:right">Cantidad</th></tr></thead>
           <tbody>${customer.items.map(i =>
-            `<tr>
+        `<tr>
               <td>${i.product}${i.barcode ? `<br><span class="small">${i.barcode}</span>` : ''}</td>
               <td class="qty">${i.qty} <span class="unit">${i.unit}</span></td>
             </tr>`).join('')}
@@ -605,7 +717,7 @@ export default function OrdersPage() {
       if (d.sale_id) {
         api.get<{ id: string; invoice_type: string; numero: number } | null>(`/api/invoices/sale/${d.sale_id}`)
           .then(inv => { if (inv) setDetailInvoice(inv) })
-          .catch(() => {})
+          .catch(() => { })
       }
     } catch { toast.error('Error al cargar el pedido') }
     finally { setLoadingDetail(false) }
@@ -647,9 +759,9 @@ export default function OrdersPage() {
     setCart(prev => prev.filter(i => i.product.id !== id))
 
   const cartSubtotal = cart.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
-  const discountPct  = Math.min(100, Math.max(0, Number(orderDiscount) || 0))
+  const discountPct = Math.min(100, Math.max(0, Number(orderDiscount) || 0))
   const cartDiscount = Math.round(cartSubtotal * discountPct / 100 * 100) / 100
-  const cartTotal    = Math.max(0, cartSubtotal - cartDiscount)
+  const cartTotal = Math.max(0, cartSubtotal - cartDiscount)
 
   const resetOrderForm = () => {
     setOrderNotes(''); setOrderDiscount(''); setCart([])
@@ -833,89 +945,89 @@ export default function OrdersPage() {
         ) : (
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
             <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[640px]">
-              <thead>
-                <tr className="border-b border-[var(--border)]">
-                  <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">N° Remito</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Cliente</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Vendedor</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Depósito</th>
-                  <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Estado</th>
-                  <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Pago</th>
-                  <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Total</th>
-                  <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Fecha</th>
-                  <th className="px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--border)]">
-                {orders.filter(o => !idSearch || o.id.slice(0, 8).toUpperCase().includes(idSearch.toUpperCase())).map(order => {
-                  const actions = getActions(order)
-                  return (
-                    <tr key={order.id}
-                      onClick={() => openDetail(order.id)}
-                      className="hover:bg-[var(--surface2)] transition-colors cursor-pointer group">
-                      <td className="px-4 py-3 hidden sm:table-cell">
-                        <span className="font-mono text-xs text-[var(--text2)] tracking-wider">{order.id.slice(0, 8).toUpperCase()}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-[var(--text)]">{order.customer_name}</p>
-                        {order.customer_address && (
-                          <p className="text-xs text-[var(--text3)] truncate max-w-[160px]">{order.customer_address}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">{order.seller_name ?? '—'}</td>
-                      <td className="px-4 py-3 text-[var(--text2)] hidden lg:table-cell">{order.warehouse_name ?? '—'}</td>
-                      <td className="px-4 py-3 text-center">
-                        <Badge variant={STATUS_VARIANTS[order.status]}>{STATUS_LABELS[order.status]}</Badge>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <Badge variant={
-                          order.payment_status === 'paid' ? 'success' :
-                            order.payment_status === 'partial' ? 'warning' :
-                              order.payment_status === 'credit' ? 'default' : 'danger'
-                        }>
-                          {PAYMENT_STATUS_LABELS[order.payment_status]}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)]">
-                        {formatCurrency(order.total)}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-[var(--text3)] hidden sm:table-cell">
-                        {formatDateTime(order.created_at)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                          onClick={e => e.stopPropagation()}>
-                          {actions.slice(0, 1).map(a => (
-                            <button key={a.action}
-                              onClick={() => {
-                                if (a.action === 'deliver_modal') {
-                                  setDeliverOrderId(order.id); setDeliverModal(true)
-                                } else if (a.action === 'payment_modal') {
-                                  setPaymentOrderId(order.id)
-                                  setPaymentOrderPending(Math.max(0, Number(order.total) - Number(order.paid_amount)))
-                                  setPaymentModal(true)
-                                } else if (a.action === 'cancel') {
-                                  setCancelConfirmOrder({ id: order.id, customer_name: order.customer_name })
-                                } else {
-                                  handleAction(order.id, a.action)
-                                }
-                              }}
-                              className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${a.variant === 'success' ? 'bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white' :
-                                a.variant === 'danger' ? 'bg-[var(--danger-subtle)] text-[var(--danger)]' :
-                                  'bg-[var(--surface2)] text-[var(--text2)]'
-                                }`}>
-                              {a.label}
-                            </button>
-                          ))}
-                          <ChevronRight size={14} className="text-[var(--text3)]" />
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+              <table className="w-full text-sm min-w-[640px]">
+                <thead>
+                  <tr className="border-b border-[var(--border)]">
+                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">N° Remito</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Cliente</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Vendedor</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Depósito</th>
+                    <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Estado</th>
+                    <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Pago</th>
+                    <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Total</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Fecha</th>
+                    <th className="px-4 py-3" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--border)]">
+                  {orders.filter(o => !idSearch || o.id.slice(0, 8).toUpperCase().includes(idSearch.toUpperCase())).map(order => {
+                    const actions = getActions(order)
+                    return (
+                      <tr key={order.id}
+                        onClick={() => openDetail(order.id)}
+                        className="hover:bg-[var(--surface2)] transition-colors cursor-pointer group">
+                        <td className="px-4 py-3 hidden sm:table-cell">
+                          <span className="font-mono text-xs text-[var(--text2)] tracking-wider">{order.id.slice(0, 8).toUpperCase()}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-[var(--text)]">{order.customer_name}</p>
+                          {order.customer_address && (
+                            <p className="text-xs text-[var(--text3)] truncate max-w-[160px]">{order.customer_address}</p>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">{order.seller_name ?? '—'}</td>
+                        <td className="px-4 py-3 text-[var(--text2)] hidden lg:table-cell">{order.warehouse_name ?? '—'}</td>
+                        <td className="px-4 py-3 text-center">
+                          <Badge variant={STATUS_VARIANTS[order.status]}>{STATUS_LABELS[order.status]}</Badge>
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <Badge variant={
+                            order.payment_status === 'paid' ? 'success' :
+                              order.payment_status === 'partial' ? 'warning' :
+                                order.payment_status === 'credit' ? 'default' : 'danger'
+                          }>
+                            {PAYMENT_STATUS_LABELS[order.payment_status]}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)]">
+                          {formatCurrency(order.total)}
+                        </td>
+                        <td className="px-4 py-3 text-xs text-[var(--text3)] hidden sm:table-cell">
+                          {formatDateTime(order.created_at)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={e => e.stopPropagation()}>
+                            {actions.slice(0, 1).map(a => (
+                              <button key={a.action}
+                                onClick={() => {
+                                  if (a.action === 'deliver_modal') {
+                                    setDeliverOrderId(order.id); setDeliverModal(true)
+                                  } else if (a.action === 'payment_modal') {
+                                    setPaymentOrderId(order.id)
+                                    setPaymentOrderPending(Math.max(0, Number(order.total) - Number(order.paid_amount)))
+                                    setPaymentModal(true)
+                                  } else if (a.action === 'cancel') {
+                                    setCancelConfirmOrder({ id: order.id, customer_name: order.customer_name })
+                                  } else {
+                                    handleAction(order.id, a.action)
+                                  }
+                                }}
+                                className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${a.variant === 'success' ? 'bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white' :
+                                  a.variant === 'danger' ? 'bg-[var(--danger-subtle)] text-[var(--danger)]' :
+                                    'bg-[var(--surface2)] text-[var(--text2)]'
+                                  }`}>
+                                {a.label}
+                              </button>
+                            ))}
+                            <ChevronRight size={14} className="text-[var(--text3)]" />
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
             <Pagination pagination={pagination} onPageChange={handlePageChange} />
           </div>
@@ -1306,53 +1418,54 @@ export default function OrdersPage() {
                   {cart.map(item => {
                     const hasStockIssue = item.quantity > (item.product.stock_current ?? 0)
                     return (
-                    <tr key={item.product.id} className={hasStockIssue ? 'bg-[var(--danger-subtle)]' : ''}>
-                      <td className="px-3 py-2">
-                        <p className="font-medium text-[var(--text)]">{item.product.name}</p>
-                        {hasStockIssue && (
-                          <p className="text-xs text-[var(--danger)] font-medium mt-0.5">
-                            ⚠ Stock disponible: {item.product.stock_current ?? 0}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button onClick={() => updateCartQty(item.product.id, -1)}
-                            className="p-1 rounded hover:bg-[var(--surface2)] hover:text-[var(--accent)] transition-colors">
-                            <Minus size={11} />
-                          </button>
-                          <input
-                            type="number"
-                            min="1"
-                            value={item.quantity || ''}
-                            onChange={e => setCartQty(item.product.id, e.target.value)}
-                            onBlur={() => normalizeCartQty(item.product.id)}
-                            onFocus={e => e.target.select()}
-                            className="w-12 text-sm mono text-center bg-[var(--surface)] border border-[var(--border)] rounded px-1 py-0.5 focus:outline-none focus:border-[var(--accent)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      <tr key={item.product.id} className={hasStockIssue ? 'bg-[var(--danger-subtle)]' : ''}>
+                        <td className="px-3 py-2">
+                          <p className="font-medium text-[var(--text)]">{item.product.name}</p>
+                          {hasStockIssue && (
+                            <p className="text-xs text-[var(--danger)] font-medium mt-0.5">
+                              ⚠ Stock disponible: {item.product.stock_current ?? 0}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button onClick={() => updateCartQty(item.product.id, -1)}
+                              className="p-1 rounded hover:bg-[var(--surface2)] hover:text-[var(--accent)] transition-colors">
+                              <Minus size={11} />
+                            </button>
+                            <input
+                              type="number"
+                              min="1"
+                              value={item.quantity || ''}
+                              onChange={e => setCartQty(item.product.id, e.target.value)}
+                              onBlur={() => normalizeCartQty(item.product.id)}
+                              onFocus={e => e.target.select()}
+                              className="w-12 text-sm mono text-center bg-[var(--surface)] border border-[var(--border)] rounded px-1 py-0.5 focus:outline-none focus:border-[var(--accent)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            />
+                            <button onClick={() => updateCartQty(item.product.id, 1)}
+                              className="p-1 rounded hover:bg-[var(--surface2)] hover:text-[var(--accent)] transition-colors">
+                              <Plus size={11} />
+                            </button>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <input type="number" min="0" step="0.01" value={item.unit_price}
+                            onChange={e => updateCartPrice(item.product.id, e.target.value)}
+                            className="w-20 text-xs mono text-right bg-[var(--surface)] border border-[var(--border)] rounded px-1.5 py-1 focus:outline-none focus:border-[var(--accent)]"
                           />
-                          <button onClick={() => updateCartQty(item.product.id, 1)}
-                            className="p-1 rounded hover:bg-[var(--surface2)] hover:text-[var(--accent)] transition-colors">
-                            <Plus size={11} />
+                        </td>
+                        <td className="px-3 py-2 text-right mono text-sm font-semibold">
+                          {formatCurrency(item.unit_price * item.quantity)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <button onClick={() => removeFromCart(item.product.id)}
+                            className="text-[var(--text3)] hover:text-[var(--danger)]">
+                            <Trash2 size={13} />
                           </button>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <input type="number" min="0" step="0.01" value={item.unit_price}
-                          onChange={e => updateCartPrice(item.product.id, e.target.value)}
-                          className="w-20 text-xs mono text-right bg-[var(--surface)] border border-[var(--border)] rounded px-1.5 py-1 focus:outline-none focus:border-[var(--accent)]"
-                        />
-                      </td>
-                      <td className="px-3 py-2 text-right mono text-sm font-semibold">
-                        {formatCurrency(item.unit_price * item.quantity)}
-                      </td>
-                      <td className="px-3 py-2">
-                        <button onClick={() => removeFromCart(item.product.id)}
-                          className="text-[var(--text3)] hover:text-[var(--danger)]">
-                          <Trash2 size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  )})}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
               <div className="px-3 py-2 border-t border-[var(--border)] flex items-center justify-between gap-3">
@@ -1507,7 +1620,7 @@ export default function OrdersPage() {
                 className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${pickingWarehouseId === w.id
                   ? 'bg-[var(--accent)] text-white'
                   : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-                }`}>
+                  }`}>
                 {w.name}
               </button>
             ))}
@@ -1524,8 +1637,8 @@ export default function OrdersPage() {
           </div>
         ) : (() => {
           const pending = pickingItems.filter(i => !checkedItems.has(i.product_id))
-          const done    = pickingItems.filter(i =>  checkedItems.has(i.product_id))
-          const sorted  = [...pending, ...done]
+          const done = pickingItems.filter(i => checkedItems.has(i.product_id))
+          const sorted = [...pending, ...done]
           return (
             <div className="space-y-3">
               {/* Resumen + progreso */}
@@ -1544,10 +1657,10 @@ export default function OrdersPage() {
                   )}
                 </div>
                 <button
-                  onClick={printPickingList}
-                  className="flex items-center gap-1.5 text-xs text-[var(--text3)] hover:text-[var(--text)] transition-colors"
+                  onClick={() => setRemitoFormOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-[var(--radius-md)] border border-[var(--border)] text-[var(--text2)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors"
                 >
-                  <Printer size={13} /> Imprimir A4
+                  <Truck size={13} /> Remito de traslado
                 </button>
               </div>
 
@@ -1623,6 +1736,66 @@ export default function OrdersPage() {
         })()}
       </Modal>
 
+      {/* ── Modal: Remito de traslado — datos de transporte ── */}
+      <Modal
+        open={remitoFormOpen}
+        onClose={() => setRemitoFormOpen(false)}
+        title="Datos del transporte"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-medium text-[var(--text2)] mb-1">Patente del vehículo</label>
+              <input
+                type="text"
+                placeholder="Ej: AB 123 CD"
+                value={remitoTransport.patente}
+                onChange={e => setRemitoTransport(prev => ({ ...prev, patente: e.target.value }))}
+                className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--text2)] mb-1">Nombre del conductor</label>
+              <input
+                type="text"
+                placeholder="Nombre y apellido"
+                value={remitoTransport.conductor}
+                onChange={e => setRemitoTransport(prev => ({ ...prev, conductor: e.target.value }))}
+                className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-[var(--text2)] mb-1">DNI del conductor</label>
+              <input
+                type="text"
+                placeholder="Ej: 33.456.789"
+                value={remitoTransport.dni}
+                onChange={e => setRemitoTransport(prev => ({ ...prev, dni: e.target.value }))}
+                className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+          </div>
+          <p className="text-xs text-[var(--text3)]">Los datos se guardan automáticamente para la próxima vez.</p>
+          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+            <div className="flex justify-end gap-2 flex-wrap">
+              <button
+                onClick={() => setRemitoFormOpen(false)}
+                className="px-4 py-2 text-sm rounded-[var(--radius-md)] border border-[var(--border)] text-[var(--text2)] hover:bg-[var(--surface2)] transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => { setRemitoFormOpen(false); printRemitoTraslado(remitoTransport) }}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:opacity-90 transition-opacity font-medium"
+              >
+                <Printer size={14} /> Imprimir remito
+              </button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
       {/* ── Modal: Por cliente ── */}
       <Modal
         open={byClientModal}
@@ -1640,7 +1813,7 @@ export default function OrdersPage() {
                 className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${pickingWarehouseId === w.id
                   ? 'bg-[var(--accent)] text-white'
                   : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-                }`}>
+                  }`}>
                 {w.name}
               </button>
             ))}
