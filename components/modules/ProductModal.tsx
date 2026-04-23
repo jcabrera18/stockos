@@ -250,6 +250,10 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
       _refCache.suppliers  = sups; setSuppliers(sups)
       _refCache.priceLists = lists; setPriceLists(lists)
       _refCache.brands     = brnds; setBrands(brnds)
+      // Sin listas de precio → precio fijo prendido por defecto al crear
+      if (!product && lists.length === 0) {
+        setForm(f => ({ ...f, use_fixed_sell_price: true }))
+      }
     }
     load().catch(() => {})
   }, [open])
@@ -623,7 +627,8 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
               if (e.key === 'Enter' && expressMode && !isEdit) {
                 e.preventDefault()
                 if (form.use_fixed_sell_price) sellPriceRef.current?.focus()
-                else handleSave()
+                else if (priceLists.length === 0) handleSave()
+                // Con listas: el preview aparece abajo, Enter queda libre para guardar con el botón
               }
             }}
             placeholder="0.00"
@@ -672,6 +677,30 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
             </div>
           )}
         </div>
+
+        {/* Preview listas de precio — modo express */}
+        {expressMode && !isEdit && !form.use_fixed_sell_price && form.cost_price && Number(form.cost_price) > 0 && priceLists.length > 0 && (
+          <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
+            <p className="text-xs font-medium text-[var(--text3)] mb-1">Precio según lista</p>
+            {priceLists.slice(0, 3).map(list => {
+              const price = Math.round(Number(form.cost_price) * (1 + list.margin_pct / 100) * 100) / 100
+              const gain = price - Number(form.cost_price)
+              return (
+                <div key={list.id} className="flex items-center justify-between text-sm">
+                  <span className="text-[var(--text2)]">{list.name}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-[var(--text3)]">
+                      +{list.margin_pct}% · ganancia ${gain.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    </span>
+                    <span className="font-semibold mono text-[var(--accent)]">
+                      ${price.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
 
         {/* Precio de venta fijo — modo express: sección propia bien alineada */}
         {expressMode && !isEdit && form.price_mode === 'fixed' && (
