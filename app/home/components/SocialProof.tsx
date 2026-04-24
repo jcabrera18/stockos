@@ -76,10 +76,12 @@ export function SocialProof() {
           </div>
           <div className="flex-shrink-0 flex justify-center md:justify-end pr-0 md:pr-8">
             <Image
-              src="/image_7.png"
+              src="/image_7.webp"
               alt="Negocio conectado con StockOS"
               width={220}
               height={300}
+              quality={75}
+              sizes="(max-width: 768px) 90vw, 220px"
             />
           </div>
         </div>

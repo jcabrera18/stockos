@@ -111,10 +111,12 @@ export function Features() {
           </div>
           <div className="flex-shrink-0 flex justify-center md:justify-end pr-0 md:pr-8">
             <Image
-              src="/image_6.png"
+              src="/image_6.webp"
               alt="Gestión inteligente con StockOS"
               width={280}
               height={320}
+              quality={75}
+              sizes="(max-width: 768px) 90vw, 280px"
             />
           </div>
         </div>

@@ -35,10 +35,12 @@ export function CTA() {
           {/* Illustration — absoluta, anclada abajo a la derecha */}
           <div className="absolute top-1/2 -translate-y-1/2 right-0 hidden md:block pointer-events-none select-none">
             <Image
-              src="/image_8.png"
+              src="/image_8.webp"
               alt="Soporte StockOS"
               width={520}
               height={390}
+              quality={75}
+              sizes="520px"
             />
           </div>
 

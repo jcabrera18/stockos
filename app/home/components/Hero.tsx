@@ -95,11 +95,13 @@ export function Hero() {
             {/* Illustration */}
             <div className="relative z-10 pt-6 pb-0">
               <Image
-                src="/image_5.png"
+                src="/image_5.webp"
                 alt="Persona gestionando su negocio con StockOS"
                 width={560}
                 height={500}
                 priority
+                quality={75}
+                sizes="(max-width: 768px) 100vw, 560px"
               />
             </div>
 
