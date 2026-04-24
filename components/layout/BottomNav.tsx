@@ -18,6 +18,7 @@ export function BottomNav() {
   const { theme, toggle } = useTheme()
   const { signOut, user, loading } = useAuth()
   const role = (user?.role as string) ?? 'cashier'
+  const [dynamicBottom, setDynamicBottom] = useState(0)
 
   // ── Nav principal (barra inferior) ───────────────────────
   const ALL_NAV_ITEMS = [
@@ -67,6 +68,32 @@ export function BottomNav() {
   const [confirmSignOut, setConfirmSignOut] = useState(false)
   const [pendingHref, setPendingHref] = useState<string | null>(null)
 
+  useEffect(() => {
+    const updateBottomOffset = () => {
+      const viewport = window.visualViewport
+      if (!viewport) {
+        setDynamicBottom(0)
+        return
+      }
+      const bottomBar = Math.max(
+        0,
+        window.innerHeight - viewport.height - (viewport.offsetTop ?? 0),
+      )
+      setDynamicBottom(bottomBar)
+    }
+    updateBottomOffset()
+    window.visualViewport?.addEventListener('resize', updateBottomOffset)
+    window.visualViewport?.addEventListener('scroll', updateBottomOffset)
+    window.addEventListener('resize', updateBottomOffset)
+    window.addEventListener('scroll', updateBottomOffset)
+    return () => {
+      window.visualViewport?.removeEventListener('resize', updateBottomOffset)
+      window.visualViewport?.removeEventListener('scroll', updateBottomOffset)
+      window.removeEventListener('resize', updateBottomOffset)
+      window.removeEventListener('scroll', updateBottomOffset)
+    }
+  }, [])
+
   useEffect(() => { setPendingHref(null) }, [pathname])
 
   // Cerrar drawer al navegar
@@ -75,7 +102,10 @@ export function BottomNav() {
   return (
     <>
       {/* ── Barra inferior ── */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--surface)]/95 backdrop-blur-md border-t border-[var(--border)] pb-safe">
+      <nav
+        className="md:hidden fixed left-0 right-0 z-40 bg-[var(--surface)]/95 backdrop-blur-md border-t border-[var(--border)] pb-safe"
+        style={{ bottom: `calc(env(safe-area-inset-bottom, 0px) + ${dynamicBottom}px)` }}
+      >
         <div className="flex items-stretch justify-around px-1">
           {loading ? (
             Array.from({ length: 4 }).map((_, i) => (
@@ -135,7 +165,8 @@ export function BottomNav() {
           style={{ background: 'rgba(0,0,0,0.4)' }}
           onClick={() => setDrawerOpen(false)}>
           <div
-            className="absolute bottom-0 left-0 right-0 bg-[var(--surface)] rounded-t-2xl border-t border-[var(--border)] max-h-[85vh] overflow-y-auto pb-safe"
+            className="absolute left-0 right-0 bg-[var(--surface)] rounded-t-2xl border-t border-[var(--border)] max-h-[85vh] overflow-y-auto pb-safe"
+            style={{ bottom: `calc(env(safe-area-inset-bottom, 0px) + ${dynamicBottom}px)` }}
             onClick={e => e.stopPropagation()}>
 
             {/* Handle */}
