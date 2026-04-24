@@ -5,33 +5,33 @@ import { AlertTriangle, TrendingDown, Clock, Building2 } from 'lucide-react'
 const PROBLEMS = [
   {
     Icon: AlertTriangle,
-    color: '#f87171',
-    bg: 'rgba(248,113,113,0.07)',
-    border: 'rgba(248,113,113,0.15)',
+    color: '#ef4444',
+    bg: 'rgba(239,68,68,0.07)',
+    border: 'rgba(239,68,68,0.18)',
     title: 'Stock que siempre miente',
     desc: 'Tu sistema dice que tenés 20 unidades, el depósito tiene 7, y el cliente ya compró 3 que no existen. Diferencias que se acumulan y cuestan plata real.',
   },
   {
     Icon: TrendingDown,
-    color: '#fbbf24',
-    bg: 'rgba(251,191,36,0.07)',
-    border: 'rgba(251,191,36,0.15)',
+    color: '#d97706',
+    bg: 'rgba(217,119,6,0.07)',
+    border: 'rgba(217,119,6,0.18)',
     title: 'Precios cargados a mano',
     desc: 'Subiste el precio en un lado, te olvidaste en el otro. Un producto con dos precios distintos. Pérdidas por error, reclamos de clientes y tiempo perdido.',
   },
   {
     Icon: Clock,
-    color: '#fb923c',
-    bg: 'rgba(251,146,60,0.07)',
-    border: 'rgba(251,146,60,0.15)',
+    color: '#ea580c',
+    bg: 'rgba(234,88,12,0.07)',
+    border: 'rgba(234,88,12,0.18)',
     title: 'Caja que frena la venta',
     desc: 'El código de barras no responde, el sistema tarda, hay que buscar el precio a mano. La fila crece y los clientes se van. Cada segundo en caja cuesta.',
   },
   {
     Icon: Building2,
-    color: '#c084fc',
-    bg: 'rgba(192,132,252,0.07)',
-    border: 'rgba(192,132,252,0.15)',
+    color: '#7c3aed',
+    bg: 'rgba(124,58,237,0.07)',
+    border: 'rgba(124,58,237,0.18)',
     title: 'Sin control por sucursal',
     desc: 'Tenés 2 o 3 locales y no sabés qué pasa en cada uno a menos que vayas en persona. Sin visibilidad, tomás decisiones a ciegas.',
   },
@@ -57,17 +57,17 @@ export function Problems() {
   }, [])
 
   return (
-    <section ref={ref} className="py-28 px-6">
+    <section ref={ref} className="py-28 px-6 bg-gray-50">
       <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="text-center mb-14 section-fade">
-          <p className="text-[#4ade80] text-xs font-semibold uppercase tracking-[0.15em] mb-4">
+          <p className="text-[#16a34a] text-xs font-semibold uppercase tracking-[0.15em] mb-4">
             El problema
           </p>
-          <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white leading-tight">
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-900 leading-tight">
             ¿Te suena familiar?
           </h2>
-          <p className="text-white/45 text-[17px] mt-4 max-w-lg mx-auto leading-relaxed">
+          <p className="text-gray-500 text-[17px] mt-4 max-w-lg mx-auto leading-relaxed">
             La mayoría de los negocios de retail en LATAM arrastran los mismos dolores de siempre.
           </p>
         </div>
@@ -77,9 +77,8 @@ export function Problems() {
           {PROBLEMS.map((p, i) => (
             <div
               key={p.title}
-              className="group p-6 rounded-2xl border transition-all duration-300 hover:scale-[1.01] section-fade"
+              className="group p-6 rounded-2xl border bg-white hover:shadow-md transition-all duration-300 hover:scale-[1.01] section-fade"
               style={{
-                background: p.bg,
                 borderColor: p.border,
                 transitionDelay: `${i * 75}ms`,
               }}
@@ -90,16 +89,16 @@ export function Problems() {
               >
                 <p.Icon size={18} style={{ color: p.color }} />
               </div>
-              <h3 className="text-white font-semibold text-[17px] mb-2.5">{p.title}</h3>
-              <p className="text-white/45 text-sm leading-relaxed">{p.desc}</p>
+              <h3 className="text-gray-900 font-semibold text-[17px] mb-2.5">{p.title}</h3>
+              <p className="text-gray-500 text-sm leading-relaxed">{p.desc}</p>
             </div>
           ))}
         </div>
 
         {/* Bridge */}
         <div className="mt-16 text-center section-fade" style={{ transitionDelay: '300ms' }}>
-          <div className="inline-flex items-center gap-3 px-5 py-3 rounded-full border border-[#16a34a]/20 bg-[#16a34a]/[0.06]">
-            <span className="text-[#4ade80] text-sm font-medium">
+          <div className="inline-flex items-center gap-3 px-5 py-3 rounded-full border border-green-200 bg-green-50">
+            <span className="text-green-700 text-sm font-medium">
               StockOS resuelve todos estos problemas, en un solo sistema.
             </span>
           </div>

@@ -218,27 +218,44 @@ export async function cacheProductFromScan(product: Product): Promise<void> {
 
 // ── Sync con backend ──────────────────────────────────────────────────────────
 
-async function fetchAllProducts(warehouseId?: string | null): Promise<Product[]> {
-  const all: Product[] = []
-  let page = 1
-  let totalPages = 1
+async function fetchAllProducts(warehouseId?: string | null, since?: string): Promise<Product[]> {
+  const params = {
+    limit: 500,
+    ...(warehouseId ? { warehouse_id: warehouseId } : {}),
+    ...(since ? { updated_since: since } : {}),
+  }
 
-  do {
-    const res = await api.get<{ data: Product[]; pagination: { pages: number } }>(
-      '/api/products',
-      { limit: 500, page, ...(warehouseId ? { warehouse_id: warehouseId } : {}) },
+  // Página 1 para conocer el total
+  const first = await api.get<{ data: Product[]; pagination: { pages: number } }>(
+    '/api/products', { ...params, page: 1 },
+  )
+  const totalPages = first.pagination.pages
+  if (totalPages <= 1) return first.data
+
+  // Resto de páginas en paralelo
+  const rest = await Promise.all(
+    Array.from({ length: totalPages - 1 }, (_, i) =>
+      api.get<{ data: Product[]; pagination: { pages: number } }>(
+        '/api/products', { ...params, page: i + 2 },
+      )
     )
-    all.push(...res.data)
-    totalPages = res.pagination.pages
-    page++
-  } while (page <= totalPages)
+  )
 
-  return all
+  return [...first.data, ...rest.flatMap(r => r.data)]
 }
 
 export async function syncProducts(warehouseId?: string | null): Promise<void> {
-  const products = await fetchAllProducts(warehouseId)
-  if (products.length === 0) return
+  const meta = await posDB.syncMeta.get('products')
+  const since = meta?.synced_at  // undefined en el primer sync → descarga todo
+
+  const now = new Date().toISOString()
+  const products = await fetchAllProducts(warehouseId, since)
+
+  if (products.length === 0) {
+    // Sin cambios desde el último sync — solo actualizar el timestamp
+    await posDB.syncMeta.put({ key: 'products', synced_at: now })
+    return
+  }
 
   const barcodeEntries: { barcode: string; product_id: string }[] = []
   for (const p of products) {
@@ -253,7 +270,7 @@ export async function syncProducts(warehouseId?: string | null): Promise<void> {
   await posDB.transaction('rw', posDB.products, posDB.barcodes, posDB.syncMeta, async () => {
     await posDB.products.bulkPut(products)
     if (barcodeEntries.length > 0) await posDB.barcodes.bulkPut(barcodeEntries)
-    await posDB.syncMeta.put({ key: 'products', synced_at: new Date().toISOString() })
+    await posDB.syncMeta.put({ key: 'products', synced_at: now })
   })
 }
 

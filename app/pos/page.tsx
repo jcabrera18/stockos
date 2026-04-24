@@ -645,7 +645,7 @@ export default function POSPage() {
       }
 
       const currentWarehouse = selectedWarehouseRef.current
-      if (!currentWarehouse) {
+      if (!currentWarehouse || !stockEnabledRef.current) {
         const localResults = await searchProductsLocal(trimmed)
         if (localResults.length > 0) {
           setResults(localResults)
@@ -657,7 +657,7 @@ export default function POSPage() {
       try {
         const res = await api.get<{ data: Product[] }>('/api/products', {
           search: trimmed, limit: 8,
-          ...(currentWarehouse?.id ? { warehouse_id: currentWarehouse.id } : {}),
+          ...(currentWarehouse?.id && stockEnabledRef.current ? { warehouse_id: currentWarehouse.id } : {}),
         })
         setResults(res.data)
         setActiveResultIndex(res.data.length > 0 ? 0 : -1)
@@ -1273,7 +1273,7 @@ export default function POSPage() {
                         return
                       }
                       const currentWarehouseEnter = selectedWarehouseRef.current
-                      if (!currentWarehouseEnter) {
+                      if (!currentWarehouseEnter || !stockEnabledRef.current) {
                         const localSearchResults = await searchProductsLocal(trimmedQ)
                         if (localSearchResults.length > 0) {
                           setResults(localSearchResults)
@@ -1283,7 +1283,7 @@ export default function POSPage() {
                       }
                       setSearching(true)
                       try {
-                        const res = await api.get<{ data: Product[] }>('/api/products', { search: trimmedQ, limit: 8, ...(currentWarehouseEnter?.id ? { warehouse_id: currentWarehouseEnter.id } : {}) })
+                        const res = await api.get<{ data: Product[] }>('/api/products', { search: trimmedQ, limit: 8, ...(currentWarehouseEnter?.id && stockEnabledRef.current ? { warehouse_id: currentWarehouseEnter.id } : {}) })
                         setResults(res.data)
                         if (res.data.length === 1) addToCart(res.data[0], pendingQtyRef.current)
                       } catch { setResults([]) } finally { setSearching(false) }
@@ -1363,11 +1363,9 @@ export default function POSPage() {
                     </button>
                   ))}
                 </>
-              ) : (
-                <span className="text-xs text-[var(--text3)]">
-                  {selectedList ? selectedList.name : 'Precio general'}
-                </span>
-              )}
+              ) : priceLists.length === 1 ? (
+                <span className="text-xs text-[var(--text3)]">{selectedList?.name ?? priceLists[0].name}</span>
+              ) : null}
             </div>
             <button
               onClick={handleSync}

@@ -1,4 +1,5 @@
 'use client'
+import Image from 'next/image'
 import { useRef, useEffect } from 'react'
 import { Star } from 'lucide-react'
 
@@ -53,30 +54,42 @@ export function SocialProof() {
   }, [])
 
   return (
-    <section ref={ref} id="testimonials" className="py-28 px-6 border-t border-white/[0.05]">
+    <section ref={ref} id="testimonials" className="py-28 px-6 border-t border-gray-100 bg-white">
       <div className="max-w-6xl mx-auto">
-        {/* Metrics */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-20">
-          {METRICS.map((m, i) => (
-            <div
-              key={m.label}
-              className="text-center p-6 rounded-2xl border border-white/[0.06] bg-[#131311] section-fade"
-              style={{ transitionDelay: `${i * 60}ms` }}
-            >
-              <p className="text-3xl sm:text-[38px] font-bold text-[#4ade80] font-mono leading-none mb-3">
-                {m.value}
-              </p>
-              <p className="text-white/38 text-sm leading-snug">{m.label}</p>
+
+        {/* Metrics + illustration banner */}
+        <div className="flex flex-col md:flex-row items-end gap-8 mb-20 rounded-3xl border border-gray-200 bg-gray-50 overflow-hidden section-fade">
+          <div className="flex-1 p-8 md:p-12">
+            <p className="text-[#16a34a] text-xs font-semibold uppercase tracking-[0.15em] mb-6">
+              Resultados reales
+            </p>
+            <div className="grid grid-cols-2 gap-4">
+              {METRICS.map((m) => (
+                <div key={m.label} className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
+                  <p className="text-3xl font-bold text-[#16a34a] font-mono leading-none mb-2">
+                    {m.value}
+                  </p>
+                  <p className="text-gray-500 text-sm leading-snug">{m.label}</p>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
+          <div className="flex-shrink-0 flex justify-center md:justify-end pr-0 md:pr-8">
+            <Image
+              src="/image_7.png"
+              alt="Negocio conectado con StockOS"
+              width={220}
+              height={300}
+            />
+          </div>
         </div>
 
         {/* Header */}
         <div className="text-center mb-12 section-fade" style={{ transitionDelay: '240ms' }}>
-          <p className="text-[#4ade80] text-xs font-semibold uppercase tracking-[0.15em] mb-4">
+          <p className="text-[#16a34a] text-xs font-semibold uppercase tracking-[0.15em] mb-4">
             Testimonios
           </p>
-          <h2 className="text-3xl sm:text-4xl font-bold text-white">
+          <h2 className="text-3xl sm:text-4xl font-bold text-gray-900">
             Lo que dicen los que ya lo usan
           </h2>
         </div>
@@ -86,7 +99,7 @@ export function SocialProof() {
           {TESTIMONIALS.map((t, i) => (
             <div
               key={t.name}
-              className="flex flex-col p-6 rounded-2xl border border-white/[0.06] bg-[#131311] section-fade"
+              className="flex flex-col p-6 rounded-2xl border border-gray-200 bg-white hover:shadow-md transition-all duration-200 section-fade"
               style={{ transitionDelay: `${300 + i * 75}ms` }}
             >
               <div className="flex gap-0.5 mb-5">
@@ -94,17 +107,17 @@ export function SocialProof() {
                   <Star key={j} size={13} className="fill-amber-400 text-amber-400" />
                 ))}
               </div>
-              <p className="text-white/55 text-[13.5px] leading-relaxed flex-1 mb-6">
+              <p className="text-gray-600 text-[13.5px] leading-relaxed flex-1 mb-6">
                 &ldquo;{t.text}&rdquo;
               </p>
-              <div className="flex items-center gap-3 pt-4 border-t border-white/[0.05]">
-                <div className="w-9 h-9 rounded-full bg-[#16a34a]/[0.15] border border-[#16a34a]/25 flex items-center justify-center text-[#4ade80] text-xs font-bold shrink-0">
+              <div className="flex items-center gap-3 pt-4 border-t border-gray-100">
+                <div className="w-9 h-9 rounded-full bg-green-50 border border-green-200 flex items-center justify-center text-[#16a34a] text-xs font-bold shrink-0">
                   {t.initials}
                 </div>
                 <div className="min-w-0">
-                  <p className="text-white text-sm font-medium truncate">{t.name}</p>
-                  <p className="text-white/32 text-xs truncate">{t.role}</p>
-                  <p className="text-white/22 text-xs">{t.location}</p>
+                  <p className="text-gray-900 text-sm font-medium truncate">{t.name}</p>
+                  <p className="text-gray-400 text-xs truncate">{t.role}</p>
+                  <p className="text-gray-400 text-xs">{t.location}</p>
                 </div>
               </div>
             </div>

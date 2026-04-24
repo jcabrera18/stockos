@@ -18,10 +18,12 @@ import type { PriceList } from '@/app/price-lists/page'
 import {
   Plus, Search, Package, CheckCircle, Clock, Truck,
   X, Minus, Trash2, ChevronRight, DollarSign, AlertCircle,
-  ClipboardList, Printer, Receipt, FileText,
+  ClipboardList, Printer, Receipt, FileText, RefreshCw,
 } from 'lucide-react'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 import { useAuth } from '@/hooks/useAuth'
+import { usePOSSync } from '@/hooks/usePOSSync'
+import { searchProductsLocal } from '@/lib/pos-cache'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────
@@ -117,6 +119,7 @@ export default function OrdersPage() {
   const { user: authUser } = useAuth()
   const stockEnabled      = authUser?.business?.stock_enabled ?? false
   const sellerWarehouseId = authUser?.role === 'seller' ? (authUser.warehouse_id ?? null) : null
+  const { cacheReady, syncing: cacheSyncing, forceSync } = usePOSSync(null)
 
   // Lista
   const [orders, setOrders] = useState<OrderSummary[]>([])
@@ -662,19 +665,18 @@ export default function OrdersPage() {
         const def = wh.find(w => w.is_default)
         if (def) setWarehouseId(def.id)
       }
-      const defPl = pl.find(p => p.is_default)
-      if (defPl) setPriceListId(defPl.id)
     }).catch(() => { })
   }, [])
 
   // Búsqueda de productos para el pedido
   useEffect(() => {
     if (!productQuery.trim()) { setProductResults([]); return }
-    const timer = setTimeout(async () => {
-      setSearchingProducts(true)
-      try {
-        if (warehouseId) {
-          // Buscar con stock del depósito seleccionado
+
+    if (warehouseId && stockEnabled) {
+      // Con depósito y stock habilitado: va a la API para obtener stock por depósito
+      const timer = setTimeout(async () => {
+        setSearchingProducts(true)
+        try {
           const res = await api.get<{ data: { product_id: string; product_name: string; stock_current: number; barcode?: string; cost_price?: number; sell_price?: number }[] }>(
             `/api/warehouses/${warehouseId}/stock`, { search: productQuery.trim(), limit: 6 }
           )
@@ -683,15 +685,32 @@ export default function OrdersPage() {
               .filter(s => !cart.find(c => c.product.id === s.product_id))
               .map(s => ({ id: s.product_id, name: s.product_name, stock_current: s.stock_current, barcode: s.barcode, cost_price: s.cost_price ?? 0, sell_price: s.sell_price ?? 0 } as Product))
           )
-        } else {
-          const res = await api.get<{ data: Product[] }>('/api/products', { search: productQuery.trim(), limit: 6 })
-          setProductResults(res.data.filter(p => !cart.find(c => c.product.id === p.id)))
-        }
+        } catch { setProductResults([]) }
+        finally { setSearchingProducts(false) }
+      }, 300)
+      return () => clearTimeout(timer)
+    }
+
+    // Sin depósito: búsqueda local en IndexedDB (instantánea)
+    if (cacheReady) {
+      let cancelled = false
+      searchProductsLocal(productQuery.trim(), 8).then(results => {
+        if (!cancelled) setProductResults(results.filter(p => !cart.find(c => c.product.id === p.id)))
+      })
+      return () => { cancelled = true }
+    }
+
+    // Fallback a API si el cache aún no está listo
+    const timer = setTimeout(async () => {
+      setSearchingProducts(true)
+      try {
+        const res = await api.get<{ data: Product[] }>('/api/products', { search: productQuery.trim(), limit: 6 })
+        setProductResults(res.data.filter(p => !cart.find(c => c.product.id === p.id)))
       } catch { setProductResults([]) }
       finally { setSearchingProducts(false) }
     }, 300)
     return () => clearTimeout(timer)
-  }, [productQuery, cart, warehouseId])
+  }, [productQuery, cart, warehouseId, cacheReady])
 
   useEffect(() => {
     if (!customerQuery.trim() || customerQuery.length < 2) { setCustomerResults([]); return }
@@ -1144,9 +1163,9 @@ export default function OrdersPage() {
                     return (
                       <tr key={item.id}>
                         <td className="px-3 py-2.5">
-                          <p className="font-medium text-[var(--text)]">{item.products.name}</p>
+                          <p className="font-medium text-[var(--text)]">{item.products?.name ?? '(producto eliminado)'}</p>
                         </td>
-                        <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">{item.quantity} {item.products.unit}</td>
+                        <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">{item.quantity} {item.products?.unit ?? ''}</td>
                         <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">{formatCurrency(item.unit_price)}</td>
                         <td className="px-3 py-2.5 text-right mono font-semibold text-[var(--text)]">{formatCurrency(item.subtotal)}</td>
                       </tr>
@@ -1336,26 +1355,35 @@ export default function OrdersPage() {
                 options={warehouses.map(w => ({ value: w.id, label: w.name }))}
                 value={warehouseId} onChange={e => { setWarehouseId(e.target.value); setCart([]); setProductResults([]) }} />
             )}
-            <Select label="Lista de precio"
-              options={priceLists.map(pl => ({ value: pl.id, label: `${pl.name} (+${pl.margin_pct}%)` }))}
-              value={priceListId} onChange={e => {
-                const newId = e.target.value
-                setPriceListId(newId)
-                if (cart.length > 0) {
-                  const list = priceLists.find(pl => pl.id === newId)
-                  setCart(prev => prev.map(i => ({
-                    ...i,
-                    unit_price: list && i.product.cost_price
-                      ? Math.round(i.product.cost_price * (1 + list.margin_pct / 100) * 100) / 100
-                      : (i.product.sell_price || i.product.cost_price || i.unit_price),
-                  })))
-                }
-              }} />
+            {priceLists.length > 0 && (
+              <Select label="Lista de precio"
+                options={priceLists.map(pl => ({ value: pl.id, label: `${pl.name} (+${pl.margin_pct}%)` }))}
+                value={priceListId} onChange={e => {
+                  const newId = e.target.value
+                  setPriceListId(newId)
+                  if (cart.length > 0) {
+                    const list = priceLists.find(pl => pl.id === newId)
+                    setCart(prev => prev.map(i => ({
+                      ...i,
+                      unit_price: list && i.product.cost_price
+                        ? Math.round(i.product.cost_price * (1 + list.margin_pct / 100) * 100) / 100
+                        : (i.product.sell_price || i.product.cost_price || i.unit_price),
+                    })))
+                  }
+                }} />
+            )}
           </div>
 
           {/* Buscador de productos */}
           <div>
-            <label className="text-sm font-medium text-[var(--text2)] block mb-1">Productos</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-sm font-medium text-[var(--text2)]">Productos</label>
+              <button onClick={forceSync} disabled={cacheSyncing}
+                className="flex items-center gap-1 text-xs text-[var(--text3)] hover:text-[var(--accent)] disabled:opacity-50 transition-colors">
+                <RefreshCw size={11} className={cacheSyncing ? 'animate-spin text-[var(--accent)]' : ''} />
+                {cacheSyncing ? 'Actualizando...' : 'Actualizar catálogo'}
+              </button>
+            </div>
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
               {searchingProducts && (

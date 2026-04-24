@@ -53,19 +53,19 @@ export function Differentials() {
   }, [])
 
   return (
-    <section ref={ref} id="differentials" className="py-28 px-6 border-t border-white/[0.05]">
+    <section ref={ref} id="differentials" className="py-28 px-6 border-t border-gray-100 bg-gray-50">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="text-center mb-14 section-fade">
-          <p className="text-[#4ade80] text-xs font-semibold uppercase tracking-[0.15em] mb-4">
+          <p className="text-[#16a34a] text-xs font-semibold uppercase tracking-[0.15em] mb-4">
             Por qué StockOS
           </p>
-          <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white leading-tight">
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-gray-900 leading-tight">
             Diseñado para crecer,
             <br />
             no para frenar
           </h2>
-          <p className="text-white/45 text-[17px] mt-4 max-w-lg mx-auto leading-relaxed">
+          <p className="text-gray-500 text-[17px] mt-4 max-w-lg mx-auto leading-relaxed">
             No es solo otro sistema de stock. Es infraestructura para el retail moderno.
           </p>
         </div>
@@ -75,20 +75,20 @@ export function Differentials() {
           {DIFFS.map((d, i) => (
             <div
               key={d.title}
-              className="flex gap-5 p-6 rounded-2xl border border-white/[0.06] bg-[#131311] hover:border-white/[0.10] transition-all duration-200 section-fade"
+              className="flex gap-5 p-6 rounded-2xl border border-gray-200 bg-white hover:shadow-md hover:border-gray-300 transition-all duration-200 section-fade"
               style={{ transitionDelay: `${i * 75}ms` }}
             >
-              <div className="shrink-0 w-12 h-12 rounded-xl bg-[#16a34a]/[0.09] border border-[#16a34a]/20 flex items-center justify-center">
-                <d.Icon size={20} className="text-[#4ade80]" />
+              <div className="shrink-0 w-12 h-12 rounded-xl bg-green-50 border border-green-200 flex items-center justify-center">
+                <d.Icon size={20} className="text-[#16a34a]" />
               </div>
               <div className="min-w-0">
-                <h3 className="text-white font-semibold text-[17px] mb-2">{d.title}</h3>
-                <p className="text-white/40 text-[13.5px] leading-relaxed mb-5">{d.desc}</p>
+                <h3 className="text-gray-900 font-semibold text-[17px] mb-2">{d.title}</h3>
+                <p className="text-gray-500 text-[13.5px] leading-relaxed mb-5">{d.desc}</p>
                 <div className="flex items-baseline gap-2">
-                  <span className="text-[28px] font-bold text-[#4ade80] font-mono leading-none">
+                  <span className="text-[28px] font-bold text-[#16a34a] font-mono leading-none">
                     {d.stat}
                   </span>
-                  <span className="text-white/30 text-xs">{d.statLabel}</span>
+                  <span className="text-gray-400 text-xs">{d.statLabel}</span>
                 </div>
               </div>
             </div>

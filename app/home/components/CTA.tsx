@@ -1,7 +1,8 @@
 'use client'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useRef, useEffect } from 'react'
-import { ArrowRight, Mail } from 'lucide-react'
+import { ArrowRight, MessageCircle } from 'lucide-react'
 
 export function CTA() {
   const ref = useRef<HTMLElement>(null)
@@ -23,48 +24,58 @@ export function CTA() {
   }, [])
 
   return (
-    <section ref={ref} className="py-24 px-6 border-t border-white/[0.05]">
-      <div className="max-w-4xl mx-auto section-fade">
-        <div className="relative overflow-hidden rounded-3xl border border-[#16a34a]/18 p-12 text-center">
-          {/* Background */}
-          <div className="absolute inset-0 bg-gradient-to-br from-[#16a34a]/[0.09] via-transparent to-transparent" />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_60%_at_50%_0%,rgba(22,163,74,0.08),transparent)]" />
-          {/* Top border glow */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-2/3 h-px bg-gradient-to-r from-transparent via-[#16a34a]/50 to-transparent" />
+    <section ref={ref} className="py-24 px-6 border-t border-gray-100 bg-white">
+      <div className="max-w-5xl mx-auto section-fade">
+        {/* overflow-visible para que la imagen pueda sobresalir por abajo */}
+        <div className="relative rounded-3xl bg-[#052e16] overflow-hidden">
+          {/* Glow */}
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_70%_80%_at_20%_50%,rgba(22,163,74,0.18),transparent)]" />
+          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-[#16a34a]/40 to-transparent" />
 
-          <div className="relative">
-            <p className="text-[#4ade80] text-xs font-semibold uppercase tracking-[0.15em] mb-6">
+          {/* Illustration — absoluta, anclada abajo a la derecha */}
+          <div className="absolute top-1/2 -translate-y-1/2 right-0 hidden md:block pointer-events-none select-none">
+            <Image
+              src="/image_8.png"
+              alt="Soporte StockOS"
+              width={520}
+              height={390}
+            />
+          </div>
+
+          {/* Text content — con padding-right en desktop para no pisar la imagen */}
+          <div className="relative px-10 py-12 md:py-14 md:pr-[500px] lg:pr-[520px]">
+            <p className="text-green-400 text-xs font-semibold uppercase tracking-[0.15em] mb-4">
               Empezá hoy
             </p>
-            <h2 className="text-4xl sm:text-5xl font-bold text-white leading-tight mb-6">
+            <h2 className="text-3xl sm:text-4xl font-bold text-white leading-tight mb-4">
               Tu competencia ya tiene<br />
               el sistema que vos necesitás
             </h2>
-            <p className="text-white/45 text-[17px] max-w-md mx-auto leading-relaxed mb-10">
-              Dejá de perder plata con stock mal contado y precios cargados a mano.
-              StockOS está listo para funcionar en menos de una hora.
+            <p className="text-white/55 text-[15px] leading-relaxed mb-8 max-w-sm">
+              Dejá de perder plata con stock mal contado.
+              StockOS funciona en menos de una hora.
             </p>
 
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <div className="flex flex-col sm:flex-row items-start gap-3">
               <Link
                 href="/register"
-                className="group w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 bg-[#16a34a] hover:bg-[#15803d] text-white rounded-xl font-semibold text-[17px] transition-all duration-200 hover:shadow-[0_0_32px_rgba(22,163,74,0.45)] active:scale-[0.98]"
+                className="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-[#16a34a] hover:bg-[#15803d] text-white rounded-xl font-semibold text-[15px] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(22,163,74,0.5)] active:scale-[0.98]"
               >
                 Crear cuenta gratis
-                <ArrowRight size={17} className="group-hover:translate-x-0.5 transition-transform" />
+                <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
               </Link>
               <a
                 href="https://wa.me/5493438445203"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 border border-white/[0.09] hover:border-white/[0.18] hover:bg-white/[0.025] text-white/60 hover:text-white/85 rounded-xl font-medium text-base transition-all duration-200"
+                className="inline-flex items-center justify-center gap-2 px-7 py-3.5 border border-white/15 hover:border-white/30 hover:bg-white/[0.05] text-white/65 hover:text-white/90 rounded-xl font-medium text-[15px] transition-all duration-200"
               >
-                <Mail size={15} />
+                <MessageCircle size={14} />
                 Solicitar una demo
               </a>
             </div>
 
-            <p className="text-white/22 text-xs mt-8">
+            <p className="text-white/30 text-xs mt-6">
               Sin tarjeta de crédito · Onboarding asistido · Soporte en español
             </p>
           </div>

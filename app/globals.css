@@ -95,8 +95,8 @@ button, a, [role="button"] {
 /* ─── Landing page ───────────────────────────────────────── */
 .landing-grid {
   background-image:
-    linear-gradient(rgba(255,255,255,0.018) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+    linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px);
   background-size: 60px 60px;
   -webkit-mask-image: radial-gradient(ellipse 85% 75% at 50% 40%, black 0%, transparent 100%);
   mask-image: radial-gradient(ellipse 85% 75% at 50% 40%, black 0%, transparent 100%);

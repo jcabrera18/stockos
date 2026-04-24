@@ -37,16 +37,16 @@ function FAQItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false)
 
   return (
-    <div className="border-b border-white/[0.06] last:border-0">
+    <div className="border-b border-gray-100 last:border-0">
       <button
         className="w-full flex items-start justify-between gap-4 py-5 text-left group"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
       >
-        <span className="text-white/72 group-hover:text-white text-sm sm:text-[15px] font-medium transition-colors leading-relaxed">
+        <span className="text-gray-700 group-hover:text-gray-900 text-sm sm:text-[15px] font-medium transition-colors leading-relaxed">
           {q}
         </span>
-        <span className="shrink-0 mt-0.5 w-5 h-5 rounded-full border border-white/15 flex items-center justify-center text-white/40 group-hover:border-white/25 transition-colors">
+        <span className="shrink-0 mt-0.5 w-5 h-5 rounded-full border border-gray-200 flex items-center justify-center text-gray-400 group-hover:border-gray-300 transition-colors">
           {open ? <Minus size={11} /> : <Plus size={11} />}
         </span>
       </button>
@@ -55,7 +55,7 @@ function FAQItem({ q, a }: { q: string; a: string }) {
           open ? 'max-h-60 pb-5' : 'max-h-0'
         }`}
       >
-        <p className="text-white/42 text-[13.5px] leading-relaxed pr-8">{a}</p>
+        <p className="text-gray-500 text-[13.5px] leading-relaxed pr-8">{a}</p>
       </div>
     </div>
   )
@@ -63,16 +63,16 @@ function FAQItem({ q, a }: { q: string; a: string }) {
 
 export function FAQ() {
   return (
-    <section id="faq" className="py-28 px-6 border-t border-white/[0.05]">
+    <section id="faq" className="py-28 px-6 border-t border-gray-100 bg-gray-50">
       <div className="max-w-3xl mx-auto">
         <div className="text-center mb-12">
-          <p className="text-[#4ade80] text-xs font-semibold uppercase tracking-[0.15em] mb-4">
+          <p className="text-[#16a34a] text-xs font-semibold uppercase tracking-[0.15em] mb-4">
             FAQ
           </p>
-          <h2 className="text-3xl sm:text-4xl font-bold text-white">Preguntas frecuentes</h2>
+          <h2 className="text-3xl sm:text-4xl font-bold text-gray-900">Preguntas frecuentes</h2>
         </div>
 
-        <div className="bg-[#131311] rounded-2xl border border-white/[0.06] px-6 sm:px-8">
+        <div className="bg-white rounded-2xl border border-gray-200 px-6 sm:px-8 shadow-sm">
           {FAQS.map(f => (
             <FAQItem key={f.q} q={f.q} a={f.a} />
           ))}
