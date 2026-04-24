@@ -21,6 +21,7 @@ import {
   ClipboardList, Printer, Receipt, FileText, RefreshCw,
 } from 'lucide-react'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
+import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
 import { useAuth } from '@/hooks/useAuth'
 import { usePOSSync } from '@/hooks/usePOSSync'
 import { searchProductsLocal } from '@/lib/pos-cache'
@@ -182,6 +183,8 @@ export default function OrdersPage() {
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
   const [selectedCustomerBalance, setSelectedCustomerBalance] = useState<number>(0)
   const [selectedCustomerCreditLimit, setSelectedCustomerCreditLimit] = useState<number>(0)
+  const [quickCustomerModal, setQuickCustomerModal] = useState(false)
+  const customerSearchRequestRef = useRef(0)
 
   // Lista de carga (picking)
   interface PickingItem {
@@ -713,17 +716,28 @@ export default function OrdersPage() {
   }, [productQuery, cart, warehouseId, cacheReady])
 
   useEffect(() => {
-    if (!customerQuery.trim() || customerQuery.length < 2) { setCustomerResults([]); return }
+    const query = customerQuery.trim()
+    if (query.length < 2) {
+      customerSearchRequestRef.current += 1
+      setCustomerResults([])
+      setSearchingCustomers(false)
+      return
+    }
+
+    const requestId = ++customerSearchRequestRef.current
     const timer = setTimeout(async () => {
       setSearchingCustomers(true)
       try {
         const data = await api.get<{ id: string; full_name: string; phone?: string; current_balance: number; credit_limit: number }[]>(
-          `/api/customers/search?q=${encodeURIComponent(customerQuery)}`
+          `/api/customers/search?q=${encodeURIComponent(query)}`
         )
-        setCustomerResults(data)
-      } catch { setCustomerResults([]) }
-      finally { setSearchingCustomers(false) }
-    }, 300)
+        if (customerSearchRequestRef.current === requestId) setCustomerResults(data)
+      } catch {
+        if (customerSearchRequestRef.current === requestId) setCustomerResults([])
+      } finally {
+        if (customerSearchRequestRef.current === requestId) setSearchingCustomers(false)
+      }
+    }, 180)
     return () => clearTimeout(timer)
   }, [customerQuery])
 
@@ -788,9 +802,12 @@ export default function OrdersPage() {
     setPayAlreadyCollected(false); setCollectedAmount(''); setCollectedMethod('efectivo')
     setCustomerQuery(''); setCustomerResults([]); setSelectedCustomerId(null)
     setSelectedCustomerBalance(0); setSelectedCustomerCreditLimit(0)
+    setCustomerName(''); setQuickCustomerModal(false)
   }
 
   const cartStockIssues = stockEnabled ? cart.filter(i => i.quantity > (i.product.stock_current ?? 0)) : []
+  const trimmedCustomerQuery = customerQuery.trim()
+  const showCustomerDropdown = !selectedCustomerId && trimmedCustomerQuery.length >= 2
 
   const handleCreateOrder = async () => {
     if (!selectedCustomerId) { toast.error('Seleccioná un cliente de la lista'); return }
@@ -1318,6 +1335,21 @@ export default function OrdersPage() {
         title="Nuevo pedido" size="lg">
         <div className="space-y-4">
 
+          <QuickCustomerModal
+            open={quickCustomerModal}
+            onClose={() => setQuickCustomerModal(false)}
+            initialName={trimmedCustomerQuery}
+            onCreated={(customer) => {
+              setSelectedCustomerId(customer.id)
+              setCustomerName(customer.full_name)
+              setSelectedCustomerBalance(Number(customer.current_balance))
+              setSelectedCustomerCreditLimit(Number(customer.credit_limit))
+              setCustomerQuery('')
+              setCustomerResults([])
+              setQuickCustomerModal(false)
+            }}
+          />
+
           {/* Datos del cliente */}
           <div className="grid grid-cols-1 gap-3">
             {/* Cliente */}
@@ -1355,28 +1387,60 @@ export default function OrdersPage() {
                       className="w-full pl-9 pr-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
                     />
                   </div>
-                  {customerResults.length > 0 && (
+                  {showCustomerDropdown && (
                     <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-20 overflow-hidden">
-                      {customerResults.map(c => (
-                        <button key={c.id}
-                          onClick={() => {
-                            setSelectedCustomerId(c.id)
-                            setCustomerName(c.full_name)
-                            setSelectedCustomerBalance(Number(c.current_balance))
-                            setSelectedCustomerCreditLimit(Number(c.credit_limit))
-                            setCustomerQuery('')
-                            setCustomerResults([])
-                          }}
-                          className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
-                          <div>
-                            <p className="text-sm font-medium text-[var(--text)]">{c.full_name}</p>
-                            {c.phone && <p className="text-xs text-[var(--text3)]">{c.phone}</p>}
+                      {customerResults.length > 0 ? (
+                        <>
+                          {customerResults.map(c => (
+                            <button key={c.id}
+                              onClick={() => {
+                                setSelectedCustomerId(c.id)
+                                setCustomerName(c.full_name)
+                                setSelectedCustomerBalance(Number(c.current_balance))
+                                setSelectedCustomerCreditLimit(Number(c.credit_limit))
+                                setCustomerQuery('')
+                                setCustomerResults([])
+                              }}
+                              className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
+                              <div>
+                                <p className="text-sm font-medium text-[var(--text)]">{c.full_name}</p>
+                                {c.phone && <p className="text-xs text-[var(--text3)]">{c.phone}</p>}
+                              </div>
+                              {Number(c.current_balance) > 0 && (
+                                <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>
+                              )}
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => setQuickCustomerModal(true)}
+                            className="w-full flex items-center gap-2 px-3 py-2.5 bg-[var(--surface)] hover:bg-[var(--accent-subtle)] transition-colors text-left border-t border-[var(--border)]">
+                            <Plus size={14} className="text-[var(--accent)]" />
+                            <span className="text-sm font-medium text-[var(--accent)]">Crear cliente &quot;{trimmedCustomerQuery}&quot;</span>
+                          </button>
+                        </>
+                      ) : !searchingCustomers ? (
+                        <div className="p-3">
+                          <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface2)] p-3">
+                            <div className="flex items-start gap-2.5">
+                              <AlertCircle size={16} className="mt-0.5 text-[var(--text3)]" />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-medium text-[var(--text)]">
+                                  No encontramos clientes para &quot;{trimmedCustomerQuery}&quot;
+                                </p>
+                                <p className="mt-1 text-xs text-[var(--text3)]">
+                                  Crealo ahora mismo sin salir del pedido.
+                                </p>
+                                <button
+                                  onClick={() => setQuickCustomerModal(true)}
+                                  className="mt-3 inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--accent)] px-3 py-2 text-xs font-medium text-white hover:bg-[var(--accent-hover)] transition-colors">
+                                  <Plus size={13} />
+                                  Crear cliente rápido
+                                </button>
+                              </div>
+                            </div>
                           </div>
-                          {Number(c.current_balance) > 0 && (
-                            <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>
-                          )}
-                        </button>
-                      ))}
+                        </div>
+                      ) : null}
                     </div>
                   )}
                 </div>

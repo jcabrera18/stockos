@@ -1,6 +1,6 @@
 // components/modules/QuickCustomerModal.tsx
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
@@ -22,10 +22,11 @@ export function QuickCustomerModal({
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
 
-  // Sincronizar nombre inicial cuando cambia (al abrir el modal)
-  useState(() => {
-    setForm(f => ({ ...f, full_name: initialName }))
-  })
+  useEffect(() => {
+    if (!open) return
+    setForm({ full_name: initialName, document: '', phone: '', credit_limit: '' })
+    setErrors({})
+  }, [open, initialName])
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm(f => ({ ...f, [field]: e.target.value }))
