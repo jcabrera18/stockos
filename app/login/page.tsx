@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { api } from '@/lib/api'
 import { useWorkstation } from '@/hooks/useWorkstation'
+import Link from 'next/link'
 
 interface Branch {
   id: string
@@ -78,7 +79,10 @@ function BrandingPanel() {
       />
 
       <div className="relative">
-        <Logo light size={32} />
+        <Link href="/home" aria-label="Ir a StockOS home">
+          <span className="sr-only">StockOS home</span>
+          <Logo light size={32} />
+        </Link>
       </div>
 
       <div className="relative flex-1 flex flex-col justify-center gap-7 mt-12">
@@ -206,7 +210,7 @@ function Field({
             width: '100%',
             padding: '11px 14px',
             paddingRight: showToggle ? 44 : 14,
-            fontSize: 15,
+          fontSize: 16,
             color: '#111827',
             background: '#fff',
             border: `1.5px solid ${focused ? '#16a34a' : '#e5e7eb'}`,
@@ -513,44 +517,60 @@ export default function LoginPage() {
         @keyframes spin    { to { transform:rotate(360deg); } }
         @keyframes floatUp { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
         @keyframes countUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+        .login-brand-panel { position: sticky; top: 0; height: 100vh; }
+        .login-grid { display: grid; grid-template-columns: clamp(260px,42%,500px) 1fr; min-height: 100vh; }
+        .login-mobile-logo { display: none; }
+        .login-right-panel {
+          background: #f9fafb;
+          min-height: 100vh;
+          padding: 36px;
+          justify-content: center;
+          gap: 10px;
+        }
+        .login-card {
+          width: 100%;
+          max-width: 440px;
+          background: #fff;
+          border-radius: 20px;
+          border: 1px solid #e5e7eb;
+          padding: 36px 36px 28px;
+          box-shadow: 0 4px 24px rgba(0,0,0,.06);
+        }
         @media (max-width: 767px) {
           .login-grid { display: block !important; }
           .login-brand-panel { display: none !important; }
           .login-mobile-logo { display: flex !important; }
+          .login-right-panel {
+            justify-content: flex-start;
+            padding: 24px 20px 18px;
+          }
+          .login-card {
+            border-radius: 18px;
+            padding: 28px 22px 22px;
+          }
         }
       `}</style>
 
-      <div
-        className="login-grid"
-        style={{ display: 'grid', gridTemplateColumns: 'clamp(260px,42%,500px) 1fr', minHeight: '100vh' }}
-      >
+      <div className="login-grid">
         {/* Left — branding */}
-        <div className="login-brand-panel" style={{ position: 'sticky', top: 0, height: '100vh' }}>
+        <div className="login-brand-panel">
           <div style={{ height: '100%' }}>
             <BrandingPanel />
           </div>
         </div>
 
         {/* Right — form */}
-        <div
-          className="flex flex-col items-center justify-center p-6"
-          style={{ background: '#f9fafb', minHeight: '100vh' }}
-        >
+        <div className="login-right-panel flex flex-col items-center">
           {/* Logo solo en mobile */}
-          <div className="login-mobile-logo mb-6" style={{ display: 'none' }}>
-            <Logo size={28} />
+          <div className="login-mobile-logo mb-6">
+            <Link href="/home" aria-label="Ir a StockOS home">
+              <span className="sr-only">StockOS home</span>
+              <Logo size={28} />
+            </Link>
           </div>
 
           <div
-            className="w-full"
-            style={{
-              maxWidth: 440,
-              background: '#fff',
-              borderRadius: 20,
-              border: '1px solid #e5e7eb',
-              padding: '36px 36px 28px',
-              boxShadow: '0 4px 24px rgba(0,0,0,.06)',
-            }}
+            className="w-full login-card"
           >
             <div key={animKey}>
 

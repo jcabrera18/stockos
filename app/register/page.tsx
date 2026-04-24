@@ -71,7 +71,9 @@ function BrandingPanel() {
       />
 
       <div className="relative">
-        <Logo light size={32} />
+        <Link href="/home" aria-label="Ir a StockOS home">
+          <Logo light size={32} />
+        </Link>
       </div>
 
       <div className="relative flex-1 flex flex-col justify-center gap-7 mt-12 brand-panel-extras">
@@ -249,20 +251,20 @@ function Field({
           onChange={e => onChange(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          style={{
-            width: '100%',
-            padding: '11px 14px',
-            paddingRight: showToggle ? 44 : 14,
-            fontSize: 15,
-            color: '#111827',
-            background: '#fff',
-            border: `1.5px solid ${error ? '#ef4444' : focused ? '#16a34a' : '#e5e7eb'}`,
-            borderRadius: 12,
-            outline: 'none',
-            boxShadow: focused ? `0 0 0 3px ${error ? '#fee2e2' : '#f0fdf4'}` : 'none',
-            transition: 'border-color .15s, box-shadow .15s',
-            fontFamily: 'inherit',
-          }}
+        style={{
+          width: '100%',
+          padding: '11px 14px',
+          paddingRight: showToggle ? 44 : 14,
+          fontSize: 16,
+          color: '#111827',
+          background: '#fff',
+          border: `1.5px solid ${error ? '#ef4444' : focused ? '#16a34a' : '#e5e7eb'}`,
+          borderRadius: 12,
+          outline: 'none',
+          boxShadow: focused ? `0 0 0 3px ${error ? '#fee2e2' : '#f0fdf4'}` : 'none',
+          transition: 'border-color .15s, box-shadow .15s',
+          fontFamily: 'inherit',
+        }}
         />
         {showToggle && (
           <button
@@ -633,43 +635,69 @@ export default function RegisterPage() {
         @keyframes spin      { to { transform:rotate(360deg); } }
         @keyframes floatUp   { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
         @keyframes countUp   { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+        .register-brand-panel { position: sticky; top: 0; height: 100vh; }
+        .register-grid { display: grid; grid-template-columns: clamp(260px,42%,500px) 1fr; min-height: 100vh; }
+        .register-mobile-logo { display: none; }
+
+        .register-right-panel {
+          background: #f9fafb;
+          min-height: 100vh;
+          padding: 36px;
+          justify-content: center;
+          gap: 10px;
+        }
+        .register-card {
+          width: 100%;
+          max-width: 440px;
+          background: #fff;
+          border-radius: 20px;
+          border: 1px solid #e5e7eb;
+          padding: 36px 36px 28px;
+          box-shadow: 0 4px 24px rgba(0,0,0,.06);
+        }
+        .register-terms {
+          margin-top: 18px;
+        }
+
         @media (max-width: 767px) {
           .register-grid { display: block !important; }
           .register-brand-panel { display: none !important; }
           .register-mobile-logo { display: flex !important; }
+          .register-right-panel {
+            justify-content: flex-start;
+            padding: 24px 20px 18px;
+          }
+          .register-card {
+            border-radius: 18px;
+            padding: 28px 22px 22px;
+          }
+          .register-terms {
+            margin-top: 12px;
+            padding-bottom: 6px;
+          }
         }
       `}</style>
 
       <div
         className="register-grid"
-        style={{ display: 'grid', gridTemplateColumns: 'clamp(260px,42%,500px) 1fr', minHeight: '100vh' }}
       >
         {/* Left — branding */}
-        <div className="register-brand-panel" style={{ position: 'sticky', top: 0, height: '100vh' }}>
+        <div className="register-brand-panel">
           <div className="register-brand-inner" style={{ height: '100%' }}>
             <BrandingPanel />
           </div>
         </div>
 
         {/* Right — form */}
-        <div
-          className="flex flex-col items-center justify-center p-6"
-          style={{ background: '#f9fafb', minHeight: '100vh' }}
-        >
+        <div className="register-right-panel flex flex-col items-center">
           {/* Logo solo en mobile */}
           <div className="register-mobile-logo mb-6" style={{ display: 'none' }}>
-            <Logo size={28} />
+            <Link href="/home" aria-label="Ir a StockOS home">
+              <Logo size={28} />
+            </Link>
           </div>
           <div
-            className="w-full"
-            style={{
-              maxWidth: 440,
-              background: '#fff',
-              borderRadius: 20,
-              border: '1px solid #e5e7eb',
-              padding: '36px 36px 28px',
-              boxShadow: '0 4px 24px rgba(0,0,0,.06)',
-            }}
+            className="w-full register-card"
           >
             <div key={animKey}>
               {step === 1 && <Step1 data={formData} onNext={next} />}
@@ -677,7 +705,7 @@ export default function RegisterPage() {
               {step === 3 && <Step3 bizName={formData.biz} />}
             </div>
           </div>
-          <p className="mt-4 text-[12px] text-gray-400 text-center">
+          <p className="register-terms mt-4 text-[12px] text-gray-400 text-center">
             Al continuar aceptás los{' '}
             <Link href="#" className="text-[#16a34a] hover:underline">Términos</Link>
             {' '}y la{' '}
