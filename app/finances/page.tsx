@@ -28,7 +28,8 @@ interface AfipSummary {
   total_net: number
   total_iva: number
 }
-type Period = 'week' | 'month' | 'year'
+type BasePeriod = 'today' | 'week' | 'month' | 'year'
+type Period = BasePeriod | 'all'
 
 const EXPENSE_CATEGORIES = [
   { value: 'proveedores', label: 'Proveedores' },
@@ -56,42 +57,47 @@ export default function FinancesPage() {
   const [incomePag, setIncomePag] = useState<PaginationType>({ total: 0, page: 1, limit: 50, pages: 0 })
   const [incomePage, setIncomePage] = useState(1)
   const [afipSummary, setAfipSummary] = useState<AfipSummary | null>(null)
-  const [afipFrom, setAfipFrom] = useState('')
-  const [afipTo, setAfipTo] = useState('')
-  const [afipLoading, setAfipLoading] = useState(false)
+  const [rangeFrom, setRangeFrom] = useState('')
+  const [rangeTo, setRangeTo] = useState('')
+  const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null)
 
   const periodRef = useRef(period)
   const expPageRef = useRef(expPage)
   const incomePageRef = useRef(incomePage)
-  const afipFromRef = useRef(afipFrom)
-  const afipToRef = useRef(afipTo)
+  const customRangeRef = useRef(customRange)
   useEffect(() => { periodRef.current = period }, [period])
-  useEffect(() => { afipFromRef.current = afipFrom }, [afipFrom])
-  useEffect(() => { afipToRef.current = afipTo }, [afipTo])
+  useEffect(() => { customRangeRef.current = customRange }, [customRange])
 
-  const fetchAfipSummary = useCallback(async (from: string, to: string) => {
-    setAfipLoading(true)
+  const fetchAfipSummary = useCallback(async (from?: string, to?: string) => {
     try {
-      const afip = await api.get<AfipSummary>('/api/invoices/summary', { from, to })
+      const params: Record<string, string> = {}
+      if (from) params.from = from
+      if (to) params.to = to
+      const afip = await api.get<AfipSummary>('/api/invoices/summary', params)
       setAfipSummary(afip)
     } catch (err) {
       console.error(err)
-    } finally {
-      setAfipLoading(false)
     }
   }, [])
 
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const { from, to } = getPeriodDates(periodRef.current)
+      const periodKey = periodRef.current
+      const custom = customRangeRef.current
+      const baseRange = custom ?? (periodKey === 'all' ? null : getPeriodDates(periodKey))
+      const dateParams = baseRange ? { from: baseRange.from, to: baseRange.to } : undefined
       const [sum, exp, inc] = await Promise.all([
-        api.get<FinanceSummary>('/api/finances/summary', { from, to }),
+        api.get<FinanceSummary>('/api/finances/summary', dateParams),
         api.get<PaginatedResponse<Expense>>('/api/finances/expenses', {
-          from, to, page: expPageRef.current, limit: 50
+          ...(dateParams ?? {}),
+          page:  expPageRef.current,
+          limit: 50,
         }),
         api.get<PaginatedResponse<Sale>>('/api/finances/income', {
-          from, to, page: incomePageRef.current, limit: 50
+          ...(dateParams ?? {}),
+          page:  incomePageRef.current,
+          limit: 50,
         }),
       ])
       setSummary(sum)
@@ -99,10 +105,7 @@ export default function FinancesPage() {
       setExpPag(exp.pagination)
       setIncome(inc.data)
       setIncomePag(inc.pagination)
-      // Solo actualizar AFIP con período global si no hay rango custom
-      if (!afipFromRef.current || !afipToRef.current) {
-        fetchAfipSummary(from, to)
-      }
+      fetchAfipSummary(baseRange?.from, baseRange?.to)
     } catch (err) {
       console.error(err)
     } finally {
@@ -130,22 +133,23 @@ export default function FinancesPage() {
     fetchData()
   }, [fetchData])
 
-  const handleAfipDateFilter = useCallback(() => {
-    const f = afipFromRef.current
-    const t = afipToRef.current
-    if (f && t) {
-      fetchAfipSummary(f + 'T00:00:00.000Z', t + 'T23:59:59.999Z')
-    }
-  }, [fetchAfipSummary])
+  const applyCustomRange = useCallback(() => {
+    if (!rangeFrom || !rangeTo) return
+    const from = `${rangeFrom}T00:00:00.000Z`
+    const to = `${rangeTo}T23:59:59.999Z`
+    const next = { from, to }
+    setCustomRange(next)
+    customRangeRef.current = next
+    fetchData()
+  }, [rangeFrom, rangeTo, fetchData])
 
-  const handleAfipClearDates = useCallback(() => {
-    setAfipFrom('')
-    setAfipTo('')
-    afipFromRef.current = ''
-    afipToRef.current = ''
-    const { from, to } = getPeriodDates(periodRef.current)
-    fetchAfipSummary(from, to)
-  }, [fetchAfipSummary])
+  const clearCustomRange = useCallback(() => {
+    setRangeFrom('')
+    setRangeTo('')
+    setCustomRange(null)
+    customRangeRef.current = null
+    fetchData()
+  }, [fetchData])
 
   const handleAddExpense = async () => {
     if (!form.amount || !form.description) return
@@ -168,9 +172,11 @@ export default function FinancesPage() {
   }
 
   const periods: { key: Period; label: string }[] = [
+    { key: 'today', label: 'Hoy' },
     { key: 'week', label: 'Semana' },
     { key: 'month', label: 'Mes' },
     { key: 'year', label: 'Año' },
+    { key: 'all', label: 'Todas' },
   ]
 
   const tabs: { key: Tab; label: string }[] = [
@@ -179,6 +185,17 @@ export default function FinancesPage() {
     { key: 'gastos', label: 'Gastos' },
     { key: 'afip', label: 'ARCA / AFIP' },
   ]
+
+  const handlePeriodChange = (newPeriod: Period) => {
+    if (customRange) {
+      setCustomRange(null)
+      customRangeRef.current = null
+    }
+    setPeriod(newPeriod)
+  }
+
+  const activePeriod: Period = customRange ? 'all' : period
+  const isRangeValid = Boolean(rangeFrom && rangeTo && rangeFrom <= rangeTo)
 
   return (
     <AppShell>
@@ -193,20 +210,56 @@ export default function FinancesPage() {
 
       <div className="p-5 space-y-4">
         {/* Período */}
-        <div className="flex gap-2">
-          {periods.map(p => (
-            <button key={p.key} onClick={() => setPeriod(p.key)}
-              className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${period === p.key ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-                }`}>
-              {p.label}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex gap-2 flex-wrap">
+            {periods.map(p => (
+              <button key={p.key} onClick={() => handlePeriodChange(p.key)}
+                className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${activePeriod === p.key ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                  }`}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 border-l border-[var(--border)] pl-3">
+            <span className="text-xs text-[var(--text3)]">Rango personalizado:</span>
+            <input
+              type="date"
+              value={rangeFrom}
+              onChange={e => setRangeFrom(e.target.value)}
+              className="text-xs px-2.5 py-1 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+            />
+            <span className="text-xs text-[var(--text3)]">→</span>
+            <input
+              type="date"
+              value={rangeTo}
+              onChange={e => setRangeTo(e.target.value)}
+              className="text-xs px-2.5 py-1 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={applyCustomRange}
+              disabled={!isRangeValid}
+            >Aplicar</Button>
+            {(customRange || rangeFrom || rangeTo) && (
+              <button
+                type="button"
+                onClick={clearCustomRange}
+                className="text-xs text-[var(--text3)] hover:text-[var(--text)] underline"
+              >Limpiar</button>
+            )}
+          </div>
         </div>
+        {customRange && (
+          <p className="text-xs text-[var(--text3)]">
+            Mostrando rango personalizado: {rangeFrom} → {rangeTo}
+          </p>
+        )}
 
         {loading ? <PageLoader /> : (
           <>
             {/* Stats rápidas */}
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
               <StatCard title="Ingresos" value={formatCurrency(summary?.revenue ?? 0)} icon={TrendingUp} accent />
               <StatCard title="Gastos" value={formatCurrency(summary?.expenses ?? 0)} icon={TrendingDown} />
               <StatCard
@@ -214,7 +267,6 @@ export default function FinancesPage() {
                 value={formatCurrency(summary?.net ?? 0)}
                 subtitle={`Margen ${summary?.margin_pct ?? 0}%`}
                 icon={DollarSign}
-                className="col-span-2 md:col-span-1"
               />
             </div>
 
@@ -320,46 +372,21 @@ export default function FinancesPage() {
 
             {/* Tab: ARCA / AFIP */}
             {tab === 'afip' && (() => {
-              const isCustomRange = !!(afipFrom && afipTo)
-              const { from: pFrom, to: pTo } = getPeriodDates(period)
-              const displayFrom = isCustomRange ? afipFrom : pFrom.slice(0, 10)
-              const displayTo   = isCustomRange ? afipTo   : pTo.slice(0, 10)
+              const activeRange = customRange ?? (period === 'all' ? null : getPeriodDates(period))
               const fmtDate = (d: string) =>
                 new Date(d + (d.length === 10 ? 'T12:00:00' : '')).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
               return (
               <div className="space-y-4">
-                {/* Selector de rango */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-[var(--text3)]">Rango personalizado:</span>
-                  <input
-                    type="date" value={afipFrom} onChange={e => setAfipFrom(e.target.value)}
-                    className="text-xs px-2.5 py-1.5 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-                  />
-                  <span className="text-xs text-[var(--text3)]">→</span>
-                  <input
-                    type="date" value={afipTo} onChange={e => setAfipTo(e.target.value)}
-                    className="text-xs px-2.5 py-1.5 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-                  />
-                  <Button onClick={handleAfipDateFilter} disabled={!afipFrom || !afipTo || afipLoading}>
-                    {afipLoading ? 'Cargando...' : 'Consultar'}
-                  </Button>
-                  {isCustomRange && (
-                    <button onClick={handleAfipClearDates}
-                      className="text-xs text-[var(--text3)] hover:text-[var(--text)] underline">
-                      Limpiar
-                    </button>
-                  )}
-                </div>
                 <p className="text-xs text-[var(--text3)] -mt-1">
-                  {isCustomRange
-                    ? <>Mostrando rango personalizado: <span className="font-medium text-[var(--text2)]">{fmtDate(displayFrom)} → {fmtDate(displayTo)}</span></>
-                    : <>Período del selector: <span className="font-medium text-[var(--text2)]">{fmtDate(displayFrom)} → {fmtDate(displayTo)}</span></>
+                  {activeRange
+                    ? <>Período del selector: <span className="font-medium text-[var(--text2)]">{fmtDate(activeRange.from.slice(0, 10))} → {fmtDate(activeRange.to.slice(0, 10))}</span></>
+                    : <>Período del selector: <span className="font-medium text-[var(--text2)]">Todo el histórico</span></>
                   }
                   <span className="ml-2">· Solo comprobantes autorizados con CAE</span>
                 </p>
 
                 {/* Stat cards */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                   <StatCard
                     title="Total facturado"
                     value={formatCurrency(afipSummary?.facturas ?? 0)}

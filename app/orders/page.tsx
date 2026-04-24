@@ -1148,19 +1148,19 @@ export default function OrdersPage() {
             </div>
 
             {/* Tabla de ítems */}
-            <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden mb-4">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--border)]">
-                    <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)]">Producto</th>
-                    <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Cant.</th>
-                    <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Precio</th>
-                    <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Subtotal</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--border)]">
-                  {detail.order_items?.map(item => {
-                    return (
+            <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] mb-4">
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-[var(--border)]">
+                      <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)]">Producto</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Cant.</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Precio</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[var(--border)]">
+                    {detail.order_items?.map(item => (
                       <tr key={item.id}>
                         <td className="px-3 py-2.5">
                           <p className="font-medium text-[var(--text)]">{item.products?.name ?? '(producto eliminado)'}</p>
@@ -1169,22 +1169,58 @@ export default function OrdersPage() {
                         <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">{formatCurrency(item.unit_price)}</td>
                         <td className="px-3 py-2.5 text-right mono font-semibold text-[var(--text)]">{formatCurrency(item.subtotal)}</td>
                       </tr>
-                    )
-                  })}
-                </tbody>
-                <tfoot>
-                  {detail.discount > 0 && (
-                    <tr className="border-t border-[var(--border)]">
-                      <td colSpan={3} className="px-3 py-2 text-sm text-[var(--text3)]">Descuento</td>
-                      <td className="px-3 py-2 text-right mono text-[var(--danger)]">− {formatCurrency(detail.discount)}</td>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    {detail.discount > 0 && (
+                      <tr className="border-t border-[var(--border)]">
+                        <td colSpan={3} className="px-3 py-2 text-sm text-[var(--text3)]">Descuento</td>
+                        <td className="px-3 py-2 text-right mono text-[var(--danger)]">− {formatCurrency(detail.discount)}</td>
+                      </tr>
+                    )}
+                    <tr className="border-t-2 border-[var(--border)]">
+                      <td colSpan={3} className="px-3 py-2.5 text-sm font-semibold">Total</td>
+                      <td className="px-3 py-2.5 text-right mono font-bold text-[var(--accent)]">{formatCurrency(detail.total)}</td>
                     </tr>
+                  </tfoot>
+                </table>
+              </div>
+                <div className="sm:hidden px-3 py-3 pt-4 space-y-3 border-t border-[var(--border)]">
+                  <div className="flex text-xs uppercase tracking-widest text-[var(--text3)] justify-between">
+                    <span>Producto</span>
+                    <span className="text-right">Subtotal</span>
+                  </div>
+                  <div className="border-b border-[var(--border)]" />
+                  <div className="space-y-3 divide-y divide-[var(--border)]">
+                    {detail.order_items?.map(item => (
+                      <div key={item.id} className="space-y-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-medium text-[var(--text)]">{item.products?.name ?? '(producto eliminado)'}</p>
+                          <span className="mono text-[var(--text2)]">{formatCurrency(item.subtotal)}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-3 text-xs text-[var(--text3)]">
+                          <span>
+                            {item.quantity} {item.products?.unit ?? ''}
+                          </span>
+                          <span>{formatCurrency(item.unit_price)}</span>
+                          {item.products?.barcode && (
+                            <span className="mono truncate max-w-[180px]">{item.products.barcode}</span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {detail.discount > 0 && (
+                    <div className="flex items-center justify-between text-xs text-[var(--danger)]">
+                      <span>Descuento</span>
+                      <span className="mono">− {formatCurrency(detail.discount)}</span>
+                    </div>
                   )}
-                  <tr className="border-t-2 border-[var(--border)]">
-                    <td colSpan={3} className="px-3 py-2.5 text-sm font-semibold">Total</td>
-                    <td className="px-3 py-2.5 text-right mono font-bold text-[var(--accent)]">{formatCurrency(detail.total)}</td>
-                  </tr>
-                </tfoot>
-              </table>
+                  <div className="flex items-center justify-between text-sm font-semibold">
+                    <span>Total</span>
+                    <span className="mono text-[var(--accent)]">{formatCurrency(detail.total)}</span>
+                  </div>
+                </div>
             </div>
 
             {detail.notes && (
@@ -1220,34 +1256,34 @@ export default function OrdersPage() {
 
             {/* Acciones del detalle */}
             <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex gap-2">
+              <div className="space-y-2">
+                <div className="flex flex-wrap gap-2">
                   <button
                     onClick={() => printOrder(detail)}
-                    className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors border border-[var(--border)]">
+                    className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors border border-[var(--border)]">
                     <Printer size={14} /> Imprimir
                   </button>
                   <button
                     onClick={() => printRemito(detail)}
-                    className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors border border-[var(--border)]">
+                    className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors border border-[var(--border)]">
                     <FileText size={14} /> Remito
                   </button>
                   {detail.sale_id && (
                     <button
                       onClick={() => setSaleDetailId(detail.sale_id!)}
-                      className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors border border-[var(--border)]">
+                      className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors border border-[var(--border)]">
                       <Receipt size={14} /> Ver venta
                     </button>
                   )}
                   {detailInvoice && (
                     <button
                       onClick={() => router.push(`/invoices?open=${detailInvoice.id}`)}
-                      className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors border border-[var(--border)]">
+                      className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors border border-[var(--border)]">
                       <FileText size={14} /> Comprobante {detailInvoice.invoice_type}-{String(detailInvoice.numero).padStart(5, '0')}
                     </button>
                   )}
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2 justify-end">
                   {getActions(detail).map(a => (
                     <button key={a.action}
                       onClick={() => {
