@@ -23,7 +23,7 @@ export const metadata: Metadata = {
     siteName: 'StockOS',
     images: [
       {
-        url: '/opengraph-image',
+        url: 'https://stockos.digital/og.png',
         width: 1200,
         height: 630,
         alt: 'StockOS — Sistema de gestión para retail en Argentina y LATAM',
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
     title: 'StockOS — Sistema de gestión para retail en Argentina y LATAM',
     description:
       'Stock, precios y ventas en tiempo real. Desde una caja hasta múltiples sucursales.',
-    images: ['/opengraph-image'],
+    images: ['https://stockos.digital/og.png'],
   },
   keywords: [
     'sistema de gestión retail',

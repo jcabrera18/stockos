@@ -26,7 +26,7 @@ export const metadata: Metadata = {
     locale: 'es_AR',
     images: [
       {
-        url: `${BASE_URL}/opengraph-image`,
+        url: `${BASE_URL}/og.png`,
         width: 1200,
         height: 630,
         alt: 'StockOS — Control total de tu negocio, en tiempo real',
@@ -37,10 +37,21 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'StockOS — Control total de tu negocio',
     description: 'Stock, ventas y precios en un solo lugar. Para vender más y no perder plata.',
-    images: [`${BASE_URL}/opengraph-image`],
+    images: [`${BASE_URL}/og.png`],
   },
   icons: {
-    icon: '/icon.svg',
+    icon: [{ url: '/icon.svg', type: 'image/svg+xml' }],
+    apple: [{ url: '/apple-icon', sizes: '180x180', type: 'image/png' }],
+    shortcut: '/icon.svg',
+  },
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'StockOS',
+  },
+  other: {
+    'msapplication-TileColor': '#16a34a',
   },
 }
 
