@@ -4,11 +4,11 @@ import { useEffect, useState } from 'react'
 type Theme = 'dark' | 'light'
 
 export function useTheme() {
-  const [theme, setTheme] = useState<Theme>('dark')
+  const [theme, setTheme] = useState<Theme>('light')
 
   useEffect(() => {
     const saved = localStorage.getItem('stockos-theme') as Theme | null
-    const initial = saved ?? 'dark'
+    const initial = saved ?? 'light'
     setTheme(initial)
     document.documentElement.setAttribute('data-theme', initial)
   }, [])

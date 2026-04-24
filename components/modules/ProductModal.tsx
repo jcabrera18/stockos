@@ -726,7 +726,11 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                   type="checkbox"
                   className="sr-only peer"
                   checked={form.use_fixed_sell_price}
-                  onChange={e => setForm(f => ({ ...f, use_fixed_sell_price: e.target.checked, sell_price: e.target.checked ? f.sell_price : '' }))}
+                  onChange={e => {
+                    const checked = e.target.checked
+                    setForm(f => ({ ...f, use_fixed_sell_price: checked, sell_price: checked ? f.sell_price : '' }))
+                    if (checked) setTimeout(() => sellPriceRef.current?.focus(), 30)
+                  }}
                 />
                 <div className="w-9 h-5 rounded-full bg-[var(--border)] peer-checked:bg-[var(--accent)] transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4" />
               </div>
@@ -755,7 +759,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                 }}
                 placeholder="0.00"
                 error={errors.sell_price}
-                autoFocus
               />
             )}
           </div>

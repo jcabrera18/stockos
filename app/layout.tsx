@@ -1,7 +1,10 @@
 import type { Metadata } from 'next'
 import Script from 'next/script'
 import { Suspense } from 'react'
+import { Inter } from 'next/font/google'
 import './globals.css'
+
+const inter = Inter({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'], display: 'swap' })
 import { Toaster } from 'sonner'
 import { AppShellWrapper } from '@/components/layout/AppShellWrapper'
 import { PostHogProvider } from '@/components/PostHogProvider'
@@ -40,9 +43,12 @@ export const metadata: Metadata = {
     images: [`${BASE_URL}/og.png`],
   },
   icons: {
-    icon: [{ url: '/icon.svg', type: 'image/svg+xml' }],
-    apple: [{ url: '/apple-icon', sizes: '180x180', type: 'image/png' }],
-    shortcut: '/icon.svg',
+    icon: [
+      { url: '/favicon.ico', sizes: '32x32', type: 'image/x-icon' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+    shortcut: '/favicon.ico',
   },
   manifest: '/manifest.webmanifest',
   appleWebApp: {
@@ -52,12 +58,13 @@ export const metadata: Metadata = {
   },
   other: {
     'msapplication-TileColor': '#16a34a',
+    'msapplication-TileImage': '/apple-touch-icon.png',
   },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es" data-theme="dark" suppressHydrationWarning>
+    <html lang="es" data-theme="dark" suppressHydrationWarning className={inter.className}>
       <body>
         <Suspense>
           <PostHogProvider>
@@ -78,7 +85,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
         <Script id="theme-init" strategy="beforeInteractive">{`
           (function() {
-            const saved = localStorage.getItem('stockos-theme') || 'dark';
+            const saved = localStorage.getItem('stockos-theme') || 'light';
             document.documentElement.setAttribute('data-theme', saved);
           })();
         `}</Script>
