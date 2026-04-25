@@ -24,12 +24,12 @@ export interface PrintInvoiceData {
 }
 
 export interface PrintBizData {
-  name?: string
-  cuit?: string
-  address?: string
-  phone?: string
-  iva_condition?: string
-  afip_punto_venta?: number
+  name?: string | null
+  cuit?: string | null
+  address?: string | null
+  phone?: string | null
+  iva_condition?: string | null
+  afip_punto_venta?: number | null
 }
 
 const TYPE_LABELS: Record<string, string> = {

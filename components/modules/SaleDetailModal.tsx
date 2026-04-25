@@ -275,7 +275,7 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
 
   const handleDownloadInvoice = () => {
     if (!invoice) return
-    printFacturaA4(invoice, user?.business, customer?.full_name)
+    printFacturaA4(invoice, user?.business ?? undefined, customer?.full_name)
   }
 
   const handleAuthorize = async () => {
