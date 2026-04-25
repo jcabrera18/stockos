@@ -314,7 +314,7 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
         toast.success(`Factura ${convertType} autorizada — CAE: ${authorized.afip_cae ?? authorized.cae}`, { id: 'afip-auth' })
         const merged = { ...authorized, invoice_items: authorized.invoice_items ?? converted.invoice_items }
         setInvoice(merged)
-        await printFacturaA4(merged, user?.business, customer?.full_name)
+        await printFacturaA4(merged, user?.business ?? undefined, customer?.full_name)
       } catch (afipErr: unknown) {
         toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar en ARCA', { id: 'afip-auth' })
         setInvoice(converted)
