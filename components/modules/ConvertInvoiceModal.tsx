@@ -83,7 +83,15 @@ export function ConvertInvoiceModal({ open, onClose, invoiceId, fallbackCustomer
         const authorized = await api.post<InvoiceSummary>(`/api/invoices/${converted.id}/authorize`, {})
         toast.success(`Factura ${convertType} autorizada — CAE: ${authorized.afip_cae}`, { id: 'afip-auth' })
         const merged = { ...authorized, invoice_items: authorized.invoice_items ?? converted.invoice_items }
-        await printFacturaA4(merged, user?.business, fallbackCustomerName)
+        const biz = user?.business
+        await printFacturaA4(merged, biz ? {
+          name: biz.name,
+          cuit: biz.cuit ?? undefined,
+          address: biz.address ?? undefined,
+          phone: biz.phone ?? undefined,
+          iva_condition: biz.iva_condition,
+          afip_punto_venta: biz.afip_punto_venta ?? undefined,
+        } : undefined, fallbackCustomerName)
       } catch (afipErr: unknown) {
         toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar en ARCA', { id: 'afip-auth' })
       }
