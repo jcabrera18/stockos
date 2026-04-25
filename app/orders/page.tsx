@@ -21,6 +21,7 @@ import {
   ClipboardList, Printer, Receipt, FileText, RefreshCw,
 } from 'lucide-react'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
+import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
 import { useAuth } from '@/hooks/useAuth'
 import { usePOSSync } from '@/hooks/usePOSSync'
@@ -57,6 +58,7 @@ interface OrderSummary {
 
 interface OrderDetail extends OrderSummary {
   warehouse_id?: string
+  invoice_id?: string
   sale_id?: string
   order_items: {
     id: string
@@ -69,6 +71,7 @@ interface OrderDetail extends OrderSummary {
   }[]
   warehouses?: { name: string }
   customers?: { full_name: string; current_balance: number; document?: string; phone?: string }
+  invoices?: { id: string; invoice_type: string; numero: number; afip_status: string } | null
 }
 
 interface CartItem {
@@ -164,6 +167,8 @@ export default function OrdersPage() {
   const [deliverNotes, setDeliverNotes] = useState('')
   const [delivering, setDelivering] = useState(false)
   const [saleDetailId, setSaleDetailId] = useState<string | null>(null)
+  const [autoConvertSale, setAutoConvertSale] = useState(false)
+  const [convertInvoiceId, setConvertInvoiceId] = useState<string | null>(null)
   const [detailInvoice, setDetailInvoice] = useState<{ id: string; invoice_type: string; numero: number } | null>(null)
 
   // Confirmación cancelación
@@ -748,7 +753,10 @@ export default function OrdersPage() {
     try {
       const d = await api.get<OrderDetail>(`/api/orders/${id}`)
       setDetail(d)
-      if (d.sale_id) {
+      // Usar invoice directo del pedido si existe
+      if (d.invoices) {
+        setDetailInvoice(d.invoices)
+      } else if (d.sale_id) {
         api.get<{ id: string; invoice_type: string; numero: number } | null>(`/api/invoices/sale/${d.sale_id}`)
           .then(inv => { if (inv) setDetailInvoice(inv) })
           .catch(() => { })
@@ -1298,6 +1306,28 @@ export default function OrdersPage() {
                       className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors border border-[var(--border)]">
                       <FileText size={14} /> Comprobante {detailInvoice.invoice_type}-{String(detailInvoice.numero).padStart(5, '0')}
                     </button>
+                  )}
+                  {detail.status !== 'pending' && detail.status !== 'cancelled' && (!detailInvoice || detailInvoice.invoice_type === 'X') && (
+                    detailInvoice?.invoice_type === 'X' ? (
+                      <button
+                        onClick={() => setConvertInvoiceId(detailInvoice.id)}
+                        className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors">
+                        <Receipt size={14} /> Facturar
+                      </button>
+                    ) : (
+                      <button
+                        onClick={async () => {
+                          try {
+                            const inv = await api.post<{ id: string }>(`/api/orders/${detail.id}/invoice`, {})
+                            setConvertInvoiceId(inv.id)
+                          } catch (err: unknown) {
+                            toast.error(err instanceof Error ? err.message : 'Error al generar comprobante')
+                          }
+                        }}
+                        className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors">
+                        <Receipt size={14} /> Facturar
+                      </button>
+                    )
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2 justify-end">
@@ -2016,9 +2046,18 @@ export default function OrdersPage() {
       {/* ── Modal detalle de venta vinculada ── */}
       <SaleDetailModal
         open={!!saleDetailId}
-        onClose={() => setSaleDetailId(null)}
+        onClose={() => { setSaleDetailId(null); setAutoConvertSale(false) }}
         saleId={saleDetailId}
         orderId={detail?.id}
+        autoConvert={autoConvertSale}
+      />
+
+      <ConvertInvoiceModal
+        open={!!convertInvoiceId}
+        onClose={() => setConvertInvoiceId(null)}
+        invoiceId={convertInvoiceId}
+        fallbackCustomerName={detail?.customers?.full_name}
+        onSuccess={() => { if (detail) openDetail(detail.id) }}
       />
 
       {/* ── Confirmación cancelación ── */}
