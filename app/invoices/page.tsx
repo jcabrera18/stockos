@@ -479,7 +479,7 @@ function InvoicesPageInner() {
 
   // ── Factura A4 moderna ───────────────────────────────────────────────────
   const handlePrintFactura = (invoice: Invoice) => {
-    printFacturaA4(invoice, user?.business)
+    printFacturaA4(invoice, user?.business ?? undefined)
   }
 
   return (
