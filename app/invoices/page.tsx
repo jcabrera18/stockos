@@ -479,7 +479,15 @@ function InvoicesPageInner() {
 
   // ── Factura A4 moderna ───────────────────────────────────────────────────
   const handlePrintFactura = (invoice: Invoice) => {
-    printFacturaA4(invoice, user?.business ?? undefined)
+    const biz = user?.business
+    printFacturaA4(invoice, biz ? {
+      name: biz.name,
+      cuit: biz.cuit ?? undefined,
+      address: biz.address ?? undefined,
+      phone: biz.phone ?? undefined,
+      iva_condition: biz.iva_condition,
+      afip_punto_venta: biz.afip_punto_venta ?? undefined,
+    } : undefined)
   }
 
   return (
