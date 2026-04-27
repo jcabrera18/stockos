@@ -52,6 +52,9 @@ export interface Product {
   barcode?: string
   image_url?: string
   cost_price: number
+  cost_price_net?: number
+  vat_rate?: number
+  cost_price_with_vat?: number
   sell_price: number
   stock_current: number
   stock_min: number

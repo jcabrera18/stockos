@@ -29,6 +29,13 @@ const UNITS = [
   { value: 'pack', label: 'Pack' },
 ]
 
+const VAT_OPTIONS = [
+  { value: '0', label: '0%' },
+  { value: '10.5', label: '10,5%' },
+  { value: '21', label: '21%' },
+  { value: '27', label: '27%' },
+]
+
 interface CostHistoryEntry {
   id:                string
   supplier_id:       string | null
@@ -61,9 +68,12 @@ const emptyForm = {
   category_id: '',
   supplier_id: '',
   brand_id: '',
-  cost_price: '',
+  cost_price_net: '',
+  vat_rate: '21',
   sell_price: '',
-  initial_stock: '',
+  initial_stock: '0',
+  stock_min: '0',
+  stock_max: '9999',
   use_fixed_sell_price: false,
   unit: 'unidad',
   price_mode: 'fixed' as 'fixed' | 'custom',
@@ -194,6 +204,9 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const [minimized, setMinimized] = useState(false)
   const [expressMode, setExpressMode] = useState(true)
   const isEdit = !!product
+  const costNet = Number(form.cost_price_net) || 0
+  const vatRate = Number(form.vat_rate) || 0
+  const costWithVat = Math.round(costNet * (1 + vatRate / 100) * 100) / 100
 
   // Alt+F para toggle precio fijo (solo cuando el modal está abierto)
   useEffect(() => {
@@ -268,9 +281,12 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         category_id: product.category_id ?? '',
         supplier_id: product.supplier_id ?? '',
         brand_id: (product as Product & { brand_id?: string }).brand_id ?? '',
-        cost_price: String(product.cost_price),
+        cost_price_net: String(product.cost_price_net ?? product.cost_price ?? 0),
+        vat_rate: String(product.vat_rate ?? 0),
         sell_price: product.use_fixed_sell_price ? String(product.sell_price) : '',
-        initial_stock: '',
+        initial_stock: String(product.stock_current ?? 0),
+        stock_min: String(product.stock_min ?? 0),
+        stock_max: String(product.stock_max ?? 9999),
         use_fixed_sell_price: product.use_fixed_sell_price ?? false,
         unit: product.unit,
         price_mode: product.price_mode ?? 'fixed',
@@ -309,15 +325,14 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     if (Object.keys(errs).length > 0) { setErrors(errs); return }
     setSaving(true)
     try {
-      const costPrice = Number(form.cost_price) || 0
       let sellPrice: number
       if (form.use_fixed_sell_price && Number(form.sell_price) > 0) {
         sellPrice = Number(form.sell_price)
       } else {
         const defaultList = priceLists.find(l => l.is_default) ?? priceLists[0]
         sellPrice = defaultList
-          ? Math.round(costPrice * (1 + defaultList.margin_pct / 100) * 100) / 100
-          : costPrice
+          ? Math.round(costWithVat * (1 + defaultList.margin_pct / 100) * 100) / 100
+          : costWithVat
       }
       const payload = {
         name: form.name.trim(),
@@ -327,12 +342,15 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         category_id: form.category_id || null,
         supplier_id: form.supplier_id || null,
         brand_id: form.brand_id || null,
-        cost_price: costPrice,
+        cost_price: costWithVat,
+        cost_price_net: costNet,
+        vat_rate: vatRate,
+        cost_price_with_vat: costWithVat,
         sell_price: sellPrice,
         use_fixed_sell_price: form.use_fixed_sell_price,
         initial_stock: Number(form.initial_stock) || 0,
-        stock_min: 0,
-        stock_max: form.price_mode === 'custom' ? 999999 : 9999,
+        stock_min: Number(form.stock_min) || 0,
+        stock_max: Number(form.stock_max) || 0,
         unit: form.unit,
         price_mode: form.price_mode,
       }
@@ -368,7 +386,10 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const validate = () => {
     const errs: Record<string, string> = {}
     if (!form.name.trim()) errs.name = 'El nombre es obligatorio'
-    if (Number(form.cost_price) < 0) errs.cost_price = 'Debe ser mayor a 0'
+    if (Number(form.cost_price_net) < 0) errs.cost_price_net = 'Debe ser mayor o igual a 0'
+    if (Number(form.stock_min) < 0) errs.stock_min = 'Debe ser mayor o igual a 0'
+    if (Number(form.stock_max) < 0) errs.stock_max = 'Debe ser mayor o igual a 0'
+    if (Number(form.stock_max) < Number(form.stock_min)) errs.stock_max = 'Debe ser mayor o igual al stock minimo'
     return errs
   }
 
@@ -378,15 +399,14 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
 
     setSaving(true)
     try {
-      const costPrice = Number(form.cost_price) || 0
       let sellPrice: number
       if (form.use_fixed_sell_price && Number(form.sell_price) > 0) {
         sellPrice = Number(form.sell_price)
       } else {
         const defaultList = priceLists.find(l => l.is_default) ?? priceLists[0]
         sellPrice = defaultList
-          ? Math.round(costPrice * (1 + defaultList.margin_pct / 100) * 100) / 100
-          : costPrice
+          ? Math.round(costWithVat * (1 + defaultList.margin_pct / 100) * 100) / 100
+          : costWithVat
       }
 
       const payload = {
@@ -397,12 +417,15 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         category_id: form.category_id || null,
         supplier_id: form.supplier_id || null,
         brand_id: form.brand_id || null,
-        cost_price: costPrice,
+        cost_price: costWithVat,
+        cost_price_net: costNet,
+        vat_rate: vatRate,
+        cost_price_with_vat: costWithVat,
         sell_price: sellPrice,
         use_fixed_sell_price: form.use_fixed_sell_price,
         initial_stock: Number(form.initial_stock) || 0,
-        stock_min: 0,
-        stock_max: form.price_mode === 'custom' ? 999999 : 9999,
+        stock_min: Number(form.stock_min) || 0,
+        stock_max: Number(form.stock_max) || 0,
         unit: form.unit,
         price_mode: form.price_mode,
       }
@@ -615,28 +638,31 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
           )}
         </div>
 
-        {/* Fila 3: Precios — siempre visible */}
-        <div className={expressMode && !isEdit ? 'grid grid-cols-1 gap-3' : 'grid grid-cols-3 gap-3'}>
-          <Input
-            ref={costPriceRef}
-            label="Precio de costo"
-            type="number"
-            min="0"
-            step="0.01"
-            value={form.cost_price}
-            onChange={set('cost_price')}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && expressMode && !isEdit) {
-                e.preventDefault()
-                if (form.use_fixed_sell_price) sellPriceRef.current?.focus()
-                else if (priceLists.length === 0) handleSave()
-                // Con listas: el preview aparece abajo, Enter queda libre para guardar con el botón
-              }
-            }}
-            placeholder="0.00"
-            error={errors.cost_price}
-          />
-          {(!expressMode || isEdit) && (
+        {(!expressMode || isEdit) && (
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium text-[var(--text2)]">Categoría</label>
+              <button
+                type="button"
+                onClick={() => { setNewCatName(''); setNewCatParent(form.category_id); setCategorySubModal(true) }}
+                title="Crear categoría"
+                className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+              >
+                <Plus size={12} /> Nueva
+              </button>
+            </div>
+            <CategoryTreePicker
+              categoryMap={categoryMap}
+              childrenMap={childrenMap}
+              value={form.category_id}
+              onChange={id => { setForm(f => ({ ...f, category_id: id })); setErrors(er => ({ ...er, category_id: '' })) }}
+              selectClass={selectClass}
+            />
+          </div>
+        )}
+
+        {(!expressMode || isEdit) && (
+          <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium text-[var(--text2)]">Proveedor</label>
@@ -656,8 +682,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                 placeholder="Sin proveedor"
               />
             </div>
-          )}
-          {(!expressMode || isEdit) && (
             <div className="flex flex-col gap-1">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium text-[var(--text2)]">Marca</label>
@@ -677,29 +701,56 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                 placeholder="Sin marca"
               />
             </div>
-          )}
-        </div>
-
-        {/* Stock inicial — solo al crear */}
-        {!isEdit && (
-          <Input
-            label="Stock inicial"
-            type="number"
-            min="0"
-            step="1"
-            value={form.initial_stock}
-            onChange={set('initial_stock')}
-            placeholder="0"
-          />
+          </div>
         )}
 
-        {/* Preview listas de precio — modo express */}
-        {expressMode && !isEdit && !form.use_fixed_sell_price && form.cost_price && Number(form.cost_price) > 0 && priceLists.length > 0 && (
+        {/* Precios e IVA */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-[var(--text2)]">Costo e IVA</p>
+            <p className="text-xs text-[var(--text3)]">Las listas calculan sobre el costo con IVA</p>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Input
+              ref={costPriceRef}
+              label="Costo"
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.cost_price_net}
+              onChange={set('cost_price_net')}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && expressMode && !isEdit) {
+                  e.preventDefault()
+                  if (form.use_fixed_sell_price) sellPriceRef.current?.focus()
+                  else if (priceLists.length === 0) handleSave()
+                }
+              }}
+              placeholder="0.00"
+              error={errors.cost_price_net}
+            />
+            <Select
+              label="IVA"
+              options={VAT_OPTIONS}
+              value={form.vat_rate}
+              onChange={set('vat_rate')}
+            />
+            <Input
+              label="Costo con IVA"
+              value={costWithVat ? String(costWithVat) : '0'}
+              readOnly
+              placeholder="0.00"
+              hint="Calculado automáticamente"
+            />
+          </div>
+        </div>
+
+        {!form.use_fixed_sell_price && costWithVat > 0 && priceLists.length > 0 && (
           <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
             <p className="text-xs font-medium text-[var(--text3)] mb-1">Precio según lista</p>
             {priceLists.slice(0, 3).map(list => {
-              const price = Math.round(Number(form.cost_price) * (1 + list.margin_pct / 100) * 100) / 100
-              const gain = price - Number(form.cost_price)
+              const price = Math.round(costWithVat * (1 + list.margin_pct / 100) * 100) / 100
+              const gain = price - costWithVat
               return (
                 <div key={list.id} className="flex items-center justify-between text-sm">
                   <span className="text-[var(--text2)]">{list.name}</span>
@@ -794,58 +845,13 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                 placeholder="0.00"
                 error={errors.sell_price}
               />
-            ) : (
-              form.cost_price && Number(form.cost_price) > 0 && (
-                <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
-                  <p className="text-xs font-medium text-[var(--text3)] mb-1">Precio según lista</p>
-                  {priceLists.slice(0, 3).map(list => {
-                    const price = Math.round(Number(form.cost_price) * (1 + list.margin_pct / 100) * 100) / 100
-                    const gain = price - Number(form.cost_price)
-                    return (
-                      <div key={list.id} className="flex items-center justify-between text-sm">
-                        <span className="text-[var(--text2)]">{list.name}</span>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-[var(--text3)]">
-                            +{list.margin_pct}% · ganancia ${gain.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                          </span>
-                          <span className="font-semibold mono text-[var(--accent)]">
-                            ${price.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                          </span>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )
-            )}
+            ) : null}
           </div>
         )}
 
         {/* Campos opcionales — solo en modo completo */}
         {(!expressMode || isEdit) && (
           <>
-            {/* Categoría — árbol navegable */}
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-[var(--text2)]">Categoría</label>
-                <button
-                  type="button"
-                  onClick={() => { setNewCatName(''); setNewCatParent(form.category_id); setCategorySubModal(true) }}
-                  title="Crear categoría"
-                  className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
-                >
-                  <Plus size={12} /> Nueva
-                </button>
-              </div>
-              <CategoryTreePicker
-                categoryMap={categoryMap}
-                childrenMap={childrenMap}
-                value={form.category_id}
-                onChange={id => { setForm(f => ({ ...f, category_id: id })); setErrors(er => ({ ...er, category_id: '' })) }}
-                selectClass={selectClass}
-              />
-            </div>
-
             {/* Precio libre toggle */}
             <label className="flex items-center gap-3 cursor-pointer select-none">
               <div className="relative flex-shrink-0">
@@ -872,6 +878,38 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                 placeholder="Descripción opcional del producto..."
                 rows={2}
                 className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] transition-colors resize-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <Input
+                label="Stock inicial"
+                type="number"
+                min="0"
+                step="1"
+                value={form.initial_stock}
+                onChange={set('initial_stock')}
+                placeholder="0"
+              />
+              <Input
+                label="Stock minimo"
+                type="number"
+                min="0"
+                step="1"
+                value={form.stock_min}
+                onChange={set('stock_min')}
+                placeholder="0"
+                error={errors.stock_min}
+              />
+              <Input
+                label="Stock maximo"
+                type="number"
+                min="0"
+                step="1"
+                value={form.stock_max}
+                onChange={set('stock_max')}
+                placeholder="9999"
+                error={errors.stock_max}
               />
             </div>
           </>

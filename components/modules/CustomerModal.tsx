@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
@@ -59,11 +59,22 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
   const [form, setForm] = useState(empty)
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const nameInputRef = useRef<HTMLInputElement>(null)
   const isEdit = !!customer
+
+  const focusNameInput = () => {
+    requestAnimationFrame(() => nameInputRef.current?.focus())
+  }
+
+  const resetForm = () => {
+    setForm(empty)
+    setErrors({})
+    focusNameInput()
+  }
 
   useEffect(() => {
     if (!open) return
-    if (!customer) { setForm(empty); setErrors({}); return }
+    if (!customer) { resetForm(); return }
 
     // Fetch fresco para garantizar que los nuevos campos estén disponibles
     api.get<CustomerSummary>(`/api/customers/${customer.id}`)
@@ -94,7 +105,7 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
     setErrors(er => ({ ...er, [field]: '' }))
   }
 
-  const handleSave = async () => {
+  const handleSave = async (mode: 'close' | 'create-another' = 'close') => {
     if (!form.full_name.trim()) { setErrors({ full_name: 'El nombre es obligatorio' }); return }
     setSaving(true)
     try {
@@ -119,26 +130,46 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
         toast.success('Cliente actualizado')
       } else {
         await api.post('/api/customers', payload)
-        toast.success('Cliente creado')
+        toast.success(mode === 'create-another' ? 'Cliente creado. Listo para cargar otro.' : 'Cliente creado')
       }
       onSaved()
-      onClose()
+      if (!isEdit && mode === 'create-another') {
+        resetForm()
+      } else {
+        onClose()
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
     } finally { setSaving(false) }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Enter') return
+
+    const withPrimaryModifier = e.metaKey || e.ctrlKey
+    if (!withPrimaryModifier) return
+
+    e.preventDefault()
+
+    if (!isEdit && e.shiftKey) {
+      void handleSave('create-another')
+      return
+    }
+
+    void handleSave('close')
   }
 
   const isArgentina = form.country === 'Argentina'
 
   return (
     <Modal open={open} onClose={onClose} title={isEdit ? 'Editar cliente' : 'Nuevo cliente'} size="lg">
-      <div className="space-y-5">
+      <div className="space-y-5" onKeyDown={handleKeyDown}>
 
         {/* Datos básicos */}
         <section className="space-y-3">
           <p className="text-xs font-semibold text-[var(--text3)] uppercase tracking-wider">Datos básicos</p>
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Nombre y apellido *" value={form.full_name} onChange={set('full_name')}
+            <Input ref={nameInputRef} label="Nombre y apellido *" value={form.full_name} onChange={set('full_name')}
               placeholder="Ej: Juan García" error={errors.full_name} />
             <Input label="SKU / Código" value={form.customer_code} onChange={set('customer_code')}
               placeholder="Ej: CLI-001" hint="Identificador único opcional" />
@@ -219,7 +250,12 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
         <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
-            <Button onClick={handleSave} loading={saving}>{isEdit ? 'Guardar cambios' : 'Crear cliente'}</Button>
+            {!isEdit && (
+              <Button variant="secondary" onClick={() => void handleSave('create-another')} disabled={saving}>
+                Guardar y crear otro
+              </Button>
+            )}
+            <Button onClick={() => void handleSave('close')} loading={saving}>{isEdit ? 'Guardar cambios' : 'Crear cliente'}</Button>
           </div>
         </div>
 

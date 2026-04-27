@@ -69,6 +69,11 @@ export default function CustomersPage() {
   useEffect(() => { searchRef.current = debouncedSearch }, [debouncedSearch])
   useEffect(() => { statusRef.current = statusFilter }, [statusFilter])
 
+  const openCreateModal = useCallback(() => {
+    setEditCustomer(null)
+    setCustomerModal(true)
+  }, [])
+
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
     try {
@@ -128,13 +133,34 @@ export default function CustomersPage() {
     return sort.dir === 'asc' ? <ChevronUp size={11} className="ml-1" /> : <ChevronDown size={11} className="ml-1" />
   }
 
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'n' || !e.altKey || customerModal) return
+
+      const target = e.target as HTMLElement | null
+      const isTypingTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        !!target?.closest('[contenteditable="true"]')
+
+      if (isTypingTarget) return
+
+      e.preventDefault()
+      openCreateModal()
+    }
+
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [customerModal, openCreateModal])
+
   return (
     <AppShell>
       <PageHeader
         title="Clientes"
         description={`${pagination.total} clientes registrados`}
         action={
-          <Button onClick={() => { setEditCustomer(null); setCustomerModal(true) }}>
+          <Button onClick={openCreateModal}>
             <Plus size={15} /> Nuevo cliente
           </Button>
         }
@@ -169,7 +195,7 @@ export default function CustomersPage() {
             icon={Users}
             title="Sin clientes"
             description="Agregá clientes para gestionar sus datos y cuentas corrientes."
-            action={<Button onClick={() => { setEditCustomer(null); setCustomerModal(true) }}><Plus size={15} /> Nuevo cliente</Button>}
+            action={<Button onClick={openCreateModal}><Plus size={15} /> Nuevo cliente</Button>}
           />
         ) : (
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
