@@ -58,6 +58,7 @@ interface OrderSummary {
 
 interface OrderDetail extends OrderSummary {
   warehouse_id?: string
+  price_list_id?: string
   invoice_id?: string
   sale_id?: string
   order_items: {
@@ -673,6 +674,7 @@ export default function OrdersPage() {
         const def = wh.find(w => w.is_default)
         if (def) setWarehouseId(def.id)
       }
+      setPriceListId(current => current || pl.find(list => list.is_default)?.id || pl[0]?.id || '')
     }).catch(() => { })
   }, [])
 
@@ -804,6 +806,12 @@ export default function OrdersPage() {
   const discountPct = Math.min(100, Math.max(0, Number(orderDiscount) || 0))
   const cartDiscount = Math.round(cartSubtotal * discountPct / 100 * 100) / 100
   const cartTotal = Math.max(0, cartSubtotal - cartDiscount)
+  const getDefaultPriceListId = () => priceLists.find(pl => pl.is_default)?.id ?? priceLists[0]?.id ?? ''
+  const getPriceListLabel = (id?: string | null) => {
+    if (!id) return null
+    const list = priceLists.find(pl => pl.id === id)
+    return list ? `${list.name} (+${list.margin_pct}%)` : id.slice(0, 8).toUpperCase()
+  }
 
   const resetOrderForm = () => {
     setOrderNotes(''); setOrderDiscount(''); setCart([])
@@ -811,6 +819,7 @@ export default function OrdersPage() {
     setCustomerQuery(''); setCustomerResults([]); setSelectedCustomerId(null)
     setSelectedCustomerBalance(0); setSelectedCustomerCreditLimit(0)
     setCustomerName(''); setQuickCustomerModal(false)
+    setPriceListId(getDefaultPriceListId())
   }
 
   const cartStockIssues = stockEnabled ? cart.filter(i => i.quantity > (i.product.stock_current ?? 0)) : []
@@ -1162,6 +1171,7 @@ export default function OrdersPage() {
             <div className="flex gap-2 flex-wrap text-xs text-[var(--text3)]">
               {detail.seller_name && <span>Vendedor: <strong>{detail.seller_name}</strong></span>}
               {detail.warehouse_name && <span>· Depósito: <strong>{detail.warehouse_name}</strong></span>}
+              {detail.price_list_id && <span>· Lista: <strong>{getPriceListLabel(detail.price_list_id)}</strong></span>}
               <span>· {formatDateTime(detail.created_at)}</span>
               <span>· Remito: <strong className="mono">{detail.id.slice(0, 8).toUpperCase()}</strong></span>
               {detail.sale_id && (

@@ -123,7 +123,14 @@ export interface SaleItem {
   discount: number
   subtotal: number
   // joins
-  products?: { name: string; barcode?: string; unit: string }
+  products?: {
+    name: string
+    barcode?: string
+    unit?: string
+    vat_rate?: number
+    cost_price_net?: number
+    cost_price_with_vat?: number
+  }
 }
 
 export interface PurchaseOrder {

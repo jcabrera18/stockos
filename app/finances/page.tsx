@@ -17,7 +17,7 @@ import type { FinanceSummary, Expense, Sale, PaginatedResponse, Pagination as Pa
 import { TrendingUp, TrendingDown, DollarSign, Plus, FileCheck } from 'lucide-react'
 import { toast } from 'sonner'
 
-type Tab = 'ingresos' | 'gastos' | 'balance' | 'afip'
+type Tab = 'ingresos' | 'gastos' | 'balance' | 'afip' | 'commissions'
 
 interface AfipTypeSummary { count: number; total: number; net: number; iva: number }
 interface AfipSummary {
@@ -27,6 +27,29 @@ interface AfipSummary {
   nd_total: number
   total_net: number
   total_iva: number
+}
+interface BusinessUser {
+  id: string
+  full_name: string | null
+  email: string | null
+  role: string
+  is_active: boolean
+  branch_id: string | null
+  warehouse_id: string | null
+  commission_pct: number | null
+  branch: { name: string } | null
+}
+interface SellerCommissionRow {
+  sellerId: string
+  sellerName: string
+  branchName: string
+  commissionPct: number
+  salesCount: number
+  soldAmount: number
+  costNetAmount: number
+  costWithVatAmount: number
+  commissionAmount: number
+  isActive: boolean
 }
 type BasePeriod = 'today' | 'week' | 'month' | 'year'
 type Period = BasePeriod | 'all'
@@ -60,6 +83,8 @@ export default function FinancesPage() {
   const [rangeFrom, setRangeFrom] = useState('')
   const [rangeTo, setRangeTo] = useState('')
   const [customRange, setCustomRange] = useState<{ from: string; to: string } | null>(null)
+  const [commissionRows, setCommissionRows] = useState<SellerCommissionRow[]>([])
+  const [commissionsLoading, setCommissionsLoading] = useState(false)
 
   const periodRef = useRef(period)
   const expPageRef = useRef(expPage)
@@ -67,6 +92,12 @@ export default function FinancesPage() {
   const customRangeRef = useRef(customRange)
   useEffect(() => { periodRef.current = period }, [period])
   useEffect(() => { customRangeRef.current = customRange }, [customRange])
+
+  const getActiveRange = useCallback(() => {
+    const periodKey = periodRef.current
+    const custom = customRangeRef.current
+    return custom ?? (periodKey === 'all' ? null : getPeriodDates(periodKey))
+  }, [])
 
   const fetchAfipSummary = useCallback(async (from?: string, to?: string) => {
     try {
@@ -83,9 +114,7 @@ export default function FinancesPage() {
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const periodKey = periodRef.current
-      const custom = customRangeRef.current
-      const baseRange = custom ?? (periodKey === 'all' ? null : getPeriodDates(periodKey))
+      const baseRange = getActiveRange()
       const dateParams = baseRange ? { from: baseRange.from, to: baseRange.to } : undefined
       const [sum, exp, inc] = await Promise.all([
         api.get<FinanceSummary>('/api/finances/summary', dateParams),
@@ -111,7 +140,111 @@ export default function FinancesPage() {
     } finally {
       setLoading(false)
     }
-  }, [fetchAfipSummary])
+  }, [fetchAfipSummary, getActiveRange])
+
+  const fetchCommissionRows = useCallback(async () => {
+    setCommissionsLoading(true)
+    try {
+      const activeRange = getActiveRange()
+      const salesParamsBase: Record<string, string | number> = {
+        page: 1,
+        limit: 100,
+      }
+
+      if (activeRange) {
+        salesParamsBase.from = activeRange.from
+        salesParamsBase.to = activeRange.to
+      }
+
+      const users = await api.get<BusinessUser[]>('/api/auth/users')
+      const sellers = (users ?? []).filter(user => user.role === 'seller')
+
+      if (sellers.length === 0) {
+        setCommissionRows([])
+        return
+      }
+
+      const firstSalesPage = await api.get<PaginatedResponse<Sale>>('/api/sales', salesParamsBase)
+      const allSales = [...(firstSalesPage.data ?? [])]
+
+      for (let currentPage = 2; currentPage <= (firstSalesPage.pagination?.pages ?? 0); currentPage += 1) {
+        const pageResponse = await api.get<PaginatedResponse<Sale>>('/api/sales', {
+          ...salesParamsBase,
+          page: currentPage,
+        })
+        allSales.push(...(pageResponse.data ?? []))
+      }
+
+      const rowsBySeller = new Map<string, SellerCommissionRow>(
+        sellers.map(seller => [
+          seller.id,
+          {
+            sellerId: seller.id,
+            sellerName: seller.full_name?.trim() || seller.email?.trim() || 'Sin nombre',
+            branchName: seller.branch?.name ?? 'Sin sucursal',
+            commissionPct: Number(seller.commission_pct ?? 0),
+            salesCount: 0,
+            soldAmount: 0,
+            costNetAmount: 0,
+            costWithVatAmount: 0,
+            commissionAmount: 0,
+            isActive: seller.is_active,
+          },
+        ])
+      )
+
+      for (const sale of allSales) {
+        if (!sale.user_id) continue
+        const sellerRow = rowsBySeller.get(sale.user_id)
+        if (!sellerRow) continue
+
+        const saleItems = sale.sale_items ?? []
+        const saleGross = saleItems.length > 0
+          ? saleItems.reduce((total, item) => total + (Number(item.unit_price ?? 0) * Number(item.quantity ?? 0)), 0)
+          : Number(sale.total ?? 0)
+        const saleDiscount = Number(sale.discount ?? 0)
+        const soldAmount = Math.max(saleGross - saleDiscount, 0)
+
+        const costNetAmount = saleItems.reduce((total, item) => {
+          const quantity = Number(item.quantity ?? 0)
+          const product = item.products
+          return total + (Number(product?.cost_price_net ?? 0) * quantity)
+        }, 0)
+
+        const costWithVatAmount = saleItems.reduce((total, item) => {
+          const quantity = Number(item.quantity ?? 0)
+          const product = item.products
+          const netCost = Number(product?.cost_price_net ?? 0)
+          const explicitCostWithVat = product?.cost_price_with_vat
+          const vatRate = Number(product?.vat_rate ?? 0)
+          const costWithVat = explicitCostWithVat != null
+            ? Number(explicitCostWithVat)
+            : netCost * (1 + vatRate / 100)
+          return total + (costWithVat * quantity)
+        }, 0)
+
+        sellerRow.salesCount += 1
+        sellerRow.soldAmount += soldAmount
+        sellerRow.costNetAmount += costNetAmount
+        sellerRow.costWithVatAmount += costWithVatAmount
+        sellerRow.commissionAmount += costNetAmount * (sellerRow.commissionPct / 100)
+      }
+
+      const nextRows = Array.from(rowsBySeller.values()).sort((a, b) => {
+        if (b.commissionAmount !== a.commissionAmount) return b.commissionAmount - a.commissionAmount
+        if (b.soldAmount !== a.soldAmount) return b.soldAmount - a.soldAmount
+        return a.sellerName.localeCompare(b.sellerName)
+      })
+
+      setCommissionRows(nextRows)
+    } catch (error) {
+      console.error(error)
+      setCommissionRows([])
+      toast.error(error instanceof Error ? error.message : 'No se pudieron calcular las comisiones')
+    } finally {
+      setCommissionsLoading(false)
+    }
+  }, [getActiveRange])
 
   useEffect(() => {
     expPageRef.current = 1
@@ -120,6 +253,11 @@ export default function FinancesPage() {
     setIncomePage(1)
     fetchData()
   }, [period, fetchData])
+
+  useEffect(() => {
+    if (tab !== 'commissions') return
+    void fetchCommissionRows()
+  }, [tab, period, customRange, fetchCommissionRows])
 
   const handleExpPageChange = useCallback((newPage: number) => {
     expPageRef.current = newPage
@@ -184,6 +322,7 @@ export default function FinancesPage() {
     { key: 'ingresos', label: 'Ingresos' },
     { key: 'gastos', label: 'Gastos' },
     { key: 'afip', label: 'ARCA / AFIP' },
+    { key: 'commissions', label: 'Comisiones' },
   ]
 
   const handlePeriodChange = (newPeriod: Period) => {
@@ -369,6 +508,99 @@ export default function FinancesPage() {
                 </div>
               )
             )}
+
+            {tab === 'commissions' && (() => {
+              const sellersWithSales = commissionRows.filter(row => row.salesCount > 0)
+              const totalSold = commissionRows.reduce((total, row) => total + row.soldAmount, 0)
+              const totalCommission = commissionRows.reduce((total, row) => total + row.commissionAmount, 0)
+              const totalCostWithVat = commissionRows.reduce((total, row) => total + row.costWithVatAmount, 0)
+
+              if (commissionsLoading) {
+                return <PageLoader />
+              }
+
+              return (
+                <div className="space-y-4">
+                  <p className="text-xs text-[var(--text3)] -mt-1">
+                    Comisión calculada sobre el costo neto del período, usando el porcentaje fijo configurado en cada vendedor.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <StatCard
+                      title="Comisiones a pagar"
+                      value={formatCurrency(totalCommission)}
+                      subtitle={`${sellersWithSales.length} vendedores con ventas`}
+                      icon={DollarSign}
+                      accent
+                    />
+                    <StatCard
+                      title="Vendido neto"
+                      value={formatCurrency(totalSold)}
+                      subtitle="Total usado para comisión"
+                      icon={TrendingUp}
+                    />
+                    <StatCard
+                      title="Costo c/IVA"
+                      value={formatCurrency(totalCostWithVat)}
+                      subtitle="Acumulado del período"
+                      icon={TrendingDown}
+                    />
+                  </div>
+
+                  {commissionRows.length === 0 ? (
+                    <p className="text-sm text-[var(--text3)] text-center py-8">No hay vendedores configurados para calcular comisiones</p>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-[var(--border)]">
+                              <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Vendedor</th>
+                              <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Sucursal</th>
+                              <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">%</th>
+                              <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Ventas</th>
+                              <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Vendido</th>
+                              <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden xl:table-cell">Costo neto</th>
+                              <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Costo c/IVA</th>
+                              <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Comisión</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[var(--border)]">
+                            {commissionRows.map(row => (
+                              <tr key={row.sellerId} className="hover:bg-[var(--surface2)] transition-colors">
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-[var(--text)]">{row.sellerName}</span>
+                                    {!row.isActive && <Badge variant="default">Inactivo</Badge>}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-[var(--text2)] hidden lg:table-cell">{row.branchName}</td>
+                                <td className="px-4 py-3 text-right mono text-[var(--text2)]">{row.commissionPct}%</td>
+                                <td className="px-4 py-3 text-right mono text-[var(--text2)] hidden md:table-cell">{row.salesCount}</td>
+                                <td className="px-4 py-3 text-right mono font-medium text-[var(--text)]">{formatCurrency(row.soldAmount)}</td>
+                                <td className="px-4 py-3 text-right mono text-[var(--text2)] hidden xl:table-cell">{formatCurrency(row.costNetAmount)}</td>
+                                <td className="px-4 py-3 text-right mono text-[var(--text2)] hidden lg:table-cell">{formatCurrency(row.costWithVatAmount)}</td>
+                                <td className="px-4 py-3 text-right mono font-semibold text-[var(--accent)]">{formatCurrency(row.commissionAmount)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <Card>
+                        <p className="text-xs font-medium text-[var(--text2)]">Cómo se calcula</p>
+                        <div className="mt-2 space-y-1 text-xs text-[var(--text3)]">
+                          <p><strong>Ventas:</strong> muestra cuántas ventas hizo ese vendedor dentro del período seleccionado.</p>
+                          <p><strong>Vendido:</strong> muestra el total vendido por ese vendedor, descontando rebajas o descuentos aplicados en cada operación.</p>
+                          <p><strong>Costo neto:</strong> muestra el costo base de los productos vendidos, sin impuestos.</p>
+                          <p><strong>Costo c/IVA:</strong> muestra ese mismo costo pero incluyendo el IVA de cada producto.</p>
+                          <p><strong>Comisión:</strong> se calcula tomando el costo neto total vendido por ese vendedor y aplicando el porcentaje de comisión que tenga configurado.</p>
+                        </div>
+                      </Card>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
 
             {/* Tab: ARCA / AFIP */}
             {tab === 'afip' && (() => {

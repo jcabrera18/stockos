@@ -71,6 +71,9 @@ export function getRoleLabel(role: string): string {
   const labels: Record<string, string> = {
     owner:     'Dueño',
     admin:     'Administrador',
+    cashier:   'Cajero',
+    stocker:   'Repositor',
+    seller:    'Vendedor',
     cajero:    'Cajero',
     repositor: 'Repositor',
   }

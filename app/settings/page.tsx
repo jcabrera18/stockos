@@ -3,8 +3,10 @@ import { useEffect, useRef, useState } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
+import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
+import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 import { useAuth } from '@/hooks/useAuth'
 import { useTheme } from '@/hooks/useTheme'
@@ -13,12 +15,6 @@ import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import { Sun, Moon, Shield, Truck, Building2, Receipt, CreditCard, MessageCircle } from 'lucide-react'
 import { Toggle } from '@/components/ui/Toggle'
-
-// const ROLE_OPTIONS = [
-//   { value: 'cashier', label: 'Cajero' },
-//   { value: 'stocker', label: 'Repositor' },
-//   { value: 'seller',  label: 'Vendedor' },
-// ]
 
 const IVA_OPTIONS = [
   { value: 'RI', label: 'Responsable Inscripto (Facturas A/B)' },
@@ -32,7 +28,29 @@ const ENV_OPTIONS = [
   { value: 'prod',    label: 'Producción' },
 ]
 
-// interface Branch { id: string; name: string }
+const ROLE_OPTIONS = [
+  { value: 'cashier', label: 'Cajero' },
+  { value: 'stocker', label: 'Repositor' },
+  { value: 'seller',  label: 'Vendedor' },
+]
+
+interface BusinessUser {
+  id: string
+  full_name: string | null
+  email: string | null
+  role: string
+  is_active: boolean
+  branch_id: string | null
+  warehouse_id: string | null
+  commission_pct: number | null
+  branch: { name: string } | null
+  warehouse: { name: string } | null
+}
+
+interface BranchOption {
+  id: string
+  name: string
+}
 
 export default function SettingsPage() {
   const { user, signOut, refreshUser } = useAuth()
@@ -59,9 +77,21 @@ export default function SettingsPage() {
   const [afipKey, setAfipKey]               = useState('')
   const [savingAfip, setSavingAfip]         = useState(false)
 
-  // const [branches, setBranches] = useState<Branch[]>([])
-  // const [newUser, setNewUser] = useState({ full_name: '', email: '', password: '', role: 'cashier', branch_id: '' })
-  // const [creating, setCreating] = useState(false)
+  const [newUser, setNewUser] = useState({
+    full_name: '',
+    email:     '',
+    password:  '',
+    role:      'cashier',
+    branch_id: '',
+    commission_pct: '',
+  })
+  const [creating, setCreating] = useState(false)
+  const [users, setUsers] = useState<BusinessUser[]>([])
+  const [loadingUsers, setLoadingUsers] = useState(false)
+  const [branches, setBranches] = useState<BranchOption[]>([])
+  const [editingUser, setEditingUser] = useState<BusinessUser | null>(null)
+  const [editForm, setEditForm] = useState({ branch_id: '', commission_pct: '' })
+  const [savingEdit, setSavingEdit] = useState(false)
   const initialized = useRef(false)
 
   useEffect(() => {
@@ -79,14 +109,6 @@ export default function SettingsPage() {
     setPtoVenta(user.business?.afip_punto_venta ? String(user.business.afip_punto_venta) : '')
     setAfipEnv(user.business?.afip_environment ?? 'homo')
   }, [user])
-
-  // useEffect(() => {
-  //   if (['owner', 'admin'].includes(role)) {
-  //     api.get<Branch[]>('/api/branches').then(res => {
-  //       setBranches(res ?? [])
-  //     }).catch(() => {})
-  //   }
-  // }, [role])
 
   const handleSaveBiz = async () => {
     setSavingBiz(true)
@@ -106,6 +128,37 @@ export default function SettingsPage() {
       setSavingBiz(false)
     }
   }
+
+  const loadUsers = async () => {
+    if (!['owner', 'admin'].includes(role)) return
+
+    setLoadingUsers(true)
+    try {
+      const data = await api.get<BusinessUser[]>('/api/auth/users')
+      setUsers(data ?? [])
+    } catch {
+      toast.error('No se pudo cargar la lista de usuarios')
+    } finally {
+      setLoadingUsers(false)
+    }
+  }
+
+  const loadBranches = async () => {
+    if (!['owner', 'admin'].includes(role)) return
+
+    try {
+      const data = await api.get<BranchOption[]>('/api/branches')
+      setBranches(data ?? [])
+    } catch {
+      toast.error('No se pudo cargar la lista de sucursales')
+    }
+  }
+
+  useEffect(() => {
+    if (!user?.business_id || !['owner', 'admin'].includes(role)) return
+    void loadBranches()
+    void loadUsers()
+  }, [user?.business_id, role])
 
   const handleSaveShipping = async () => {
     setSavingShipping(true)
@@ -145,7 +198,104 @@ export default function SettingsPage() {
     }
   }
 
-  // const handleCreateUser = async () => { ... }
+  const handleCreateUser = async () => {
+    const fullName = newUser.full_name.trim()
+    const email = newUser.email.trim()
+    const password = newUser.password.trim()
+    const branchId = newUser.branch_id
+    const isSeller = newUser.role === 'seller'
+    const commissionPct = isSeller ? Number(newUser.commission_pct) : null
+
+    if (!user?.business_id) {
+      toast.error('No se pudo identificar el negocio')
+      return
+    }
+
+    if (!fullName || !email || !password) {
+      toast.error('Completá nombre, email y contraseña')
+      return
+    }
+
+    if (!branchId) {
+      toast.error('Seleccioná la sucursal en la que va a trabajar')
+      return
+    }
+
+    if (isSeller && (newUser.commission_pct === '' || commissionPct === null || Number.isNaN(commissionPct) || commissionPct < 0 || commissionPct > 100)) {
+      toast.error('Ingresá un porcentaje de comisión válido entre 0 y 100')
+      return
+    }
+
+    setCreating(true)
+    try {
+      await api.post('/api/auth/register', {
+        full_name:   fullName,
+        email,
+        password,
+        role:        newUser.role,
+        business_id: user.business_id,
+        branch_id:   branchId,
+        commission_pct: commissionPct,
+      })
+
+      toast.success('Usuario creado correctamente')
+      setNewUser({
+        full_name: '',
+        email:     '',
+        password:  '',
+        role:      'cashier',
+        branch_id: '',
+        commission_pct: '',
+      })
+      await loadUsers()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al crear usuario'
+      toast.error(message)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const openEditUser = (selectedUser: BusinessUser) => {
+    setEditingUser(selectedUser)
+    setEditForm({
+      branch_id: selectedUser.branch_id ?? '',
+      commission_pct: selectedUser.commission_pct != null ? String(selectedUser.commission_pct) : '',
+    })
+  }
+
+  const handleSaveUserEdit = async () => {
+    if (!editingUser) return
+
+    if (!editForm.branch_id) {
+      toast.error('Seleccioná una sucursal')
+      return
+    }
+
+    const isSeller = editingUser.role === 'seller'
+    const parsedCommission = isSeller ? Number(editForm.commission_pct) : null
+
+    if (isSeller && (editForm.commission_pct === '' || parsedCommission === null || Number.isNaN(parsedCommission) || parsedCommission < 0 || parsedCommission > 100)) {
+      toast.error('Ingresá un porcentaje de comisión válido entre 0 y 100')
+      return
+    }
+
+    setSavingEdit(true)
+    try {
+      await api.patch(`/api/auth/users/${editingUser.id}`, {
+        branch_id: editForm.branch_id,
+        commission_pct: isSeller ? parsedCommission : null,
+      })
+      toast.success('Usuario actualizado')
+      setEditingUser(null)
+      await loadUsers()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Error al actualizar usuario'
+      toast.error(message)
+    } finally {
+      setSavingEdit(false)
+    }
+  }
 
   const isOwnerAdmin = ['owner', 'admin'].includes(role)
 
@@ -297,6 +447,139 @@ export default function SettingsPage() {
                   <Button onClick={handleSaveAfip} disabled={savingAfip}>
                     {savingAfip ? 'Guardando...' : 'Guardar configuración ARCA'}
                   </Button>
+                </div>
+              </Card>
+            )}
+
+            {isOwnerAdmin && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Crear usuario</CardTitle>
+                </CardHeader>
+                <div className="space-y-5">
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs text-[var(--text3)] mb-1">Nombre completo</p>
+                      <Input
+                        value={newUser.full_name}
+                        onChange={e => setNewUser(prev => ({ ...prev, full_name: e.target.value }))}
+                        placeholder="Nombre y apellido"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs text-[var(--text3)] mb-1">Email</p>
+                      <Input
+                        type="email"
+                        value={newUser.email}
+                        onChange={e => setNewUser(prev => ({ ...prev, email: e.target.value }))}
+                        placeholder="usuario@negocio.com"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs text-[var(--text3)] mb-1">Contraseña</p>
+                      <Input
+                        type="password"
+                        value={newUser.password}
+                        onChange={e => setNewUser(prev => ({ ...prev, password: e.target.value }))}
+                        placeholder="Mínimo 6 caracteres"
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs text-[var(--text3)] mb-1">Rol</p>
+                      <Select
+                        options={ROLE_OPTIONS}
+                        value={newUser.role}
+                        onChange={e => setNewUser(prev => ({ ...prev, role: e.target.value }))}
+                      />
+                    </div>
+                    <div>
+                      <p className="text-xs text-[var(--text3)] mb-1">Sucursal</p>
+                      <Select
+                        options={branches.map(branch => ({ value: branch.id, label: branch.name }))}
+                        value={newUser.branch_id}
+                        onChange={e => setNewUser(prev => ({ ...prev, branch_id: e.target.value }))}
+                        placeholder="Seleccionar sucursal"
+                      />
+                    </div>
+                    {newUser.role === 'seller' && (
+                      <div>
+                        <p className="text-xs text-[var(--text3)] mb-1">Comisión (%)</p>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.01"
+                          value={newUser.commission_pct}
+                          onChange={e => setNewUser(prev => ({ ...prev, commission_pct: e.target.value }))}
+                          placeholder="Ej: 5"
+                        />
+                      </div>
+                    )}
+                    <p className="text-xs text-[var(--text3)]">
+                      Los administradores y dueños pueden crear cajeros, repositores y vendedores.
+                    </p>
+                    <Button onClick={handleCreateUser} disabled={creating}>
+                      {creating ? 'Creando...' : 'Crear usuario'}
+                    </Button>
+                  </div>
+
+                  <div className="border border-[var(--border)] rounded-[var(--radius-md)] bg-[var(--surface2)] p-3">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div>
+                        <p className="text-sm font-medium text-[var(--text)]">Usuarios del negocio</p>
+                        <p className="text-xs text-[var(--text3)]">{users.length} registrados</p>
+                      </div>
+                      <Button variant="ghost" onClick={() => void loadUsers()} disabled={loadingUsers}>
+                        {loadingUsers ? 'Cargando...' : 'Actualizar'}
+                      </Button>
+                    </div>
+
+                    <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+                      {!loadingUsers && users.length === 0 && (
+                        <p className="text-xs text-[var(--text3)]">Todavía no hay usuarios creados.</p>
+                      )}
+
+                      {users.map(item => (
+                        <div
+                          key={item.id}
+                          className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-3"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-[var(--text)] truncate">
+                                {item.full_name?.trim() || 'Sin nombre'}
+                              </p>
+                              <p className="text-xs text-[var(--text3)] truncate mt-0.5">
+                                {item.email ?? 'Sin email'}
+                              </p>
+                              <p className="text-xs text-[var(--text3)] mt-0.5">
+                                {getRoleLabel(item.role)}
+                              </p>
+                              {item.role === 'seller' && (
+                                <p className="text-xs text-[var(--text3)] mt-0.5">
+                                  Comisión: {item.commission_pct ?? 0}%
+                                </p>
+                              )}
+                              {(item.branch || item.warehouse) && (
+                                <p className="text-xs text-[var(--text3)] mt-0.5">
+                                  {item.branch ? `Sucursal: ${item.branch.name}` : 'Sucursal: sin asignar'}
+                                  {item.warehouse ? ` · Depósito: ${item.warehouse.name}` : ' · Depósito: sin asignar'}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Badge variant={item.is_active ? 'success' : 'danger'}>
+                                {item.is_active ? 'Activo' : 'Inactivo'}
+                              </Badge>
+                              <Button variant="ghost" size="sm" onClick={() => openEditUser(item)}>
+                                Editar
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </Card>
             )}
@@ -503,9 +786,6 @@ export default function SettingsPage() {
               </Card>
             )}
 
-            {/* Crear usuario — oculto temporalmente */}
-            {/* {isOwnerAdmin && <CreateUserCard ... />} */}
-
             {/* Sesión */}
             <Card>
               <CardHeader>
@@ -519,6 +799,49 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      <Modal
+        open={!!editingUser}
+        onClose={() => !savingEdit && setEditingUser(null)}
+        title={editingUser ? `Editar ${editingUser.full_name?.trim() || editingUser.email || 'usuario'}` : 'Editar usuario'}
+        size="md"
+      >
+        <div className="space-y-4 pb-5">
+          <div>
+            <p className="text-xs text-[var(--text3)] mb-1">Sucursal</p>
+            <Select
+              options={branches.map(branch => ({ value: branch.id, label: branch.name }))}
+              value={editForm.branch_id}
+              onChange={e => setEditForm(prev => ({ ...prev, branch_id: e.target.value }))}
+              placeholder="Seleccionar sucursal"
+            />
+          </div>
+
+          {editingUser?.role === 'seller' && (
+            <div>
+              <p className="text-xs text-[var(--text3)] mb-1">Comisión (%)</p>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={editForm.commission_pct}
+                onChange={e => setEditForm(prev => ({ ...prev, commission_pct: e.target.value }))}
+                placeholder="Ej: 5"
+              />
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setEditingUser(null)} disabled={savingEdit}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveUserEdit} disabled={savingEdit}>
+              {savingEdit ? 'Guardando...' : 'Guardar cambios'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </AppShell>
   )
 }
