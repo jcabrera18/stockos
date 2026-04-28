@@ -1,5 +1,5 @@
 'use client'
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { api } from '@/lib/api'
 import { posthog } from '@/lib/posthog'
@@ -46,10 +46,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const supabase = createClient()
   const [user, setUser]       = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
+  // Ref para saber si ya tenemos un perfil cargado (evita limpiar sesión en errores transitorios)
+  const hasProfileRef = useRef(false)
 
   const loadProfile = useCallback(async () => {
     try {
       const profile = await api.get<UserProfile>('/api/auth/me')
+      hasProfileRef.current = true
       setUser(profile)
       if (posthog.__loaded) {
         posthog.identify(profile.id, {
@@ -60,8 +63,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           business:    profile.business?.name,
         })
       }
-    } catch {
-      setUser(null)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : ''
+      // Solo limpiar sesión si es un error de autenticación genuino (no token),
+      // no ante errores de red transitorios o Railway cold starts.
+      if (msg === 'No autenticado' || !hasProfileRef.current) {
+        hasProfileRef.current = false
+        setUser(null)
+      }
+      // Si ya teníamos perfil y falla por red/server, conservamos el usuario actual
     } finally {
       setLoading(false)
     }
@@ -71,9 +81,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loadProfile()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'SIGNED_IN') {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         loadProfile()
       } else if (event === 'SIGNED_OUT') {
+        hasProfileRef.current = false
         setUser(null)
         setLoading(false)
       }

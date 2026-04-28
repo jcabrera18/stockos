@@ -31,14 +31,26 @@ export async function apiFetch<T = unknown>(
     if (qs) url += `?${qs}`
   }
 
-  const res = await fetch(url, {
-    ...fetchOptions,
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...fetchOptions.headers,
-    },
-  })
+  const makeRequest = (t: string) =>
+    fetch(url, {
+      ...fetchOptions,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${t}`,
+        ...fetchOptions.headers,
+      },
+    })
+
+  let res = await makeRequest(token)
+
+  // Si el token expiró (race con auto-refresh), intentar renovar una vez
+  if (res.status === 401) {
+    const supabase = createClient()
+    const { data } = await supabase.auth.refreshSession()
+    const newToken = data.session?.access_token
+    if (!newToken) throw new Error('No autenticado')
+    res = await makeRequest(newToken)
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))

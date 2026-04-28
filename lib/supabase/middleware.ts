@@ -25,7 +25,14 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
+  // getUser() hace una llamada de red a Supabase Auth. Si Supabase tiene un
+  // hiccup momentáneo, no queremos redirigir a /login y desloguear al usuario.
+  // En caso de error de red en el middleware, dejamos pasar (el cliente manejará auth).
+  let user = null
+  try {
+    const { data, error } = await supabase.auth.getUser()
+    if (!error) user = data.user
+  } catch { }
 
   const isProtected = !request.nextUrl.pathname.startsWith('/login')
     && !request.nextUrl.pathname.startsWith('/register')
