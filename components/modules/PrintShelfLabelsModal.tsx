@@ -1,5 +1,6 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import JsBarcode from 'jsbarcode'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
@@ -74,6 +75,41 @@ function calcSaving(mainPrice: number, tierPrice: number): { pct: number; amount
   const amount = Math.round(mainPrice - tierPrice)
   const pct = Math.round((amount / mainPrice) * 100)
   return { pct, amount }
+}
+
+// ─── Barcode helpers ──────────────────────────────────────────────────────────
+
+const BARCODE_OPTS = {
+  format: 'CODE128' as const,
+  displayValue: false,
+  margin: 2,
+  width: 1.2,
+  height: 38,
+  background: 'transparent',
+  lineColor: '#111',
+}
+
+function generateBarcodeSVG(code: string): string {
+  try {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg') as SVGSVGElement
+    JsBarcode(svg, code, BARCODE_OPTS)
+    return svg.outerHTML
+  } catch {
+    return ''
+  }
+}
+
+function BarcodeStrip({ code }: { code: string }) {
+  const ref = useRef<SVGSVGElement>(null)
+  useEffect(() => {
+    if (!ref.current || !code) return
+    try { JsBarcode(ref.current, code, BARCODE_OPTS) } catch {}
+  }, [code])
+  return (
+    <div className="w-[38px] self-stretch flex items-center justify-center overflow-hidden border-l border-gray-100 bg-white flex-shrink-0">
+      <svg ref={ref} style={{ transform: 'rotate(-90deg)', flexShrink: 0 }} />
+    </div>
+  )
 }
 
 const LABELS_PER_PAGE = 15
@@ -278,20 +314,22 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
            </div>`
         : ''
 
-      const codeHtml = showCode && code
-        ? `<p class="lcode">${code}</p>`
+      const barcodeHtml = showCode && code
+        ? `<div class="lbarcode">${generateBarcodeSVG(code)}</div>`
         : ''
 
       return `
         <div class="label">
           <p class="lname">${p.name}</p>
           <div class="lmain">
-            <p class="lqty">${qtyLabel(mainList.min_quantity)}</p>
-            <p class="lprice">${formatPrice(mainPrice)}</p>
-            ${mainList.min_quantity > 1 ? `<p class="lmain-cu">c/u</p>` : ''}
+            <div class="lmain-price">
+              <p class="lqty">${qtyLabel(mainList.min_quantity)}</p>
+              <p class="lprice">${formatPrice(mainPrice)}</p>
+              ${mainList.min_quantity > 1 ? `<p class="lmain-cu">c/u</p>` : ''}
+            </div>
+            ${barcodeHtml}
           </div>
           ${tiersHtml}
-          ${codeHtml}
         </div>
       `
     }).join('')
@@ -350,12 +388,34 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     .lmain {
       flex: 1;
       display: flex;
+      flex-direction: row;
+      border-top: 1px solid #e5e7eb;
+      overflow: hidden;
+    }
+
+    .lmain-price {
+      flex: 1;
+      display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       padding: 3mm 4mm;
       background: #f9fafb;
-      border-top: 1px solid #e5e7eb;
+    }
+
+    .lbarcode {
+      width: 10mm;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-left: 1px solid #e5e7eb;
+      overflow: hidden;
+      background: white;
+    }
+
+    .lbarcode svg {
+      transform: rotate(-90deg);
+      flex-shrink: 0;
     }
 
     .lqty {
@@ -433,17 +493,6 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
       font-size: 6pt;
       font-weight: 500;
       color: #9ca3af;
-    }
-
-    /* Código */
-    .lcode {
-      font-size: 7pt;
-      font-family: 'Courier New', monospace;
-      color: #9ca3af;
-      border-top: 1px solid #f3f4f6;
-      padding: 1.5mm 4mm;
-      word-break: break-all;
-      letter-spacing: 0.03em;
     }
 
     @media screen {
@@ -561,7 +610,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
                   onChange={e => setShowCode(e.target.checked)}
                   className="w-4 h-4 accent-[var(--accent)]"
                 />
-                Mostrar código numérico (barcode / SKU)
+                Mostrar código de barras (gráfico escaneable)
               </label>
             </div>
           </div>
@@ -692,16 +741,19 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
                   </p>
 
                   {/* Precio principal — zona central */}
-                  <div className="flex-1 flex flex-col items-center justify-center bg-gray-50 border-t border-gray-100 py-3 px-2">
-                    <span className="text-[7px] font-semibold text-gray-400 uppercase tracking-widest mb-0.5">
-                      {qtyLabel(mainList.min_quantity)}
-                    </span>
-                    <span className="text-[30px] font-black text-gray-900 leading-none tracking-tight">
-                      {formatPrice(mainPrice)}
-                    </span>
-                    {mainList.min_quantity > 1 && (
-                      <span className="text-[7px] font-semibold text-gray-400 mt-0.5">c/u</span>
-                    )}
+                  <div className="flex-1 flex flex-row border-t border-gray-100 overflow-hidden">
+                    <div className="flex-1 flex flex-col items-center justify-center bg-gray-50 py-3 px-2">
+                      <span className="text-[7px] font-semibold text-gray-400 uppercase tracking-widest mb-0.5">
+                        {qtyLabel(mainList.min_quantity)}
+                      </span>
+                      <span className="text-[30px] font-black text-gray-900 leading-none tracking-tight">
+                        {formatPrice(mainPrice)}
+                      </span>
+                      {mainList.min_quantity > 1 && (
+                        <span className="text-[7px] font-semibold text-gray-400 mt-0.5">c/u</span>
+                      )}
+                    </div>
+                    {showCode && code && <BarcodeStrip code={code} />}
                   </div>
 
                   {/* Escalas — tira inferior */}
@@ -732,12 +784,6 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
                     </div>
                   )}
 
-                  {/* Código */}
-                  {showCode && code && (
-                    <p className="text-[7px] text-gray-400 font-mono border-t border-gray-100 px-3 py-1 break-all">
-                      {code}
-                    </p>
-                  )}
                 </div>
               )
             })}

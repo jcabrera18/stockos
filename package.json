@@ -14,6 +14,7 @@
     "clsx": "^2.1.1",
     "dexie": "^4.4.2",
     "html2canvas": "^1.4.1",
+    "jsbarcode": "^3.12.3",
     "lucide-react": "^0.447.0",
     "next": "^16.2.1",
     "posthog-js": "^1.144.2",

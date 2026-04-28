@@ -52,6 +52,11 @@ interface BranchOption {
   name: string
 }
 
+interface WarehouseOption {
+  id: string
+  name: string
+}
+
 export default function SettingsPage() {
   const { user, signOut, refreshUser } = useAuth()
   const role = user?.role ?? ''
@@ -78,19 +83,21 @@ export default function SettingsPage() {
   const [savingAfip, setSavingAfip]         = useState(false)
 
   const [newUser, setNewUser] = useState({
-    full_name: '',
-    email:     '',
-    password:  '',
-    role:      'cashier',
-    branch_id: '',
+    full_name:      '',
+    email:          '',
+    password:       '',
+    role:           'cashier',
+    branch_id:      '',
+    warehouse_id:   '',
     commission_pct: '',
   })
   const [creating, setCreating] = useState(false)
   const [users, setUsers] = useState<BusinessUser[]>([])
   const [loadingUsers, setLoadingUsers] = useState(false)
   const [branches, setBranches] = useState<BranchOption[]>([])
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([])
   const [editingUser, setEditingUser] = useState<BusinessUser | null>(null)
-  const [editForm, setEditForm] = useState({ branch_id: '', commission_pct: '' })
+  const [editForm, setEditForm] = useState({ branch_id: '', warehouse_id: '', commission_pct: '' })
   const [savingEdit, setSavingEdit] = useState(false)
   const initialized = useRef(false)
 
@@ -154,9 +161,21 @@ export default function SettingsPage() {
     }
   }
 
+  const loadWarehouses = async () => {
+    if (!['owner', 'admin'].includes(role)) return
+
+    try {
+      const data = await api.get<WarehouseOption[]>('/api/warehouses')
+      setWarehouses(data ?? [])
+    } catch {
+      toast.error('No se pudo cargar la lista de depósitos')
+    }
+  }
+
   useEffect(() => {
     if (!user?.business_id || !['owner', 'admin'].includes(role)) return
     void loadBranches()
+    void loadWarehouses()
     void loadUsers()
   }, [user?.business_id, role])
 
@@ -221,6 +240,11 @@ export default function SettingsPage() {
       return
     }
 
+    if (isSeller && !newUser.warehouse_id) {
+      toast.error('Seleccioná el depósito asignado al vendedor')
+      return
+    }
+
     if (isSeller && (newUser.commission_pct === '' || commissionPct === null || Number.isNaN(commissionPct) || commissionPct < 0 || commissionPct > 100)) {
       toast.error('Ingresá un porcentaje de comisión válido entre 0 y 100')
       return
@@ -229,22 +253,24 @@ export default function SettingsPage() {
     setCreating(true)
     try {
       await api.post('/api/auth/register', {
-        full_name:   fullName,
+        full_name:      fullName,
         email,
         password,
-        role:        newUser.role,
-        business_id: user.business_id,
-        branch_id:   branchId,
+        role:           newUser.role,
+        business_id:    user.business_id,
+        branch_id:      branchId,
+        warehouse_id:   isSeller ? newUser.warehouse_id : undefined,
         commission_pct: commissionPct,
       })
 
       toast.success('Usuario creado correctamente')
       setNewUser({
-        full_name: '',
-        email:     '',
-        password:  '',
-        role:      'cashier',
-        branch_id: '',
+        full_name:      '',
+        email:          '',
+        password:       '',
+        role:           'cashier',
+        branch_id:      '',
+        warehouse_id:   '',
         commission_pct: '',
       })
       await loadUsers()
@@ -259,7 +285,8 @@ export default function SettingsPage() {
   const openEditUser = (selectedUser: BusinessUser) => {
     setEditingUser(selectedUser)
     setEditForm({
-      branch_id: selectedUser.branch_id ?? '',
+      branch_id:      selectedUser.branch_id ?? '',
+      warehouse_id:   selectedUser.warehouse_id ?? '',
       commission_pct: selectedUser.commission_pct != null ? String(selectedUser.commission_pct) : '',
     })
   }
@@ -275,6 +302,11 @@ export default function SettingsPage() {
     const isSeller = editingUser.role === 'seller'
     const parsedCommission = isSeller ? Number(editForm.commission_pct) : null
 
+    if (isSeller && !editForm.warehouse_id) {
+      toast.error('Seleccioná el depósito asignado al vendedor')
+      return
+    }
+
     if (isSeller && (editForm.commission_pct === '' || parsedCommission === null || Number.isNaN(parsedCommission) || parsedCommission < 0 || parsedCommission > 100)) {
       toast.error('Ingresá un porcentaje de comisión válido entre 0 y 100')
       return
@@ -283,7 +315,8 @@ export default function SettingsPage() {
     setSavingEdit(true)
     try {
       await api.patch(`/api/auth/users/${editingUser.id}`, {
-        branch_id: editForm.branch_id,
+        branch_id:      editForm.branch_id,
+        warehouse_id:   isSeller ? editForm.warehouse_id : null,
         commission_pct: isSeller ? parsedCommission : null,
       })
       toast.success('Usuario actualizado')
@@ -303,7 +336,7 @@ export default function SettingsPage() {
     <AppShell>
       <PageHeader title="Configuración" />
 
-      <div className="p-5">
+      <div className="p-5 space-y-5">
         <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-5 items-start">
 
           {/* ── Columna izquierda ── */}
@@ -451,138 +484,6 @@ export default function SettingsPage() {
               </Card>
             )}
 
-            {isOwnerAdmin && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Crear usuario</CardTitle>
-                </CardHeader>
-                <div className="space-y-5">
-                  <div className="space-y-3">
-                    <div>
-                      <p className="text-xs text-[var(--text3)] mb-1">Nombre completo</p>
-                      <Input
-                        value={newUser.full_name}
-                        onChange={e => setNewUser(prev => ({ ...prev, full_name: e.target.value }))}
-                        placeholder="Nombre y apellido"
-                      />
-                    </div>
-                    <div>
-                      <p className="text-xs text-[var(--text3)] mb-1">Email</p>
-                      <Input
-                        type="email"
-                        value={newUser.email}
-                        onChange={e => setNewUser(prev => ({ ...prev, email: e.target.value }))}
-                        placeholder="usuario@negocio.com"
-                      />
-                    </div>
-                    <div>
-                      <p className="text-xs text-[var(--text3)] mb-1">Contraseña</p>
-                      <Input
-                        type="password"
-                        value={newUser.password}
-                        onChange={e => setNewUser(prev => ({ ...prev, password: e.target.value }))}
-                        placeholder="Mínimo 6 caracteres"
-                      />
-                    </div>
-                    <div>
-                      <p className="text-xs text-[var(--text3)] mb-1">Rol</p>
-                      <Select
-                        options={ROLE_OPTIONS}
-                        value={newUser.role}
-                        onChange={e => setNewUser(prev => ({ ...prev, role: e.target.value }))}
-                      />
-                    </div>
-                    <div>
-                      <p className="text-xs text-[var(--text3)] mb-1">Sucursal</p>
-                      <Select
-                        options={branches.map(branch => ({ value: branch.id, label: branch.name }))}
-                        value={newUser.branch_id}
-                        onChange={e => setNewUser(prev => ({ ...prev, branch_id: e.target.value }))}
-                        placeholder="Seleccionar sucursal"
-                      />
-                    </div>
-                    {newUser.role === 'seller' && (
-                      <div>
-                        <p className="text-xs text-[var(--text3)] mb-1">Comisión (%)</p>
-                        <Input
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.01"
-                          value={newUser.commission_pct}
-                          onChange={e => setNewUser(prev => ({ ...prev, commission_pct: e.target.value }))}
-                          placeholder="Ej: 5"
-                        />
-                      </div>
-                    )}
-                    <p className="text-xs text-[var(--text3)]">
-                      Los administradores y dueños pueden crear cajeros, repositores y vendedores.
-                    </p>
-                    <Button onClick={handleCreateUser} disabled={creating}>
-                      {creating ? 'Creando...' : 'Crear usuario'}
-                    </Button>
-                  </div>
-
-                  <div className="border border-[var(--border)] rounded-[var(--radius-md)] bg-[var(--surface2)] p-3">
-                    <div className="flex items-center justify-between gap-3 mb-3">
-                      <div>
-                        <p className="text-sm font-medium text-[var(--text)]">Usuarios del negocio</p>
-                        <p className="text-xs text-[var(--text3)]">{users.length} registrados</p>
-                      </div>
-                      <Button variant="ghost" onClick={() => void loadUsers()} disabled={loadingUsers}>
-                        {loadingUsers ? 'Cargando...' : 'Actualizar'}
-                      </Button>
-                    </div>
-
-                    <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
-                      {!loadingUsers && users.length === 0 && (
-                        <p className="text-xs text-[var(--text3)]">Todavía no hay usuarios creados.</p>
-                      )}
-
-                      {users.map(item => (
-                        <div
-                          key={item.id}
-                          className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-3"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-[var(--text)] truncate">
-                                {item.full_name?.trim() || 'Sin nombre'}
-                              </p>
-                              <p className="text-xs text-[var(--text3)] truncate mt-0.5">
-                                {item.email ?? 'Sin email'}
-                              </p>
-                              <p className="text-xs text-[var(--text3)] mt-0.5">
-                                {getRoleLabel(item.role)}
-                              </p>
-                              {item.role === 'seller' && (
-                                <p className="text-xs text-[var(--text3)] mt-0.5">
-                                  Comisión: {item.commission_pct ?? 0}%
-                                </p>
-                              )}
-                              {(item.branch || item.warehouse) && (
-                                <p className="text-xs text-[var(--text3)] mt-0.5">
-                                  {item.branch ? `Sucursal: ${item.branch.name}` : 'Sucursal: sin asignar'}
-                                  {item.warehouse ? ` · Depósito: ${item.warehouse.name}` : ' · Depósito: sin asignar'}
-                                </p>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Badge variant={item.is_active ? 'success' : 'danger'}>
-                                {item.is_active ? 'Activo' : 'Inactivo'}
-                              </Badge>
-                              <Button variant="ghost" size="sm" onClick={() => openEditUser(item)}>
-                                Editar
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            )}
           </div>
 
           {/* ── Columna derecha ── */}
@@ -798,6 +699,157 @@ export default function SettingsPage() {
 
           </div>
         </div>
+
+        {/* ── Crear usuario (ancho completo) ── */}
+        {isOwnerAdmin && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Gestión de usuarios</CardTitle>
+            </CardHeader>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+              {/* Formulario */}
+              <div className="space-y-4">
+                <p className="text-sm font-medium text-[var(--text)]">Crear usuario</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs text-[var(--text3)] mb-1">Nombre completo</p>
+                    <Input
+                      value={newUser.full_name}
+                      onChange={e => setNewUser(prev => ({ ...prev, full_name: e.target.value }))}
+                      placeholder="Nombre y apellido"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--text3)] mb-1">Email</p>
+                    <Input
+                      type="email"
+                      value={newUser.email}
+                      onChange={e => setNewUser(prev => ({ ...prev, email: e.target.value }))}
+                      placeholder="usuario@negocio.com"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--text3)] mb-1">Contraseña</p>
+                    <Input
+                      type="password"
+                      value={newUser.password}
+                      onChange={e => setNewUser(prev => ({ ...prev, password: e.target.value }))}
+                      placeholder="Mínimo 6 caracteres"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-xs text-[var(--text3)] mb-1">Rol</p>
+                    <Select
+                      options={ROLE_OPTIONS}
+                      value={newUser.role}
+                      onChange={e => setNewUser(prev => ({ ...prev, role: e.target.value }))}
+                    />
+                  </div>
+                  <div className={newUser.role === 'seller' ? '' : 'col-span-2'}>
+                    <p className="text-xs text-[var(--text3)] mb-1">Sucursal</p>
+                    <Select
+                      options={branches.map(branch => ({ value: branch.id, label: branch.name }))}
+                      value={newUser.branch_id}
+                      onChange={e => setNewUser(prev => ({ ...prev, branch_id: e.target.value }))}
+                      placeholder="Seleccionar sucursal"
+                    />
+                  </div>
+                  {newUser.role === 'seller' && (
+                    <div>
+                      <p className="text-xs text-[var(--text3)] mb-1">Depósito</p>
+                      <Select
+                        options={warehouses.map(w => ({ value: w.id, label: w.name }))}
+                        value={newUser.warehouse_id}
+                        onChange={e => setNewUser(prev => ({ ...prev, warehouse_id: e.target.value }))}
+                        placeholder="Seleccionar depósito"
+                      />
+                    </div>
+                  )}
+                  {newUser.role === 'seller' && (
+                    <div>
+                      <p className="text-xs text-[var(--text3)] mb-1">Comisión (%)</p>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={newUser.commission_pct}
+                        onChange={e => setNewUser(prev => ({ ...prev, commission_pct: e.target.value }))}
+                        placeholder="Ej: 5"
+                      />
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-[var(--text3)]">
+                  Los administradores y dueños pueden crear cajeros, repositores y vendedores.
+                </p>
+                <Button onClick={handleCreateUser} disabled={creating}>
+                  {creating ? 'Creando...' : 'Crear usuario'}
+                </Button>
+              </div>
+
+              {/* Lista de usuarios */}
+              <div className="border border-[var(--border)] rounded-[var(--radius-md)] bg-[var(--surface2)] p-3">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div>
+                    <p className="text-sm font-medium text-[var(--text)]">Usuarios del negocio</p>
+                    <p className="text-xs text-[var(--text3)]">{users.length} registrados</p>
+                  </div>
+                  <Button variant="ghost" onClick={() => void loadUsers()} disabled={loadingUsers}>
+                    {loadingUsers ? 'Cargando...' : 'Actualizar'}
+                  </Button>
+                </div>
+
+                <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+                  {!loadingUsers && users.length === 0 && (
+                    <p className="text-xs text-[var(--text3)]">Todavía no hay usuarios creados.</p>
+                  )}
+
+                  {users.map(item => (
+                    <div
+                      key={item.id}
+                      className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-3"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-[var(--text)] truncate">
+                            {item.full_name?.trim() || 'Sin nombre'}
+                          </p>
+                          <p className="text-xs text-[var(--text3)] truncate mt-0.5">
+                            {item.email ?? 'Sin email'}
+                          </p>
+                          <p className="text-xs text-[var(--text3)] mt-0.5">
+                            {getRoleLabel(item.role)}
+                          </p>
+                          {item.role === 'seller' && (
+                            <p className="text-xs text-[var(--text3)] mt-0.5">
+                              Comisión: {item.commission_pct ?? 0}%
+                            </p>
+                          )}
+                          {(item.branch || item.warehouse) && (
+                            <p className="text-xs text-[var(--text3)] mt-0.5">
+                              {item.branch ? `Sucursal: ${item.branch.name}` : 'Sucursal: sin asignar'}
+                              {item.warehouse ? ` · Depósito: ${item.warehouse.name}` : ''}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={item.is_active ? 'success' : 'danger'}>
+                            {item.is_active ? 'Activo' : 'Inactivo'}
+                          </Badge>
+                          <Button variant="ghost" size="sm" onClick={() => openEditUser(item)}>
+                            Editar
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
       </div>
 
       <Modal
@@ -816,6 +868,18 @@ export default function SettingsPage() {
               placeholder="Seleccionar sucursal"
             />
           </div>
+
+          {editingUser?.role === 'seller' && (
+            <div>
+              <p className="text-xs text-[var(--text3)] mb-1">Depósito</p>
+              <Select
+                options={warehouses.map(w => ({ value: w.id, label: w.name }))}
+                value={editForm.warehouse_id}
+                onChange={e => setEditForm(prev => ({ ...prev, warehouse_id: e.target.value }))}
+                placeholder="Seleccionar depósito"
+              />
+            </div>
+          )}
 
           {editingUser?.role === 'seller' && (
             <div>

@@ -19,9 +19,6 @@ import {
 import { CategoryTreePicker } from '@/components/ui/CategoryTreePicker'
 import { toast } from 'sonner'
 import { ProductPriceRulesModal } from '@/components/modules/ProductPriceRulesModal'
-import { BulkPriceModal } from '@/components/modules/BulkPriceModal'
-import { PrintPriceListModal } from '@/components/modules/PrintPriceListModal'
-import { TrendingUp, Printer } from 'lucide-react'
 
 interface Supplier { id: string; name: string }
 
@@ -71,8 +68,6 @@ const [deleteModal, setDeleteModal] = useState(false)
   const [priceRulesProduct, setPriceRulesProduct] = useState<Product | null>(null)
 
   const [allCategories, setAllCategories] = useState<Category[]>([])
-  const [bulkPriceModal, setBulkPriceModal] = useState(false)
-  const [printModal, setPrintModal] = useState(false)
 
   // Filtros
   const [brandFilter, setBrandFilter] = useState('')
@@ -267,17 +262,9 @@ const handleDelete = async () => {
         title="Productos"
         description={`${pagination.total} productos`}
         action={
-          <>
-            <Button variant="secondary" onClick={() => setPrintModal(true)}>
-              <Printer size={15} /> <span className="hidden sm:inline">Lista de precios</span>
-            </Button>
-            <Button variant="secondary" onClick={() => setBulkPriceModal(true)}>
-              <TrendingUp size={15} /> <span className="hidden sm:inline">Actualizar precios</span>
-            </Button>
-            <Button onClick={openCreate}>
-              <Plus size={15} /> Nuevo producto
-            </Button>
-          </>
+          <Button onClick={openCreate}>
+            <Plus size={15} /> Nuevo producto
+          </Button>
         }
       />
 
@@ -544,16 +531,6 @@ const handleDelete = async () => {
         product={priceRulesProduct}
       />
 
-      <BulkPriceModal
-        open={bulkPriceModal}
-        onClose={() => setBulkPriceModal(false)}
-        onApplied={fetchProducts}
-      />
-
-      <PrintPriceListModal
-        open={printModal}
-        onClose={() => setPrintModal(false)}
-      />
     </AppShell>
   )
 }

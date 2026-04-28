@@ -13,6 +13,8 @@ import { api } from '@/lib/api'
 import { Plus, Tag, Pencil, Trash2, Star, TrendingUp, Printer } from 'lucide-react'
 import { toast } from 'sonner'
 import { PrintShelfLabelsModal } from '@/components/modules/PrintShelfLabelsModal'
+import { BulkPriceModal } from '@/components/modules/BulkPriceModal'
+import { PrintPriceListModal } from '@/components/modules/PrintPriceListModal'
 
 export interface PriceList {
   id: string
@@ -56,6 +58,10 @@ export default function PriceListsPage() {
 
   // Modal imprimir etiquetas
   const [printModal, setPrintModal] = useState(false)
+
+  // Modal lista de precios y actualizar precios
+  const [priceListPrintModal, setPriceListPrintModal] = useState(false)
+  const [bulkPriceModal, setBulkPriceModal] = useState(false)
 
   const fetchLists = useCallback(async () => {
     setLoading(true)
@@ -154,6 +160,12 @@ export default function PriceListsPage() {
         description={`${lists.length} listas activas`}
         action={
           <div className="flex gap-2">
+            <Button variant="secondary" onClick={() => setPriceListPrintModal(true)}>
+              <Printer size={15} /> <span className="hidden sm:inline">Lista de precios</span>
+            </Button>
+            <Button variant="secondary" onClick={() => setBulkPriceModal(true)}>
+              <TrendingUp size={15} /> <span className="hidden sm:inline">Actualizar precios</span>
+            </Button>
             <Button variant="secondary" onClick={() => setPrintModal(true)} disabled={lists.length === 0}>
               <Printer size={15} /> Imprimir precios
             </Button>
@@ -376,6 +388,9 @@ export default function PriceListsPage() {
 
       {/* Modal imprimir etiquetas */}
       <PrintShelfLabelsModal open={printModal} onClose={() => setPrintModal(false)} />
+
+      <PrintPriceListModal open={priceListPrintModal} onClose={() => setPriceListPrintModal(false)} />
+      <BulkPriceModal open={bulkPriceModal} onClose={() => setBulkPriceModal(false)} onApplied={() => {}} />
     </AppShell>
   )
 }

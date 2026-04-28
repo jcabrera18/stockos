@@ -14,7 +14,7 @@ import { CustomerModal } from '@/components/modules/CustomerModal'
 import { PageLoader } from '@/components/ui/Spinner'
 import { api } from '@/lib/api'
 import type { PaginatedResponse, Pagination as PaginationType } from '@/types'
-import { Plus, Users, Search, Pencil, Trash2, ChevronUp, ChevronDown, ChevronsUpDown, MapPin, Tag } from 'lucide-react'
+import { Plus, Users, Search, Pencil, Trash2, ChevronUp, ChevronDown, ChevronsUpDown, MapPin, Tag, Printer } from 'lucide-react'
 import { toast } from 'sonner'
 
 type TabId = 'customers' | 'zones' | 'categories'
@@ -594,6 +594,10 @@ export default function CustomersPage() {
   const [deleteCustomer, setDeleteCustomer] = useState<CustomerSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  const [printModal, setPrintModal] = useState(false)
+  const [printFields, setPrintFields] = useState<string[]>(['full_name', 'document', 'phone', 'email', 'address', 'locality', 'delivery_zone_name', 'client_category_name'])
+  const [printLoading, setPrintLoading] = useState(false)
+
   const searchRef = useRef(debouncedSearch)
   const pageRef = useRef(page)
   const statusRef = useRef(statusFilter)
@@ -663,6 +667,112 @@ export default function CustomersPage() {
     } finally { setDeleting(false) }
   }
 
+  const PRINT_FIELDS: { key: string; label: string }[] = [
+    { key: 'customer_code', label: 'Código' },
+    { key: 'full_name', label: 'Nombre' },
+    { key: 'document', label: 'Documento' },
+    { key: 'phone', label: 'Teléfono' },
+    { key: 'email', label: 'Email' },
+    { key: 'address', label: 'Dirección' },
+    { key: 'locality', label: 'Localidad' },
+    { key: 'province', label: 'Provincia' },
+    { key: 'postal_code', label: 'Código postal' },
+    { key: 'delivery_zone_name', label: 'Zona de entrega' },
+    { key: 'client_category_name', label: 'Categoría' },
+    { key: 'current_balance', label: 'Saldo' },
+    { key: 'credit_limit', label: 'Límite de crédito' },
+    { key: 'birthdate', label: 'Fecha de nacimiento' },
+    { key: 'is_active', label: 'Estado' },
+    { key: 'notes', label: 'Notas' },
+  ]
+
+  const togglePrintField = (key: string) => {
+    setPrintFields(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
+  }
+
+  const handlePrint = async () => {
+    setPrintLoading(true)
+    try {
+      const baseParams: Record<string, string | number | undefined> = {
+        search: debouncedSearch || undefined,
+        limit: 100,
+        is_active: statusFilter === 'all' ? undefined : statusFilter === 'active' ? 1 : 0,
+        delivery_zone_id: zoneFilter || undefined,
+        client_category_id: categoryFilter || undefined,
+      }
+      const customers: CustomerSummary[] = []
+      let currentPage = 1
+      let totalPages = 1
+      do {
+        const res = await api.get<PaginatedResponse<CustomerSummary>>('/api/customers', { ...baseParams, page: currentPage })
+        customers.push(...res.data)
+        totalPages = res.pagination.pages
+        currentPage++
+      } while (currentPage <= totalPages)
+
+      const selected = PRINT_FIELDS.filter(f => printFields.includes(f.key))
+
+      const formatCell = (customer: CustomerSummary, key: string): string => {
+        const val = (customer as unknown as Record<string, unknown>)[key]
+        if (val === null || val === undefined || val === '') return '—'
+        if (key === 'is_active') return val ? 'Activo' : 'Inactivo'
+        if (key === 'current_balance' || key === 'credit_limit') {
+          return `$${Number(val).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
+        }
+        if (key === 'birthdate') return String(val).split('T')[0]
+        return String(val)
+      }
+
+      const headerRow = selected.map(f => `<th>${f.label}</th>`).join('')
+      const bodyRows = customers.map(c =>
+        `<tr>${selected.map(f => `<td>${formatCell(c, f.key)}</td>`).join('')}</tr>`
+      ).join('')
+
+      const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<title>Listado de Clientes</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 10px; color: #111; background: #fff; padding: 16mm 14mm; }
+  h1 { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .meta { font-size: 9px; color: #666; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: #f0f0f0; text-align: left; padding: 5px 6px; font-size: 9px; font-weight: 600; border: 1px solid #ccc; white-space: nowrap; }
+  td { padding: 4px 6px; border: 1px solid #ddd; vertical-align: top; word-break: break-word; max-width: 160px; }
+  tr:nth-child(even) td { background: #fafafa; }
+  @media print {
+    body { padding: 10mm 10mm; }
+    @page { size: A4 landscape; margin: 10mm; }
+  }
+</style>
+</head>
+<body>
+<h1>Listado de Clientes</h1>
+<p class="meta">Generado el ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })} — ${customers.length} cliente${customers.length !== 1 ? 's' : ''}${debouncedSearch ? ` · Búsqueda: "${debouncedSearch}"` : ''}${statusFilter !== 'all' ? ` · ${statusFilter === 'active' ? 'Activos' : 'Inactivos'}` : ''}</p>
+<table>
+<thead><tr>${headerRow}</tr></thead>
+<tbody>${bodyRows}</tbody>
+</table>
+</body>
+</html>`
+
+      const win = window.open('', '_blank')
+      if (win) {
+        win.document.write(html)
+        win.document.close()
+        win.focus()
+        setTimeout(() => { win.print() }, 400)
+      }
+      setPrintModal(false)
+    } catch {
+      toast.error('Error al generar el listado')
+    } finally {
+      setPrintLoading(false)
+    }
+  }
+
   const toggleSort = (field: SortField) => {
     setSort(s => s.field === field ? { field, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' })
   }
@@ -704,7 +814,12 @@ export default function CustomersPage() {
         description={activeTab === 'customers' ? `${pagination.total} clientes registrados` : activeTab === 'zones' ? 'Zonas de entrega' : 'Categorías de clientes'}
         action={
           activeTab === 'customers'
-            ? <Button onClick={openCreateModal}><Plus size={15} /> Nuevo cliente</Button>
+            ? (
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" onClick={() => setPrintModal(true)}><Printer size={15} /> Imprimir clientes</Button>
+                <Button onClick={openCreateModal}><Plus size={15} /> Nuevo cliente</Button>
+              </div>
+            )
             : undefined
         }
       />
@@ -907,6 +1022,31 @@ export default function CustomersPage() {
         loading={deleting}
         danger
       />
+
+      <Modal open={printModal} onClose={() => setPrintModal(false)} title="Imprimir listado de clientes" size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-[var(--text2)]">Elegí qué columnas incluir en el listado impreso.</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            {PRINT_FIELDS.map(f => (
+              <label key={f.key} className="flex items-center gap-2 cursor-pointer text-sm text-[var(--text)]">
+                <input
+                  type="checkbox"
+                  checked={printFields.includes(f.key)}
+                  onChange={() => togglePrintField(f.key)}
+                  className="w-4 h-4 accent-[var(--accent)] cursor-pointer"
+                />
+                {f.label}
+              </label>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border)]">
+            <Button variant="secondary" onClick={() => setPrintModal(false)} disabled={printLoading}>Cancelar</Button>
+            <Button onClick={handlePrint} loading={printLoading} disabled={printFields.length === 0}>
+              <Printer size={14} /> Imprimir
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </AppShell>
   )
 }
