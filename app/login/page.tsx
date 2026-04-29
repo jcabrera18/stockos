@@ -618,6 +618,13 @@ export default function LoginPage() {
                       'Ingresar'
                     )}
                   </button>
+
+                  <p className="text-center text-[13px] text-gray-400 mt-5">
+                    ¿No tenés cuenta?{' '}
+                    <Link href="/register" className="text-[#16a34a] font-semibold hover:underline">
+                      Registrate gratis
+                    </Link>
+                  </p>
                 </form>
               )}
 
