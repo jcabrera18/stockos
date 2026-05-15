@@ -8,7 +8,16 @@ type FetchOptions = RequestInit & {
 
 async function getAccessToken(): Promise<string | null> {
   const supabase = createClient()
-  const { data } = await supabase.auth.getSession()
+  const { data, error } = await supabase.auth.getSession()
+  if (error) {
+    // status === 0 o name === 'AuthRetryableFetchError' indica fallo de red al
+    // intentar refrescar el token (ej. offline). No es un logout real: propagamos
+    // como TypeError para que los handlers de red lo detecten y no deslogeen al usuario.
+    if (error.status === 0 || (error as { name?: string }).name === 'AuthRetryableFetchError') {
+      throw new TypeError(error.message || 'Failed to fetch')
+    }
+    return null
+  }
   return data.session?.access_token ?? null
 }
 
@@ -34,6 +43,7 @@ export async function apiFetch<T = unknown>(
   const makeRequest = (t: string) =>
     fetch(url, {
       ...fetchOptions,
+      signal: fetchOptions.signal ?? AbortSignal.timeout(10_000),
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${t}`,

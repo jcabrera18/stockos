@@ -25,14 +25,20 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // getUser() hace una llamada de red a Supabase Auth. Si Supabase tiene un
-  // hiccup momentáneo, no queremos redirigir a /login y desloguear al usuario.
-  // En caso de error de red en el middleware, dejamos pasar (el cliente manejará auth).
+  // getUser() hace una llamada de red a Supabase Auth para verificar el JWT.
+  // Si falla por red (offline / Supabase unreachable), hacemos fallback a getSession()
+  // que lee de cookies localmente sin red, evitando un redirect a /login espurio.
   let user = null
   try {
     const { data, error } = await supabase.auth.getUser()
     if (!error) user = data.user
-  } catch { }
+  } catch {
+    // Fallback offline: leer sesión de cookies sin validación de red
+    try {
+      const { data } = await supabase.auth.getSession()
+      user = data.session?.user ?? null
+    } catch { }
+  }
 
   const isProtected = !request.nextUrl.pathname.startsWith('/login')
     && !request.nextUrl.pathname.startsWith('/register')

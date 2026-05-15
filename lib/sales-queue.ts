@@ -7,6 +7,8 @@ import { posDB, type PendingSale } from './pos-db'
 import { api } from './api'
 
 export function isNetworkError(err: unknown): boolean {
+  // Timeout del AbortSignal (sin red, el fetch nunca responde)
+  if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) return true
   if (!(err instanceof TypeError)) return false
   const msg = err.message.toLowerCase()
   return (

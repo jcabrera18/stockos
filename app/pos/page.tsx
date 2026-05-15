@@ -24,6 +24,7 @@ import {
   syncPromotions,
   getLocalPromotions,
   getLastSyncTime,
+  getVariablePriceProducts,
   type PricingResult,
   type ScanResult,
 } from '@/lib/pos-cache'
@@ -152,7 +153,6 @@ export default function POSPage() {
 
   const [f3PickerOpen, setF3PickerOpen] = useState(false)
   const [variableProducts, setVariableProducts] = useState<Product[]>([])
-  const [variableProductsLoading, setVariableProductsLoading] = useState(false)
   const [f3ActiveIndex, setF3ActiveIndex] = useState(0)
 
   const [cajaWarning, setCajaWarning] = useState(false)
@@ -175,11 +175,8 @@ export default function POSPage() {
   const [pendingCount, setPendingCount] = useState(0)
 
   const refreshVariableProducts = useCallback(async () => {
-    setVariableProductsLoading(true)
-    try {
-      const res = await api.get<{ data: Product[] }>('/api/products', { price_mode: 'custom', limit: 100 })
-      setVariableProducts(res.data)
-    } catch { } finally { setVariableProductsLoading(false) }
+    const products = await getVariablePriceProducts()
+    setVariableProducts(products)
   }, [])
 
   // Leer timestamp de última sync desde IndexedDB cuando el cache esté listo
@@ -948,9 +945,47 @@ export default function POSPage() {
         customer_id:      selectedCustomer?.id ?? null,
         ...(!isSingleSplit ? { payment_splits: paymentSplits } : {}),
       }
+      const offline = !navigator.onLine
+
+      // Helper para armar una venta offline local (ticket sin id real)
+      const buildOfflineSale = (offlineId: string): CompletedSale => ({
+        id: offlineId,
+        total,
+        subtotal,
+        discount: saleDiscountAmount,
+        shipping_amount: shipping,
+        payment_method: effectiveMethod,
+        installments: effectiveInstallments,
+        ...(isSingleSplit ? {} : { payment_splits: paymentSplits }),
+        items: cart,
+        created_at: new Date().toISOString(),
+      })
+
+      const finishOfflineSale = (sale: CompletedSale, msg: string) => {
+        setPendingCount(c => c + 1)
+        toast.info(msg)
+        setCompletedSale(sale)
+        localStorage.removeItem(POS_CART_KEY)
+        setCart([]); setSaleDiscountPct(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
+        setPaymentModalOpen(false); setStep('ticket')
+      }
+
       let sale: CompletedSale
       if (ccSplit) {
         if (!selectedCustomer) throw new Error('Seleccioná un cliente para cuenta corriente')
+
+        if (offline) {
+          const offlineId = crypto.randomUUID()
+          await queueSale({
+            id: offlineId,
+            created_at: new Date().toISOString(),
+            payload,
+            customer_charge: { customer_id: selectedCustomer.id, amount: ccSplit.amount },
+          })
+          finishOfflineSale(buildOfflineSale(offlineId), 'Sin conexión — venta guardada en cuenta corriente, se sincronizará automáticamente')
+          return
+        }
+
         try {
           const freshCustomer = await api.get<CustomerSummary & { is_active?: boolean }>(`/api/customers/${selectedCustomer.id}`)
           if (freshCustomer.is_active === false) throw new Error('El cliente está desactivado')
@@ -974,27 +1009,21 @@ export default function POSPage() {
             payload,
             customer_charge: { customer_id: selectedCustomer.id, amount: ccSplit.amount },
           })
-          setPendingCount(c => c + 1)
-          toast.info('Sin conexión — venta guardada en cuenta corriente, se sincronizará automáticamente')
-          sale = {
-            id: offlineId,
-            total,
-            subtotal,
-            discount: saleDiscountAmount,
-            shipping_amount: shipping,
-            payment_method: effectiveMethod,
-            installments: effectiveInstallments,
-            ...(isSingleSplit ? {} : { payment_splits: paymentSplits }),
-            items: cart,
-            created_at: new Date().toISOString(),
-          }
-          setCompletedSale(sale)
-          localStorage.removeItem(POS_CART_KEY)
-          setCart([]); setSaleDiscountPct(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
-          setPaymentModalOpen(false); setStep('ticket')
+          finishOfflineSale(buildOfflineSale(offlineId), 'Sin conexión — venta guardada en cuenta corriente, se sincronizará automáticamente')
           return
         }
       } else {
+        if (offline) {
+          const offlineId = crypto.randomUUID()
+          await queueSale({
+            id: offlineId,
+            created_at: new Date().toISOString(),
+            payload,
+          })
+          finishOfflineSale(buildOfflineSale(offlineId), 'Sin conexión — venta guardada, se sincronizará automáticamente')
+          return
+        }
+
         try {
           sale = await api.post<CompletedSale>('/api/sales', payload)
           toast.success('Venta registrada')
@@ -1006,24 +1035,7 @@ export default function POSPage() {
             created_at: new Date().toISOString(),
             payload,
           })
-          setPendingCount(c => c + 1)
-          toast.info('Sin conexión — venta guardada, se sincronizará automáticamente')
-          sale = {
-            id: offlineId,
-            total,
-            subtotal,
-            discount: saleDiscountAmount,
-            shipping_amount: shipping,
-            payment_method: effectiveMethod,
-            installments: effectiveInstallments,
-            ...(isSingleSplit ? {} : { payment_splits: paymentSplits }),
-            items: cart,
-            created_at: new Date().toISOString(),
-          }
-          setCompletedSale(sale)
-          localStorage.removeItem(POS_CART_KEY)
-          setCart([]); setSaleDiscountPct(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
-          setPaymentModalOpen(false); setStep('ticket')
+          finishOfflineSale(buildOfflineSale(offlineId), 'Sin conexión — venta guardada, se sincronizará automáticamente')
           return
         }
       }
@@ -2042,11 +2054,7 @@ export default function POSPage() {
                 <kbd className="px-1.5 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded">Esc</kbd>
               </div>
             </div>
-            {variableProductsLoading ? (
-              <div className="flex justify-center py-8">
-                <div className="w-5 h-5 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
-              </div>
-            ) : variableProducts.length === 0 ? (
+            {variableProducts.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-[var(--text3)]">
                 No hay productos de precio libre.<br />
                 <span className="text-xs">Activá "Precio libre por venta" en el catálogo.</span>
