@@ -29,6 +29,13 @@ export interface LocalPriceRule {
   list_name: string    // aplanado desde price_lists join
 }
 
+export interface LocalPriceOverride {
+  id: string           // `${product_id}::${price_list_id}`
+  product_id: string
+  price_list_id: string
+  price: number
+}
+
 export interface SyncMeta {
   key: string
   synced_at: string
@@ -49,6 +56,7 @@ class POSDatabase extends Dexie {
   barcodes!: Table<LocalBarcode>
   priceLists!: Table<LocalPriceList>
   priceRules!: Table<LocalPriceRule>
+  priceOverrides!: Table<LocalPriceOverride>
   promotions!: Table<Promotion>
   syncMeta!: Table<SyncMeta>
   pendingSales!: Table<PendingSale>
@@ -71,6 +79,16 @@ class POSDatabase extends Dexie {
       promotions:   'id, scope, scope_id',
       syncMeta:     'key',
       pendingSales: 'id, status, created_at',
+    })
+    this.version(3).stores({
+      products:       'id, name, barcode, updated_at',
+      barcodes:       'barcode, product_id',
+      priceLists:     'id',
+      priceRules:     'id, product_id, price_list_id',
+      priceOverrides: 'id, product_id',
+      promotions:     'id, scope, scope_id',
+      syncMeta:       'key',
+      pendingSales:   'id, status, created_at',
     })
   }
 }

@@ -597,12 +597,23 @@ export default function CustomersPage() {
   const [printModal, setPrintModal] = useState(false)
   const [printFields, setPrintFields] = useState<string[]>(['full_name', 'document', 'phone', 'email', 'address', 'locality', 'delivery_zone_name', 'client_category_name'])
   const [printLoading, setPrintLoading] = useState(false)
+  const [printZoneFilter, setPrintZoneFilter] = useState('')
+  const [printCategoryFilter, setPrintCategoryFilter] = useState('')
+  const [printLocality, setPrintLocality] = useState('')
+  const [printLocalities, setPrintLocalities] = useState<string[]>([])
+  const [printLocalitiesLoading, setPrintLocalitiesLoading] = useState(false)
 
   const searchRef = useRef(debouncedSearch)
   const pageRef = useRef(page)
   const statusRef = useRef(statusFilter)
   const zoneRef = useRef(zoneFilter)
   const categoryRef = useRef(categoryFilter)
+  const printZoneRef = useRef(printZoneFilter)
+  const printCategoryRef = useRef(printCategoryFilter)
+  const printLocalityRef = useRef(printLocality)
+  const printFieldsRef = useRef(printFields)
+  const filterZonesRef = useRef(filterZones)
+  const filterCategoriesRef = useRef(filterCategories)
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), search ? 300 : 0)
@@ -612,6 +623,12 @@ export default function CustomersPage() {
   useEffect(() => { statusRef.current = statusFilter }, [statusFilter])
   useEffect(() => { zoneRef.current = zoneFilter }, [zoneFilter])
   useEffect(() => { categoryRef.current = categoryFilter }, [categoryFilter])
+  useEffect(() => { printZoneRef.current = printZoneFilter }, [printZoneFilter])
+  useEffect(() => { printCategoryRef.current = printCategoryFilter }, [printCategoryFilter])
+  useEffect(() => { printLocalityRef.current = printLocality }, [printLocality])
+  useEffect(() => { printFieldsRef.current = printFields }, [printFields])
+  useEffect(() => { filterZonesRef.current = filterZones }, [filterZones])
+  useEffect(() => { filterCategoriesRef.current = filterCategories }, [filterCategories])
 
   useEffect(() => {
     api.get<DeliveryZone[]>('/api/delivery-zones').then(setFilterZones).catch(() => {})
@@ -622,6 +639,28 @@ export default function CustomersPage() {
     setEditCustomer(null)
     setCustomerModal(true)
   }, [])
+
+  const openPrintModal = useCallback(async () => {
+    setPrintZoneFilter('')
+    setPrintCategoryFilter('')
+    setPrintLocality('')
+    setPrintModal(true)
+    if (printLocalities.length > 0) return
+    setPrintLocalitiesLoading(true)
+    try {
+      const seen = new Set<string>()
+      let cur = 1
+      let total = 1
+      do {
+        const res = await api.get<PaginatedResponse<CustomerSummary>>('/api/customers', { limit: 100, page: cur })
+        res.data.forEach(c => { if (c.locality) seen.add(c.locality) })
+        total = res.pagination.pages
+        cur++
+      } while (cur <= total)
+      setPrintLocalities([...seen].sort((a, b) => a.localeCompare(b, 'es')))
+    } catch { /* ignore */ }
+    finally { setPrintLocalitiesLoading(false) }
+  }, [printLocalities.length])
 
   const fetchCustomers = useCallback(async () => {
     setLoading(true)
@@ -690,27 +729,34 @@ export default function CustomersPage() {
     setPrintFields(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key])
   }
 
-  const handlePrint = async () => {
+  const handlePrint = useCallback(async () => {
+    const zoneId = printZoneRef.current
+    const categoryId = printCategoryRef.current
+    const locality = printLocalityRef.current
+    const fields = printFieldsRef.current
+    const zones = filterZonesRef.current
+    const categories = filterCategoriesRef.current
+
     setPrintLoading(true)
     try {
-      const baseParams: Record<string, string | number | undefined> = {
-        search: debouncedSearch || undefined,
-        limit: 100,
-        is_active: statusFilter === 'all' ? undefined : statusFilter === 'active' ? 1 : 0,
-        delivery_zone_id: zoneFilter || undefined,
-        client_category_id: categoryFilter || undefined,
-      }
-      const customers: CustomerSummary[] = []
+      const rawCustomers: CustomerSummary[] = []
       let currentPage = 1
       let totalPages = 1
       do {
-        const res = await api.get<PaginatedResponse<CustomerSummary>>('/api/customers', { ...baseParams, page: currentPage })
-        customers.push(...res.data)
+        const res = await api.get<PaginatedResponse<CustomerSummary>>('/api/customers', { limit: 100, page: currentPage })
+        rawCustomers.push(...res.data)
         totalPages = res.pagination.pages
         currentPage++
       } while (currentPage <= totalPages)
 
-      const selected = PRINT_FIELDS.filter(f => printFields.includes(f.key))
+      const customers = rawCustomers.filter(c => {
+        if (zoneId && c.delivery_zone_id !== zoneId) return false
+        if (categoryId && c.client_category_id !== categoryId) return false
+        if (locality && c.locality !== locality) return false
+        return true
+      })
+
+      const selected = PRINT_FIELDS.filter(f => fields.includes(f.key))
 
       const formatCell = (customer: CustomerSummary, key: string): string => {
         const val = (customer as unknown as Record<string, unknown>)[key]
@@ -722,6 +768,17 @@ export default function CustomersPage() {
         if (key === 'birthdate') return String(val).split('T')[0]
         return String(val)
       }
+
+      const activeFilters: string[] = []
+      if (zoneId) {
+        const zoneName = zones.find(z => z.id === zoneId)?.name
+        if (zoneName) activeFilters.push(`Zona: ${zoneName}`)
+      }
+      if (categoryId) {
+        const catName = categories.find(c => c.id === categoryId)?.name
+        if (catName) activeFilters.push(`Categoría: ${catName}`)
+      }
+      if (locality) activeFilters.push(`Localidad: ${locality}`)
 
       const headerRow = selected.map(f => `<th>${f.label}</th>`).join('')
       const bodyRows = customers.map(c =>
@@ -750,7 +807,7 @@ export default function CustomersPage() {
 </head>
 <body>
 <h1>Listado de Clientes</h1>
-<p class="meta">Generado el ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })} — ${customers.length} cliente${customers.length !== 1 ? 's' : ''}${debouncedSearch ? ` · Búsqueda: "${debouncedSearch}"` : ''}${statusFilter !== 'all' ? ` · ${statusFilter === 'active' ? 'Activos' : 'Inactivos'}` : ''}</p>
+<p class="meta">Generado el ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })} — ${customers.length} cliente${customers.length !== 1 ? 's' : ''}${activeFilters.length > 0 ? ` · ${activeFilters.join(' · ')}` : ''}</p>
 <table>
 <thead><tr>${headerRow}</tr></thead>
 <tbody>${bodyRows}</tbody>
@@ -771,7 +828,7 @@ export default function CustomersPage() {
     } finally {
       setPrintLoading(false)
     }
-  }
+  }, [])
 
   const toggleSort = (field: SortField) => {
     setSort(s => s.field === field ? { field, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { field, dir: 'asc' })
@@ -816,7 +873,7 @@ export default function CustomersPage() {
           activeTab === 'customers'
             ? (
               <div className="flex items-center gap-2">
-                <Button variant="secondary" onClick={() => setPrintModal(true)}><Printer size={15} /> Imprimir clientes</Button>
+                <Button variant="secondary" onClick={openPrintModal}><Printer size={15} /> Imprimir clientes</Button>
                 <Button onClick={openCreateModal}><Plus size={15} /> Nuevo cliente</Button>
               </div>
             )
@@ -1024,24 +1081,73 @@ export default function CustomersPage() {
       />
 
       <Modal open={printModal} onClose={() => setPrintModal(false)} title="Imprimir listado de clientes" size="sm">
-        <div className="space-y-4">
-          <p className="text-sm text-[var(--text2)]">Elegí qué columnas incluir en el listado impreso.</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-            {PRINT_FIELDS.map(f => (
-              <label key={f.key} className="flex items-center gap-2 cursor-pointer text-sm text-[var(--text)]">
-                <input
-                  type="checkbox"
-                  checked={printFields.includes(f.key)}
-                  onChange={() => togglePrintField(f.key)}
-                  className="w-4 h-4 accent-[var(--accent)] cursor-pointer"
-                />
-                {f.label}
-              </label>
-            ))}
+        <div className="space-y-5">
+
+          {/* Filtros */}
+          <div className="space-y-3">
+            <p className="text-xs font-semibold text-[var(--text3)] uppercase tracking-wide">Filtros</p>
+            <div className="grid grid-cols-1 gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--text2)]">Zona de entrega</label>
+                <select
+                  value={printZoneFilter}
+                  onChange={e => setPrintZoneFilter(e.target.value)}
+                  className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] cursor-pointer"
+                >
+                  <option value="">Todas las zonas</option>
+                  {filterZones.map(z => <option key={z.id} value={z.id}>{z.name}</option>)}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--text2)]">Categoría</label>
+                <select
+                  value={printCategoryFilter}
+                  onChange={e => setPrintCategoryFilter(e.target.value)}
+                  className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] cursor-pointer"
+                >
+                  <option value="">Todas las categorías</option>
+                  {filterCategories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-[var(--text2)]">
+                  Localidad
+                  {printLocalitiesLoading && <span className="ml-2 text-[var(--text3)] font-normal">cargando...</span>}
+                </label>
+                <select
+                  value={printLocality}
+                  onChange={e => setPrintLocality(e.target.value)}
+                  disabled={printLocalitiesLoading}
+                  className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] cursor-pointer disabled:opacity-50"
+                >
+                  <option value="">Todas las localidades</option>
+                  {printLocalities.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </div>
+            </div>
           </div>
-          <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border)]">
+
+          {/* Columnas */}
+          <div className="space-y-3 pt-3 border-t border-[var(--border)]">
+            <p className="text-xs font-semibold text-[var(--text3)] uppercase tracking-wide">Columnas a incluir</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+              {PRINT_FIELDS.map(f => (
+                <label key={f.key} className="flex items-center gap-2 cursor-pointer text-sm text-[var(--text)]">
+                  <input
+                    type="checkbox"
+                    checked={printFields.includes(f.key)}
+                    onChange={() => togglePrintField(f.key)}
+                    className="w-4 h-4 accent-[var(--accent)] cursor-pointer"
+                  />
+                  {f.label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 pb-4 border-t border-[var(--border)]">
             <Button variant="secondary" onClick={() => setPrintModal(false)} disabled={printLoading}>Cancelar</Button>
-            <Button onClick={handlePrint} loading={printLoading} disabled={printFields.length === 0}>
+            <Button onClick={handlePrint} loading={printLoading} disabled={printFields.length === 0 || printLocalitiesLoading}>
               <Printer size={14} /> Imprimir
             </Button>
           </div>

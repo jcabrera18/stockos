@@ -80,6 +80,19 @@ const emptyForm = {
   price_mode: 'fixed' as 'fixed' | 'custom',
 }
 
+const PRICE_MODES = [
+  { value: 'list'  as const, label: 'Por lista',     hint: 'Margen sobre costo' },
+  { value: 'fixed' as const, label: 'Precio fijo',   hint: 'Vos definís el precio' },
+  { value: 'libre' as const, label: 'Precio libre',  hint: 'Cajero lo ingresa' },
+]
+
+function SectionLabel({ children }: { children: string }) {
+  return (
+    <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--text3)]">
+      {children}
+    </p>
+  )
+}
 
 export function ProductModal({ open, onClose, onSaved, product }: ProductModalProps) {
   const [form, setForm] = useState(emptyForm)
@@ -96,6 +109,8 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
+  // overridePrices: precio manual por lista (price_list_id → valor string editable)
+  const [overridePrices, setOverridePrices] = useState<Record<string, string>>({})
   const [supplierSubModal, setSupplierSubModal] = useState(false)
   const [brandSubModal, setBrandSubModal] = useState(false)
   const [newBrandName, setNewBrandName] = useState('')
@@ -116,6 +131,14 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const vatRate = Number(form.vat_rate) || 0
   const costWithVat = Math.round(costNet * (1 + vatRate / 100) * 100) / 100
 
+  const currentPriceMode = form.price_mode === 'custom' ? 'libre' : form.use_fixed_sell_price ? 'fixed' : 'list'
+
+  const setPriceMode = (mode: 'list' | 'fixed' | 'libre') => {
+    if (mode === 'libre')  setForm(f => ({ ...f, price_mode: 'custom', use_fixed_sell_price: false }))
+    else if (mode === 'fixed') setForm(f => ({ ...f, price_mode: 'fixed', use_fixed_sell_price: true }))
+    else setForm(f => ({ ...f, price_mode: 'fixed', use_fixed_sell_price: false }))
+  }
+
   // Alt+F para toggle precio fijo (solo cuando el modal está abierto)
   useEffect(() => {
     if (!open) return
@@ -133,11 +156,9 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     return () => window.removeEventListener('keydown', handler)
   }, [open])
 
-  // Restaurar al abrir / limpiar historial al cerrar
   useEffect(() => {
     if (open) {
       setMinimized(false)
-      // Modo express solo para crear; edición siempre muestra todo
       setExpressMode(!product)
     } else {
       setCostHistoryOpen(false)
@@ -172,7 +193,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
       _refCache.suppliers  = sups; setSuppliers(sups)
       _refCache.priceLists = lists; setPriceLists(lists)
       _refCache.brands     = brnds; setBrands(brnds)
-      // Sin listas de precio → precio fijo prendido por defecto al crear
       if (!product && lists.length === 0) {
         setForm(f => ({ ...f, use_fixed_sell_price: true }))
       }
@@ -199,12 +219,20 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         unit: product.unit,
         price_mode: product.price_mode ?? 'fixed',
       })
-      api.get<Product>(`/api/products/${product.id}`)
-        .then(full => { setBarcodes((full.product_barcodes ?? []).map(b => b.barcode)) })
+      api.get<Product & { price_overrides?: { price_list_id: string; price: number }[] }>(`/api/products/${product.id}`)
+        .then(full => {
+          setBarcodes((full.product_barcodes ?? []).map(b => b.barcode))
+          const ovMap: Record<string, string> = {}
+          for (const ov of (full.price_overrides ?? [])) {
+            ovMap[ov.price_list_id] = String(ov.price)
+          }
+          setOverridePrices(ovMap)
+        })
         .catch(() => { setBarcodes(product.barcode ? [product.barcode] : []) })
     } else {
       setForm(emptyForm)
       setBarcodes([])
+      setOverridePrices({})
     }
     setNewBarcode('')
     setErrors({})
@@ -224,7 +252,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     if (!pasted) return
     e.preventDefault()
     addBarcode(pasted)
-    // Saltar al nombre para que el usuario lo complete
     setTimeout(() => nameInputRef.current?.focus(), 30)
   }
 
@@ -262,14 +289,20 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         unit: form.unit,
         price_mode: form.price_mode,
       }
-      await api.post('/api/products', payload)
+      const created = await api.post<{ id: string }>('/api/products', payload)
+      const overridePayload = Object.entries(overridePrices)
+        .filter(([, v]) => v !== '' && Number(v) > 0)
+        .map(([price_list_id, price]) => ({ price_list_id, price: Number(price) }))
+      if (overridePayload.length > 0) {
+        await api.put(`/api/products/${created.id}/price-overrides`, overridePayload)
+      }
       toast.success('Producto creado')
       onSaved()
-      // Resetear para el siguiente
       setForm(emptyForm)
       setBarcodes([])
       setNewBarcode('')
       setErrors({})
+      setOverridePrices({})
       setTimeout(() => newBarcodeRef.current?.focus(), 50)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
@@ -338,11 +371,19 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         price_mode: form.price_mode,
       }
 
+      const overridePayload = Object.entries(overridePrices)
+        .filter(([, v]) => v !== '' && Number(v) > 0)
+        .map(([price_list_id, price]) => ({ price_list_id, price: Number(price) }))
+
       if (isEdit) {
         await api.patch(`/api/products/${product!.id}`, payload)
+        await api.put(`/api/products/${product!.id}/price-overrides`, overridePayload)
         toast.success('Producto actualizado')
       } else {
-        await api.post('/api/products', payload)
+        const created = await api.post<{ id: string }>('/api/products', payload)
+        if (overridePayload.length > 0) {
+          await api.put(`/api/products/${created.id}/price-overrides`, overridePayload)
+        }
         toast.success('Producto creado')
       }
 
@@ -395,10 +436,8 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         parent_id: newCatParent || null,
       })
       const updated = await api.get<Category[]>('/api/products/categories').catch(() => categories)
-      // Actualizar cache para que próximas aperturas tengan la nueva categoría
       _refCache.categories = updated
       setCategories(updated)
-      // Auto-seleccionar la recién creada en el producto
       setForm(f => ({ ...f, category_id: created.id }))
       setNewCatName('')
       setNewCatParent('')
@@ -411,7 +450,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     }
   }
 
-  // Mapas para el árbol de categorías
   const categoryMap = new Map(categories.map(c => [c.id, c]))
   const childrenMap = new Map<string | null, Category[]>()
   categories.forEach(c => {
@@ -421,6 +459,63 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   })
 
   const selectClass = 'w-full px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
+
+  const renderBarcodeField = (autoFocus?: boolean) => (
+    <div className="flex flex-col gap-1">
+      <label className="text-sm font-medium text-[var(--text2)]">Código de barras (EAN)</label>
+      {barcodes.length > 0 && (
+        <div className="flex gap-1 mb-1">
+          <select
+            value={selectedBarcodeIdx}
+            onChange={e => setSelectedBarcodeIdx(Number(e.target.value))}
+            className="flex-1 min-w-0 px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors mono"
+          >
+            {barcodes.map((b, i) => (
+              <option key={i} value={i}>{b}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => removeBarcode(selectedBarcodeIdx)}
+            className="flex-shrink-0 px-2 py-2 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--danger,#ef4444)] hover:bg-[var(--surface2)] transition-colors"
+            title="Eliminar código seleccionado"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
+      <div className="flex gap-1">
+        <input
+          ref={newBarcodeRef}
+          type="text"
+          autoFocus={autoFocus}
+          value={newBarcode}
+          onChange={e => setNewBarcode(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              addBarcode()
+              if (expressMode && !isEdit) {
+                setTimeout(() => nameInputRef.current?.focus(), 30)
+              }
+            }
+          }}
+          onPaste={handleBarcodePaste}
+          placeholder="7790895000152"
+          className="flex-1 min-w-0 px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] transition-colors mono"
+        />
+        <button
+          type="button"
+          onClick={() => addBarcode()}
+          className="flex-shrink-0 px-2 py-2 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors"
+          title="Agregar código"
+        >
+          <Plus size={14} />
+        </button>
+      </div>
+      <p className="text-xs text-[var(--text3)]">Escaneá o pegá el código</p>
+    </div>
+  )
 
   return (
     <Modal
@@ -435,82 +530,29 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     >
       <div className="space-y-5">
 
-        {/* Hint modo express */}
+        {/* Toggle express / completo */}
         {!isEdit && (
-          <div className="flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)]">
+          <button
+            type="button"
+            onClick={() => setExpressMode(v => !v)}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-left cursor-pointer hover:bg-[var(--surface3)] transition-colors"
+          >
             <p className="text-xs text-[var(--text2)]">
               {expressMode
                 ? 'Modo express — escaneá el código, completá el nombre y guardá.'
                 : 'Modo completo — todos los campos disponibles.'}
             </p>
-            <button
-              type="button"
-              onClick={() => setExpressMode(v => !v)}
-              className="text-xs text-[var(--accent)] hover:opacity-80 transition-opacity flex-shrink-0 ml-3"
-            >
+            <span className="text-xs text-[var(--accent)] hover:opacity-80 transition-opacity flex-shrink-0 ml-3">
               {expressMode ? 'Ver más campos' : 'Modo express'}
-            </button>
-          </div>
+            </span>
+          </button>
         )}
 
         {/* ── MODO EXPRESS ── */}
         {expressMode && !isEdit && (
           <>
-            {/* Barcode */}
-            <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-[var(--text2)]">Código de barras (EAN)</label>
-              {barcodes.length > 0 && (
-                <div className="flex gap-1 mb-1">
-                  <select
-                    value={selectedBarcodeIdx}
-                    onChange={e => setSelectedBarcodeIdx(Number(e.target.value))}
-                    className="flex-1 min-w-0 px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors mono"
-                  >
-                    {barcodes.map((b, i) => (
-                      <option key={i} value={i}>{b}</option>
-                    ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => removeBarcode(selectedBarcodeIdx)}
-                    className="flex-shrink-0 px-2 py-2 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--danger,#ef4444)] hover:bg-[var(--surface2)] transition-colors"
-                    title="Eliminar código seleccionado"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
-              <div className="flex gap-1">
-                <input
-                  ref={newBarcodeRef}
-                  type="text"
-                  autoFocus
-                  value={newBarcode}
-                  onChange={e => setNewBarcode(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      addBarcode()
-                      setTimeout(() => nameInputRef.current?.focus(), 30)
-                    }
-                  }}
-                  onPaste={handleBarcodePaste}
-                  placeholder="7790895000152"
-                  className="flex-1 min-w-0 px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] transition-colors mono"
-                />
-                <button
-                  type="button"
-                  onClick={() => addBarcode()}
-                  className="flex-shrink-0 px-2 py-2 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors"
-                  title="Agregar código"
-                >
-                  <Plus size={14} />
-                </button>
-              </div>
-              <p className="text-xs text-[var(--text3)]">Escaneá o pegá el código</p>
-            </div>
+            {renderBarcodeField(true)}
 
-            {/* Nombre */}
             <Input
               ref={nameInputRef}
               label="Nombre *"
@@ -526,7 +568,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
               error={errors.name}
             />
 
-            {/* Costo e IVA */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium text-[var(--text2)]">Costo e IVA</p>
@@ -567,31 +608,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
               </div>
             </div>
 
-            {/* Precio según lista (express) */}
-            {!form.use_fixed_sell_price && costWithVat > 0 && priceLists.length > 0 && (
-              <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
-                <p className="text-xs font-medium text-[var(--text3)] mb-1">Precio según lista</p>
-                {priceLists.map(list => {
-                  const price = Math.round(costWithVat * (1 + list.margin_pct / 100) * 100) / 100
-                  const gain = price - costWithVat
-                  return (
-                    <div key={list.id} className="flex items-center justify-between text-sm">
-                      <span className="text-[var(--text2)]">{list.name}</span>
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs text-[var(--text3)]">
-                          +{list.margin_pct}% · ganancia ${gain.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                        </span>
-                        <span className="font-semibold mono text-[var(--accent)]">
-                          ${price.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {/* Precio fijo (express) */}
             {form.price_mode === 'fixed' && (
               <div className="space-y-3">
                 <label className="flex items-center gap-3 cursor-pointer select-none">
@@ -640,87 +656,33 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
           </>
         )}
 
-        {/* ── MODO COMPLETO / EDICIÓN — layout 2 columnas ── */}
+        {/* ── MODO COMPLETO / EDICIÓN ── */}
         {(!expressMode || isEdit) && (
-          <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+          <div className="divide-y divide-[var(--border)]">
 
-            {/* ── Columna izquierda: Identificación ── */}
-            <div className="space-y-4">
+            {/* 1 ── Identificación */}
+            <div className="space-y-4 pb-6">
+              <SectionLabel>Identificación</SectionLabel>
 
-              {/* Barcode + SKU */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1">
-                  <label className="text-sm font-medium text-[var(--text2)]">Código de barras (EAN)</label>
-                  {barcodes.length > 0 && (
-                    <div className="flex gap-1 mb-1">
-                      <select
-                        value={selectedBarcodeIdx}
-                        onChange={e => setSelectedBarcodeIdx(Number(e.target.value))}
-                        className="flex-1 min-w-0 px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors mono"
-                      >
-                        {barcodes.map((b, i) => (
-                          <option key={i} value={i}>{b}</option>
-                        ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => removeBarcode(selectedBarcodeIdx)}
-                        className="flex-shrink-0 px-2 py-2 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--danger,#ef4444)] hover:bg-[var(--surface2)] transition-colors"
-                        title="Eliminar código seleccionado"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  )}
-                  <div className="flex gap-1">
-                    <input
-                      ref={newBarcodeRef}
-                      type="text"
-                      autoFocus={!isEdit}
-                      value={newBarcode}
-                      onChange={e => setNewBarcode(e.target.value)}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          addBarcode()
-                        }
-                      }}
-                      onPaste={handleBarcodePaste}
-                      placeholder="7790895000152"
-                      className="flex-1 min-w-0 px-2 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] transition-colors mono"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => addBarcode()}
-                      className="flex-shrink-0 px-2 py-2 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors"
-                      title="Agregar código"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                  <p className="text-xs text-[var(--text3)]">Escaneá o pegá el código</p>
-                </div>
+              {renderBarcodeField(!isEdit)}
+
+              <Input
+                ref={nameInputRef}
+                label="Nombre *"
+                value={form.name}
+                onChange={set('name')}
+                placeholder="Ej: Coca Cola 500ml"
+                error={errors.name}
+                autoFocus={isEdit}
+              />
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Input
                   label="SKU interno"
                   value={form.sku}
                   onChange={set('sku')}
                   placeholder="COC-500"
                 />
-              </div>
-
-              {/* Nombre + Unidad */}
-              <div className="grid grid-cols-3 gap-3">
-                <div className="col-span-2">
-                  <Input
-                    ref={nameInputRef}
-                    label="Nombre *"
-                    value={form.name}
-                    onChange={set('name')}
-                    placeholder="Ej: Coca Cola 500ml"
-                    error={errors.name}
-                    autoFocus={isEdit}
-                  />
-                </div>
                 <Select
                   label="Unidad"
                   options={UNITS}
@@ -728,15 +690,18 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                   onChange={set('unit')}
                 />
               </div>
+            </div>
 
-              {/* Categoría */}
-              <div className="flex flex-col gap-1">
+            {/* 2 ── Clasificación */}
+            <div className="space-y-4 py-6">
+              <SectionLabel>Clasificación</SectionLabel>
+
+              <div className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-[var(--text2)]">Categoría</label>
                   <button
                     type="button"
                     onClick={() => { setNewCatName(''); setNewCatParent(form.category_id); setCategorySubModal(true) }}
-                    title="Crear categoría"
                     className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
                   >
                     <Plus size={12} /> Nueva
@@ -751,15 +716,13 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                 />
               </div>
 
-              {/* Proveedor + Marca */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium text-[var(--text2)]">Proveedor</label>
                     <button
                       type="button"
                       onClick={() => setSupplierSubModal(true)}
-                      title="Crear proveedor"
                       className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
                     >
                       <Plus size={12} /> Nuevo
@@ -772,13 +735,12 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                     placeholder="Sin proveedor"
                   />
                 </div>
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1.5">
                   <div className="flex items-center justify-between">
                     <label className="text-sm font-medium text-[var(--text2)]">Marca</label>
                     <button
                       type="button"
                       onClick={() => { setNewBrandName(''); setBrandSubModal(true) }}
-                      title="Crear marca"
                       className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
                     >
                       <Plus size={12} /> Nueva
@@ -792,173 +754,215 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                   />
                 </div>
               </div>
+            </div>
 
-              {/* Descripción */}
-              <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-[var(--text2)]">Descripción</label>
-                <textarea
-                  value={form.description}
-                  onChange={set('description')}
-                  placeholder="Descripción opcional del producto..."
-                  rows={3}
-                  className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] transition-colors resize-none"
+            {/* 3 ── Costos y precios */}
+            <div className="space-y-4 py-6">
+              <SectionLabel>Costos y precios</SectionLabel>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Input
+                  ref={costPriceRef}
+                  label="Costo neto"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.cost_price_net}
+                  onChange={set('cost_price_net')}
+                  placeholder="0.00"
+                  error={errors.cost_price_net}
+                />
+                <Select
+                  label="IVA"
+                  options={VAT_OPTIONS}
+                  value={form.vat_rate}
+                  onChange={set('vat_rate')}
+                />
+                <Input
+                  label="Costo con IVA"
+                  value={costWithVat ? String(costWithVat) : '0'}
+                  readOnly
+                  placeholder="0.00"
+                  hint="Calculado automáticamente"
                 />
               </div>
 
-            </div>
-
-            {/* ── Columna derecha: Precios y stock ── */}
-            <div className="space-y-4">
-
-              {/* Costo e IVA */}
-              <div className="space-y-2">
+              {/* Segmented control: modo de precio de venta */}
+              <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-[var(--text2)]">Costo e IVA</p>
-                  <p className="text-xs text-[var(--text3)]">Las listas calculan sobre el costo con IVA</p>
+                  <label className="text-sm font-medium text-[var(--text2)]">Precio de venta</label>
+                  <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text3)]">Alt+F</kbd>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <Input
-                    ref={costPriceRef}
-                    label="Costo"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={form.cost_price_net}
-                    onChange={set('cost_price_net')}
-                    placeholder="0.00"
-                    error={errors.cost_price_net}
-                  />
-                  <Select
-                    label="IVA"
-                    options={VAT_OPTIONS}
-                    value={form.vat_rate}
-                    onChange={set('vat_rate')}
-                  />
-                  <Input
-                    label="Costo con IVA"
-                    value={costWithVat ? String(costWithVat) : '0'}
-                    readOnly
-                    placeholder="0.00"
-                    hint="Calculado automáticamente"
-                  />
+                <div className="flex rounded-[var(--radius-md)] border border-[var(--border)] overflow-hidden">
+                  {PRICE_MODES.map((opt, i) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => setPriceMode(opt.value)}
+                      className={cn(
+                        'flex-1 px-3 py-2.5 text-center transition-colors',
+                        i > 0 && 'border-l border-[var(--border)]',
+                        currentPriceMode === opt.value
+                          ? 'bg-[var(--accent)] text-white'
+                          : 'text-[var(--text2)] hover:bg-[var(--surface2)]'
+                      )}
+                    >
+                      <span className="block text-sm font-medium leading-tight">{opt.label}</span>
+                      <span className={cn('block text-[10px] mt-0.5 leading-tight', currentPriceMode === opt.value ? 'text-white/70' : 'text-[var(--text3)]')}>
+                        {opt.hint}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* Precio según lista */}
-              {!form.use_fixed_sell_price && costWithVat > 0 && priceLists.length > 0 && (
-                <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
-                  <p className="text-xs font-medium text-[var(--text3)] mb-1">Precio según lista</p>
+              {/* Input precio fijo */}
+              {currentPriceMode === 'fixed' && (
+                <Input
+                  ref={sellPriceRef}
+                  label="Precio de venta"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.sell_price}
+                  onChange={set('sell_price')}
+                  placeholder="0.00"
+                  error={errors.sell_price}
+                />
+              )}
+
+              {/* Preview de listas — precios editables */}
+              {currentPriceMode === 'list' && costWithVat > 0 && priceLists.length > 0 && (
+                <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface2)]/35 p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text3)]">Precios por lista</p>
+                    <p className="text-[10px] text-[var(--text3)]">Editá para redondear</p>
+                  </div>
                   {priceLists.map(list => {
-                    const price = Math.round(costWithVat * (1 + list.margin_pct / 100) * 100) / 100
-                    const gain = price - costWithVat
+                    const calculated = Math.round(costWithVat * (1 + list.margin_pct / 100) * 100) / 100
+                    const overrideVal = overridePrices[list.id] ?? ''
+                    const displayPrice = overrideVal !== '' ? Number(overrideVal) : calculated
+                    const gain = displayPrice - costWithVat
+                    const isOverridden = overrideVal !== ''
                     return (
-                      <div key={list.id} className="flex items-center justify-between text-sm">
-                        <span className="text-[var(--text2)]">{list.name}</span>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-[var(--text3)]">
-                            +{list.margin_pct}% · ganancia ${gain.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                          </span>
-                          <span className="font-semibold mono text-[var(--accent)]">
-                            ${price.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                          </span>
+                      <div key={list.id} className={cn(
+                        'flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-sm transition-colors',
+                        isOverridden
+                          ? 'bg-[var(--accent)]/8 ring-1 ring-[var(--accent)]/25'
+                          : 'bg-[var(--surface)]/75'
+                      )}>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-[var(--text2)] truncate">{list.name}</p>
+                            {isOverridden && (
+                              <span className="flex-shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[var(--accent)] bg-[var(--accent)]/12 px-1 py-0.5 rounded">
+                                Personalizado
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-[var(--text3)]">
+                            +{list.margin_pct}%
+                            {isOverridden && (
+                              <span className="ml-1 line-through opacity-50">${calculated.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+                            )}
+                            {' · '}ganancia ${gain.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <span className="text-[var(--text3)] text-sm">$</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={overrideVal}
+                            onChange={e => {
+                              const v = e.target.value
+                              setOverridePrices(prev => {
+                                const next = { ...prev }
+                                if (v === '') delete next[list.id]
+                                else next[list.id] = v
+                                return next
+                              })
+                            }}
+                            placeholder={calculated.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                            className={cn(
+                              'w-28 px-2 py-1 text-sm font-medium text-right rounded-[var(--radius-sm)] bg-[var(--surface)] border transition-colors focus:outline-none mono',
+                              isOverridden
+                                ? 'border-[var(--accent)]/40 text-[var(--accent)] focus:border-[var(--accent)]'
+                                : 'border-[var(--border)] text-[var(--text2)] focus:border-[var(--accent)]'
+                            )}
+                          />
+                          {isOverridden && (
+                            <button
+                              type="button"
+                              onClick={() => setOverridePrices(prev => { const next = { ...prev }; delete next[list.id]; return next })}
+                              title="Restaurar precio calculado"
+                              className="p-1 text-[var(--text3)] hover:text-[var(--danger,#ef4444)] transition-colors"
+                            >
+                              <X size={12} />
+                            </button>
+                          )}
                         </div>
                       </div>
                     )
                   })}
                 </div>
               )}
-
-              {/* Precio de venta fijo */}
-              {form.price_mode === 'fixed' && (
-                <div className="space-y-2">
-                  <label className="flex items-center gap-3 cursor-pointer select-none">
-                    <div className="relative flex-shrink-0">
-                      <input
-                        type="checkbox"
-                        className="sr-only peer"
-                        checked={form.use_fixed_sell_price}
-                        onChange={e => setForm(f => ({ ...f, use_fixed_sell_price: e.target.checked, sell_price: e.target.checked ? f.sell_price : '' }))}
-                      />
-                      <div className="w-9 h-5 rounded-full bg-[var(--border)] peer-checked:bg-[var(--accent)] transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium text-[var(--text)]">Precio de venta fijo</p>
-                      <p className="text-xs text-[var(--text3)]">Sobreescribe el precio de la lista. Ideal cuando no usás márgenes.</p>
-                    </div>
-                  </label>
-                  {form.use_fixed_sell_price && (
-                    <Input
-                      label="Precio de venta"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={form.sell_price}
-                      onChange={set('sell_price')}
-                      placeholder="0.00"
-                      error={errors.sell_price}
-                    />
-                  )}
-                </div>
-              )}
-
-              {/* Precio libre */}
-              <label className="flex items-center gap-3 cursor-pointer select-none">
-                <div className="relative flex-shrink-0">
-                  <input
-                    type="checkbox"
-                    className="sr-only peer"
-                    checked={form.price_mode === 'custom'}
-                    onChange={e => setForm(f => ({ ...f, price_mode: e.target.checked ? 'custom' : 'fixed', use_fixed_sell_price: e.target.checked ? false : f.use_fixed_sell_price }))}
-                  />
-                  <div className="w-9 h-5 rounded-full bg-[var(--border)] peer-checked:bg-[var(--accent)] transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium text-[var(--text)]">Precio libre por venta</p>
-                  <p className="text-xs text-[var(--text3)]">El cajero ingresa el precio en cada venta (ej: verdura, carne por peso)</p>
-                </div>
-              </label>
-
-              {/* Stock */}
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-[var(--text2)]">Stock</p>
-                <div className="grid grid-cols-3 gap-3">
-                  <Input
-                    label="Stock inicial"
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={form.initial_stock}
-                    onChange={set('initial_stock')}
-                    placeholder="0"
-                  />
-                  <Input
-                    label="Stock mínimo"
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={form.stock_min}
-                    onChange={set('stock_min')}
-                    placeholder="0"
-                    error={errors.stock_min}
-                  />
-                  <Input
-                    label="Stock máximo"
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={form.stock_max}
-                    onChange={set('stock_max')}
-                    placeholder="9999"
-                    error={errors.stock_max}
-                  />
-                </div>
-              </div>
-
             </div>
+
+            {/* 4 ── Stock */}
+            <div className="space-y-4 py-6">
+              <SectionLabel>Stock</SectionLabel>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Input
+                  label="Stock inicial"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.initial_stock}
+                  onChange={set('initial_stock')}
+                  placeholder="0"
+                />
+                <Input
+                  label="Stock mínimo"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.stock_min}
+                  onChange={set('stock_min')}
+                  placeholder="0"
+                  error={errors.stock_min}
+                  hint="Alerta de reposición"
+                />
+                <Input
+                  label="Stock máximo"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.stock_max}
+                  onChange={set('stock_max')}
+                  placeholder="9999"
+                  error={errors.stock_max}
+                />
+              </div>
+            </div>
+
+            {/* 5 ── Descripción (opcional) */}
+            <div className="space-y-3 pt-6">
+              <SectionLabel>Descripción (opcional)</SectionLabel>
+              <textarea
+                value={form.description}
+                onChange={set('description')}
+                placeholder="Descripción opcional del producto..."
+                rows={3}
+                className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] transition-colors resize-none"
+              />
+            </div>
+
           </div>
         )}
 
-        {/* Historial de costos — solo en edición, ancho completo */}
+        {/* Historial de costos — solo en edición */}
         {isEdit && (
           <div className="border border-[var(--border)] rounded-[var(--radius-md)] overflow-hidden">
             <button
@@ -1014,10 +1018,10 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         )}
 
         {/* Footer sticky */}
-        <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
-          <div className="flex justify-end gap-2">
+        <div className="sticky bottom-0 -mx-4 sm:-mx-5 mt-5 border-t border-[var(--border)] bg-[var(--surface)]/95 px-4 pb-4 pt-3 backdrop-blur sm:px-5">
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
-            {expressMode && !isEdit && (
+            {!isEdit && (
               <Button variant="secondary" onClick={handleSaveAndNew} loading={saving}>
                 Guardar y agregar otro
               </Button>

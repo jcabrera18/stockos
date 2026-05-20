@@ -144,6 +144,8 @@ export default function OrdersPage() {
   const [newOrderModal, setNewOrderModal] = useState(false)
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
+  // Map<product_id, Map<price_list_id, price>> — cargado una vez
+  const priceOverridesRef = useRef<Map<string, Map<string, number>>>(new Map())
 
   // Form nuevo pedido
   const [customerName, setCustomerName] = useState('')
@@ -665,7 +667,8 @@ export default function OrdersPage() {
     Promise.all([
       api.get<Warehouse[]>('/api/warehouses'),
       api.get<PriceList[]>('/api/price-lists'),
-    ]).then(([wh, pl]) => {
+      api.get<{ product_id: string; price_list_id: string; price: number }[]>('/api/products/price-overrides').catch(() => []),
+    ]).then(([wh, pl, ovRaw]) => {
       setWarehouses(wh)
       setPriceLists(pl)
       if (sellerWarehouseId) {
@@ -675,6 +678,14 @@ export default function OrdersPage() {
         if (def) setWarehouseId(def.id)
       }
       setPriceListId(current => current || pl.find(list => list.is_default)?.id || pl[0]?.id || '')
+      // Construir mapa de overrides para uso sin re-render
+      const ovMap = new Map<string, Map<string, number>>()
+      for (const ov of ovRaw) {
+        let inner = ovMap.get(ov.product_id)
+        if (!inner) { inner = new Map(); ovMap.set(ov.product_id, inner) }
+        inner.set(ov.price_list_id, ov.price)
+      }
+      priceOverridesRef.current = ovMap
     }).catch(() => { })
   }, [])
 
@@ -769,9 +780,10 @@ export default function OrdersPage() {
 
   const addToCart = (product: Product) => {
     const list = priceLists.find(pl => pl.id === priceListId)
-    const price = list && product.cost_price
+    const override = priceOverridesRef.current.get(product.id)?.get(priceListId)
+    const price = override ?? (list && product.cost_price
       ? Math.round(product.cost_price * (1 + list.margin_pct / 100) * 100) / 100
-      : (product.sell_price || product.cost_price || 0)
+      : (product.sell_price || product.cost_price || 0))
     setCart(prev => [...prev, { product, quantity: 1, unit_price: price, discount: 0 }])
     setProductQuery('')
     setProductResults([])
@@ -1503,12 +1515,15 @@ export default function OrdersPage() {
                   setPriceListId(newId)
                   if (cart.length > 0) {
                     const list = priceLists.find(pl => pl.id === newId)
-                    setCart(prev => prev.map(i => ({
-                      ...i,
-                      unit_price: list && i.product.cost_price
-                        ? Math.round(i.product.cost_price * (1 + list.margin_pct / 100) * 100) / 100
-                        : (i.product.sell_price || i.product.cost_price || i.unit_price),
-                    })))
+                    setCart(prev => prev.map(i => {
+                      const override = priceOverridesRef.current.get(i.product.id)?.get(newId)
+                      return {
+                        ...i,
+                        unit_price: override ?? (list && i.product.cost_price
+                          ? Math.round(i.product.cost_price * (1 + list.margin_pct / 100) * 100) / 100
+                          : (i.product.sell_price || i.product.cost_price || i.unit_price)),
+                      }
+                    }))
                   }
                 }} />
             )}

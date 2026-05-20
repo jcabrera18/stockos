@@ -15,7 +15,7 @@
  * desde IndexedDB al init, para que computeLocalPrice sea SÍNCRONO.
  */
 import { api } from '@/lib/api'
-import { posDB, type LocalPriceList, type LocalPriceRule } from '@/lib/pos-db'
+import { posDB, type LocalPriceList, type LocalPriceRule, type LocalPriceOverride } from '@/lib/pos-db'
 import type { Product } from '@/types'
 import type { Promotion } from '@/lib/promoUtils'
 
@@ -44,6 +44,9 @@ let priceListsMemory: LocalPriceList[] = []
 // Map: product_id → reglas ordenadas por min_quantity DESC
 const rulesMemory = new Map<string, LocalPriceRule[]>()
 
+// Map: product_id → Map<price_list_id, price>
+const overridesMemory = new Map<string, Map<string, number>>()
+
 async function buildMemoryCaches(): Promise<void> {
   // Price lists — ordenadas por min_quantity DESC
   const lists = await posDB.priceLists.toArray()
@@ -62,6 +65,15 @@ async function buildMemoryCaches(): Promise<void> {
   }
   for (const group of rulesMemory.values()) {
     group.sort((a, b) => b.min_quantity - a.min_quantity)
+  }
+
+  // Price overrides
+  const overrides = await posDB.priceOverrides.toArray()
+  overridesMemory.clear()
+  for (const ov of overrides) {
+    let inner = overridesMemory.get(ov.product_id)
+    if (!inner) { inner = new Map(); overridesMemory.set(ov.product_id, inner) }
+    inner.set(ov.price_list_id, ov.price)
   }
 }
 
@@ -106,22 +118,26 @@ export function computeLocalPrice(
     return { price: product.sell_price, list_name: 'Precio fijo', margin_pct: 0, rule_source: 'fixed' }
   }
 
+  const productOverrides = overridesMemory.get(product.id)
+
   // Primero: reglas específicas del producto (independiente de la lista global)
   // Ordenadas DESC por min_quantity → el find retorna la más específica aplicable
   const productRules = rulesMemory.get(product.id)
   if (productRules) {
     const rule = productRules.find(r => r.min_quantity <= quantity)
     if (rule) {
-      const price = Math.round(product.cost_price * (1 + rule.margin_pct / 100) * 100) / 100
-      return { price, list_name: rule.list_name, margin_pct: rule.margin_pct, rule_source: 'rule' }
+      const override = productOverrides?.get(rule.price_list_id)
+      const price = override ?? Math.round(product.cost_price * (1 + rule.margin_pct / 100) * 100) / 100
+      return { price, list_name: rule.list_name, margin_pct: rule.margin_pct, rule_source: override != null ? 'override' : 'rule' }
     }
   }
 
   // Sin regla de producto → selección global por cantidad
   const list = selectBestPriceList(quantity)
   if (list) {
-    const price = Math.round(product.cost_price * (1 + list.margin_pct / 100) * 100) / 100
-    return { price, list_name: list.name, margin_pct: list.margin_pct, rule_source: 'list' }
+    const override = productOverrides?.get(list.id)
+    const price = override ?? Math.round(product.cost_price * (1 + list.margin_pct / 100) * 100) / 100
+    return { price, list_name: list.name, margin_pct: list.margin_pct, rule_source: override != null ? 'override' : 'list' }
   }
 
   return { price: product.sell_price, list_name: 'Precio base', margin_pct: 0, rule_source: 'base' }
@@ -292,6 +308,25 @@ async function syncPriceLists(): Promise<void> {
   })
 }
 
+async function syncPriceOverrides(): Promise<void> {
+  const raw = await api.get<{ product_id: string; price_list_id: string; price: number }[]>(
+    '/api/products/price-overrides'
+  )
+
+  const overrides: LocalPriceOverride[] = raw.map(r => ({
+    id:            `${r.product_id}::${r.price_list_id}`,
+    product_id:    r.product_id,
+    price_list_id: r.price_list_id,
+    price:         r.price,
+  }))
+
+  await posDB.transaction('rw', posDB.priceOverrides, posDB.syncMeta, async () => {
+    await posDB.priceOverrides.clear()
+    if (overrides.length > 0) await posDB.priceOverrides.bulkPut(overrides)
+    await posDB.syncMeta.put({ key: 'price_overrides', synced_at: new Date().toISOString() })
+  })
+}
+
 /**
  * Sincroniza todas las reglas de precio del negocio.
  *
@@ -349,6 +384,7 @@ export async function initPOSCache(warehouseId?: string | null): Promise<void> {
     syncPromotions(),
     syncPriceLists(),
     syncPriceRules().catch(() => {}),
+    syncPriceOverrides().catch(() => {}),
   ])
 
   await buildMemoryCaches()
@@ -361,6 +397,7 @@ export async function syncPOSCache(warehouseId?: string | null): Promise<void> {
     syncPromotions().catch(() => {}),
     syncPriceLists().catch(() => {}),
     syncPriceRules().catch(() => {}),
+    syncPriceOverrides().catch(() => {}),
   ])
   await buildMemoryCaches()
 }
