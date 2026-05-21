@@ -158,23 +158,22 @@ export default function BrandsPage() {
 
       {/* Modal crear/editar */}
       <Modal open={modal} onClose={() => setModal(false)}
-        title={editBrand ? 'Editar marca' : 'Nueva marca'} size="sm">
-        <div className="space-y-4">
-          <Input label="Nombre *" value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="Ej: Coca Cola, Unilever, La Serenísima..."
-            autoFocus
-            onKeyDown={e => { if (e.key === 'Enter') handleSave() }}
-          />
-          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
-            <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => setModal(false)} disabled={saving}>Cancelar</Button>
-              <Button onClick={handleSave} loading={saving}>
-                {editBrand ? 'Guardar' : 'Crear marca'}
-              </Button>
-            </div>
+        title={editBrand ? 'Editar marca' : 'Nueva marca'} size="sm"
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setModal(false)} disabled={saving}>Cancelar</Button>
+            <Button onClick={handleSave} loading={saving}>
+              {editBrand ? 'Guardar' : 'Crear marca'}
+            </Button>
           </div>
-        </div>
+        }
+      >
+        <Input label="Nombre *" value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="Ej: Coca Cola, Unilever, La Serenísima..."
+          autoFocus
+          onKeyDown={e => { if (e.key === 'Enter') handleSave() }}
+        />
       </Modal>
 
       {/* Confirm eliminar */}

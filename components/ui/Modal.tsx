@@ -8,6 +8,7 @@ interface ModalProps {
   onClose: () => void
   title?: string
   children: React.ReactNode
+  footer?: React.ReactNode
   size?: 'sm' | 'md' | 'lg' | 'xl'
   zIndex?: number
   minimizable?: boolean
@@ -16,7 +17,7 @@ interface ModalProps {
   onRestore?: () => void
 }
 
-export function Modal({ open, onClose, title, children, size = 'md', zIndex, minimizable, minimized, onMinimize, onRestore }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, size = 'md', zIndex, minimizable, minimized, onMinimize, onRestore }: ModalProps) {
   useEffect(() => {
     if (!open) return
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -49,11 +50,19 @@ export function Modal({ open, onClose, title, children, size = 'md', zIndex, min
   }
 
   return (
-    <div
-      className="fixed inset-0 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: zIndex ?? 50 }}
-      onClick={onClose}
-    >
+    <>
+      {/* Backdrop separado del contenido para evitar bug de Safari:
+          backdrop-filter + animaciones CSS en descendientes causa renders duplicados */}
+      <div
+        className="fixed inset-0"
+        style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: zIndex ?? 50 }}
+        onClick={onClose}
+      />
+      <div
+        className="fixed inset-0 flex items-center justify-center p-4"
+        style={{ zIndex: (zIndex ?? 50) + 1 }}
+        onClick={onClose}
+      >
       <div className={cn(
         'w-full bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl max-h-[90vh] flex flex-col',
         sizes[size]
@@ -79,10 +88,16 @@ export function Modal({ open, onClose, title, children, size = 'md', zIndex, min
             </div>
           </div>
         )}
-        <div className="px-4 sm:px-5 pt-5 overflow-y-auto flex-1">
+        <div className="px-4 sm:px-5 pt-5 pb-5 overflow-y-auto flex-1">
           {children}
         </div>
+        {footer && (
+          <div className="flex-shrink-0 border-t border-[var(--border)] px-4 sm:px-5 pt-3 pb-4 bg-[var(--surface)]">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
+    </>
   )
 }

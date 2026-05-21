@@ -801,7 +801,7 @@ export default function CustomersPage() {
   tr:nth-child(even) td { background: #fafafa; }
   @media print {
     body { padding: 10mm 10mm; }
-    @page { size: A4 landscape; margin: 10mm; }
+    @page { size: A4 portrait; margin: 10mm; }
   }
 </style>
 </head>

@@ -114,8 +114,8 @@ export function POSTicket({
   const printRef = useRef<HTMLDivElement>(null)
   const [sharing, setSharing] = useState(false)
   const [invoice, setInvoice] = useState<InvoiceInfo | null>(null)
+  const [qrDataUrl, setQrDataUrl] = useState<string>('')
 
-  // Convert modal state
   const [convertModal, setConvertModal] = useState(false)
   const [convertType, setConvertType] = useState<'A' | 'B' | 'C'>('B')
   const [receptorCuit, setReceptorCuit] = useState('')
@@ -135,7 +135,16 @@ export function POSTicket({
       .catch(() => {})
   }, [invoiceId])
 
-  // Keyboard shortcuts
+  useEffect(() => {
+    if (!invoice || invoice.afip_status !== 'authorized') { setQrDataUrl(''); return }
+    const cae = invoice.afip_cae ?? invoice.cae
+    if (!cae || !business?.cuit) { setQrDataUrl(''); return }
+    const url = buildAfipQrUrl(invoice, business.cuit, business.afip_punto_venta ?? 1)
+    QRCode.toDataURL(url, { width: 120, margin: 1, errorCorrectionLevel: 'M' })
+      .then(setQrDataUrl)
+      .catch(() => setQrDataUrl(''))
+  }, [invoice, business])
+
   useEffect(() => {
     if (!open || convertModal) return
     const handler = (e: KeyboardEvent) => {
@@ -183,75 +192,92 @@ export function POSTicket({
       } catch { }
     }
 
-    const sep = `<div style="border-top:1.5px solid #000;margin:9px 0;"></div>`
+    const sep = `<hr style="border:none;border-top:1px dashed #000;margin:10px 0;">`
     const row = (left: string, right: string) =>
-      `<div style="display:flex;justify-content:space-between;">${left}${right}</div>`
+      `<div style="display:flex;justify-content:space-between;align-items:baseline;">${left}${right}</div>`
+    const metaRow = (label: string, value: string) =>
+      `<div style="display:flex;justify-content:space-between;align-items:baseline;line-height:1.8;">
+        <span style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;">${label}</span>
+        <span style="font-weight:700;">${value}</span>
+      </div>`
+
+    const bizInfoGrid = [
+      biz?.cuit ? `<div><div style="font-size:8px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.1em;">CUIT</div><div style="font-size:11px;font-weight:700;">${biz.cuit}</div></div>` : '',
+      biz?.iva_condition ? `<div><div style="font-size:8px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.1em;">Cond. IVA</div><div style="font-size:11px;font-weight:700;">${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div></div>` : '',
+      biz?.address ? `<div><div style="font-size:8px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.1em;">Domicilio</div><div style="font-size:11px;font-weight:700;">${biz.address}</div></div>` : '',
+      biz?.phone ? `<div><div style="font-size:8px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.1em;">Teléfono</div><div style="font-size:11px;font-weight:700;">${biz.phone}</div></div>` : '',
+    ].filter(Boolean).join('')
 
     const html = `
-      <div style="text-align:center;margin-bottom:4px;">
-        <div style="font-size:16px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;">${biz?.name ?? ''}</div>
-        ${biz?.cuit ? `<div style="font-weight:700;margin-top:3px;">CUIT: ${biz.cuit}</div>` : ''}
-        ${biz?.address ? `<div style="font-weight:700;">${biz.address}</div>` : ''}
-        ${biz?.phone ? `<div style="font-weight:700;">Tel: ${biz.phone}</div>` : ''}
-        ${biz?.iva_condition ? `<div style="font-weight:700;">COND. IVA: ${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div>` : ''}
+      <div style="text-align:center;margin-bottom:6px;">
+        <div style="font-size:16px;font-weight:800;letter-spacing:0.02em;">${biz?.name ?? ''}</div>
+        ${bizInfoGrid ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-top:8px;text-align:left;">${bizInfoGrid}</div>` : ''}
       </div>
       ${sep}
-      <div style="text-align:center;font-weight:700;font-size:14px;letter-spacing:0.04em;">${typeLabel.toUpperCase()}</div>
-      <div style="text-align:center;font-weight:700;margin-top:2px;">N° ${ptoVenta}-${numero}</div>
-      ${sep}
-      <div style="font-weight:700;line-height:1.6;">
-        <div>RECEPTOR: ${inv.receptor_name ?? customerName ?? 'Consumidor Final'}</div>
-        ${inv.receptor_cuit ? `<div>CUIT: ${inv.receptor_cuit}</div>` : ''}
-        ${inv.receptor_address ? `<div>${inv.receptor_address}</div>` : ''}
-        <div>COND. IVA: ${IVA_LABELS[inv.receptor_iva_condition ?? 'CF'] ?? inv.receptor_iva_condition}</div>
+      <div style="text-align:center;">
+        <div style="font-size:15px;font-weight:800;letter-spacing:0.06em;">${typeLabel.toUpperCase()}</div>
+        <div style="font-size:12px;font-weight:700;margin-top:2px;letter-spacing:0.04em;">N° ${ptoVenta}-${numero}</div>
       </div>
       ${sep}
-      ${row('<span style="font-weight:900;font-size:12px;">DESCRIPCION</span>', '<span style="font-weight:900;font-size:12px;">IMPORTE</span>')}
-      <div style="margin-top:6px;">
+      <div style="font-size:11px;line-height:1.8;">
+        ${metaRow('Receptor', inv.receptor_name ?? customerName ?? 'Consumidor Final')}
+        ${inv.receptor_cuit ? metaRow('CUIT', inv.receptor_cuit) : ''}
+        ${inv.receptor_address ? `<div style="font-size:11px;">${inv.receptor_address}</div>` : ''}
+        ${metaRow('Cond. IVA', IVA_LABELS[inv.receptor_iva_condition ?? 'CF'] ?? (inv.receptor_iva_condition ?? 'CF'))}
+      </div>
+      ${sep}
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+        <span style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;">Descripción</span>
+        <span style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;">Importe</span>
+      </div>
+      <div>
         ${(inv.invoice_items ?? []).map(item => `
-          <div style="margin-bottom:8px;">
+          <div style="margin-bottom:9px;">
             ${row(
-              `<span style="flex:1;padding-right:8px;word-break:break-word;font-weight:700;">${item.quantity}x ${item.description}</span>`,
+              `<span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity}x ${item.description}</span>`,
               `<span style="flex-shrink:0;font-weight:700;">${fmt(item.subtotal)}</span>`
             )}
-            <div style="font-size:12px;font-weight:700;padding-left:4px;">c/u ${fmt(item.unit_price)}</div>
+            <div style="font-size:10px;opacity:0.7;">c/u ${fmt(item.unit_price)}</div>
           </div>
         `).join('')}
       </div>
       ${sep}
       ${isA ? `
-        ${row('<span style="font-weight:700;">NETO GRAVADO</span>', `<span style="font-weight:700;">${fmt(inv.net_amount ?? 0)}</span>`)}
-        ${row('<span style="font-weight:700;">IVA 21%</span>', `<span style="font-weight:700;">${fmt(inv.iva_amount ?? 0)}</span>`)}
-        <div style="border-top:1.5px solid #000;margin:5px 0;"></div>
+        ${row('<span style="font-size:11px;">Neto gravado</span>', `<span style="font-weight:700;">${fmt(inv.net_amount ?? 0)}</span>`)}
+        ${row('<span style="font-size:11px;">IVA 21%</span>', `<span style="font-weight:700;">${fmt(inv.iva_amount ?? 0)}</span>`)}
+        <div style="border-top:1px solid #000;margin:6px 0;"></div>
       ` : ''}
-      <div style="display:flex;justify-content:space-between;font-weight:700;font-size:15px;margin-top:2px;">
-        <span>TOTAL</span><span>${fmt(inv.total_amount ?? 0)}</span>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:2px;">
+        <span style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">Total</span>
+        <span style="font-size:18px;font-weight:800;">${fmt(inv.total_amount ?? 0)}</span>
       </div>
       ${sep}
       ${cae ? `
-        <div style="text-align:center;font-weight:700;font-size:12px;letter-spacing:0.03em;">COMPROBANTE AUTORIZADO</div>
-        <div style="text-align:center;font-weight:700;margin-top:2px;">CAE: ${cae}</div>
-        ${inv.afip_cae_vto ?? inv.cae_expiry ? `<div style="text-align:center;font-weight:700;">VTO. CAE: ${inv.afip_cae_vto ?? inv.cae_expiry}</div>` : ''}
-        ${qrDataUrl ? `
-          <div style="text-align:center;margin:8px 0 4px;">
-            <img src="${qrDataUrl}" style="width:110px;height:110px;" />
-          </div>
-          <div style="text-align:center;font-size:11px;font-weight:700;">Verificar en afip.gob.ar/fe/qr</div>
-          <div style="text-align:center;margin:6px 0;">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170 58" width="110" height="38">
-              <text x="85" y="38" text-anchor="middle" font-family="Arial Black,Arial" font-size="44" font-weight="900" fill="#000">ARCA</text>
-              <text x="85" y="49" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#000" letter-spacing="1">AGENCIA DE RECAUDACION</text>
-              <text x="85" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#000" letter-spacing="1">Y CONTROL ADUANERO</text>
-            </svg>
-          </div>
-        ` : ''}
+        <div style="text-align:center;font-size:11px;line-height:1.8;">
+          <div style="font-weight:700;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;">Comprobante autorizado</div>
+          <div>CAE: <strong>${cae}</strong></div>
+          ${inv.afip_cae_vto ?? inv.cae_expiry ? `<div>Vto. CAE: ${inv.afip_cae_vto ?? inv.cae_expiry}</div>` : ''}
+          ${qrDataUrl ? `
+            <div style="margin:10px 0 4px;">
+              <img src="${qrDataUrl}" style="width:110px;height:110px;" />
+            </div>
+            <div style="font-size:10px;margin-bottom:6px;">Verificar en afip.gob.ar/fe/qr</div>
+            <div style="margin:6px 0;">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170 58" width="110" height="38">
+                <text x="85" y="38" text-anchor="middle" font-family="Arial Black,Arial" font-size="44" font-weight="900" fill="#000">ARCA</text>
+                <text x="85" y="49" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#000" letter-spacing="1">AGENCIA DE RECAUDACION</text>
+                <text x="85" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#000" letter-spacing="1">Y CONTROL ADUANERO</text>
+              </svg>
+            </div>
+          ` : ''}
+        </div>
       ` : `
-        <div style="text-align:center;font-weight:700;padding:2px 0;letter-spacing:0.03em;font-size:12px;">*** NO VALIDO COMO FACTURA ***</div>
+        <div style="text-align:center;font-size:10px;letter-spacing:0.06em;padding:2px 0;">NO VÁLIDO COMO FACTURA</div>
       `}
       ${sep}
-      <div style="text-align:center;font-weight:700;font-size:12px;line-height:1.7;">
-        <div>GRACIAS POR SU COMPRA!</div>
-        <div style="font-weight:700;">Powered by StockOS</div>
+      <div style="text-align:center;font-size:11px;line-height:1.8;">
+        <div style="font-weight:700;">¡Gracias por su compra!</div>
+        <div style="font-size:10px;opacity:0.6;">stockos.digital</div>
       </div>
     `
 
@@ -263,9 +289,10 @@ export function POSTicket({
         @page { size: 80mm auto; margin: 0mm 2mm; }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 80mm; background: #fff; }
-        body { font-family: 'Courier New', Courier, monospace; font-size: 13px; font-weight: 700; line-height: 1.5; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        body { font-family: 'Courier New', Courier, monospace; font-size: 12px; font-weight: 700; line-height: 1.5; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        hr { border: none !important; border-top: 1px dashed #000 !important; margin: 10px 0 !important; }
       </style>
-    </head><body><div style="padding:8px 12px 16px;">${html}</div></body></html>`)
+    </head><body><div style="padding:10px 12px 16px;">${html}</div></body></html>`)
     win.document.close()
     win.focus()
     setTimeout(() => { win.print(); win.close() }, 400)
@@ -321,7 +348,16 @@ export function POSTicket({
     @page { size: 80mm auto; margin: 3mm 2mm; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 80mm; background: #fff; }
-    body { font-family: 'Courier New', Courier, monospace; font-size: 13px; font-weight: 700; line-height: 1.5; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 1.65;
+      color: #000;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    hr { border: none !important; border-top: 1px dashed #888 !important; margin: 8px 0 !important; }
   </style>
 </head>
 <body>${content.innerHTML}</body>
@@ -364,24 +400,28 @@ export function POSTicket({
     }
   }
 
-  // Styles shared between screen and print
-  const sep: React.CSSProperties = { borderTop: '1.5px solid #000', margin: '9px 0' }
-  const row: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }
+  // Separator: <hr style={sepStyle} />
+  const sepStyle: React.CSSProperties = {
+    border: 'none',
+    borderTop: '1px dashed #ccc',
+    margin: '12px 0',
+    width: '100%',
+  }
 
   const invoiceTypeLabel = (type: string) => {
     const map: Record<string, string> = {
-      A: 'FACTURA A', B: 'FACTURA B', C: 'FACTURA C',
-      NCA: 'NOTA DE CRÉDITO A', NCB: 'NOTA DE CRÉDITO B', NCC: 'NOTA DE CRÉDITO C',
-      R: 'REMITO',
+      A: 'Factura A', B: 'Factura B', C: 'Factura C',
+      NCA: 'Nota de Crédito A', NCB: 'Nota de Crédito B', NCC: 'Nota de Crédito C',
+      R: 'Remito',
     }
-    return map[type] ?? `COMPROBANTE ${type}`
+    return map[type] ?? `Comprobante ${type}`
   }
 
   if (!open) return null
 
   return (
     <>
-      {/* Overlay sobre el POS */}
+      {/* Overlay */}
       <div
         className="fixed inset-0 z-50 flex items-center justify-center p-4"
         style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}
@@ -405,11 +445,11 @@ export function POSTicket({
             </button>
           </div>
 
-          {/* Botones de acción — siempre visibles arriba */}
+          {/* Action buttons */}
           <div className="flex flex-col gap-2 flex-shrink-0">
             <div className="grid grid-cols-3 gap-2">
               <button
-                onClick={handlePrint}
+                onClick={isInvoiced && invoice ? () => handlePrintInvoiceTicket(invoice) : handlePrint}
                 className="flex flex-col items-center justify-center gap-1 py-3 rounded-[var(--radius-md)] bg-white/10 border border-white/20 text-sm font-medium text-white hover:bg-white/20 transition-colors active:scale-95"
               >
                 <Printer size={15} />
@@ -445,153 +485,342 @@ export function POSTicket({
             </button>
           </div>
 
-          {/* Ticket paper — scrolleable si hay muchos items */}
+          {/* Ticket paper — scrollable */}
           <div className="overflow-y-auto" style={{ borderRadius: '6px' }}>
-          <div style={{
-            display: 'flex',
-            justifyContent: 'center',
-            background: '#e8e8e8',
-            borderRadius: '6px',
-            padding: '12px 8px',
-            boxShadow: 'inset 0 1px 4px rgba(0,0,0,0.12)',
-          }}>
-            <div
-              ref={printRef}
-              style={{
-                fontFamily: "'Courier New', Courier, monospace",
-                fontSize: '13px',
-                fontWeight: 700,
-                lineHeight: 1.5,
-                color: '#000',
-                background: '#fff',
-                width: '302px',
-                padding: '8px 12px 16px',
-                boxShadow: '0 1px 6px rgba(0,0,0,0.15)',
-              }}
-            >
-              {/* Encabezado del negocio */}
-              <div style={{ textAlign: 'center', marginBottom: '4px' }}>
-                <div style={{ fontSize: '16px', fontWeight: 800, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                  {business?.name}
-                </div>
-                {business?.cuit && <div style={{ marginTop: '3px', fontWeight: 700 }}>CUIT: {business.cuit}</div>}
-                {business?.iva_condition && (
-                  <div style={{ fontWeight: 700 }}>
-                    {IVA_LABELS[business.iva_condition] ?? business.iva_condition}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              background: '#e2e2e2',
+              borderRadius: '6px',
+              padding: '16px 8px',
+              boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.14)',
+            }}>
+              <div
+                ref={printRef}
+                style={{
+                  fontFamily: "system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif",
+                  fontSize: '12px',
+                  fontWeight: 400,
+                  lineHeight: 1.65,
+                  color: '#111',
+                  background: '#fff',
+                  width: '302px',
+                  padding: '22px 18px 26px',
+                  boxShadow: '0 4px 24px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.08)',
+                }}
+              >
+                {/* Business header — siempre visible */}
+                <div style={{ textAlign: 'center', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '17px', fontWeight: 700, letterSpacing: '0.01em', color: '#000' }}>
+                    {business?.name}
                   </div>
-                )}
-                {business?.address && <div style={{ marginTop: '2px', fontWeight: 700 }}>{business.address}</div>}
-                {business?.phone && <div style={{ fontWeight: 700 }}>Tel: {business.phone}</div>}
-              </div>
-
-              <div style={sep} />
-
-              {/* Sucursal / Caja / Cajero / Fecha */}
-              <div style={{ fontSize: '12px', fontWeight: 700, lineHeight: '1.6' }}>
-                {(branchName || registerName) && (
-                  <div>SUC: {branchName ?? ''}{registerName ? ` — ${registerName}` : ''}</div>
-                )}
-                {sellerName && <div>CAJERO: {sellerName}</div>}
-                <div>FECHA: {formatDateTime(sale.created_at)}</div>
-                <div>N° TICKET: #{sale.id.slice(-8).toUpperCase()}</div>
-                {customerName && <div>CLIENTE: {customerName}</div>}
-              </div>
-
-              <div style={sep} />
-
-              {/* Encabezado columnas */}
-              <div style={{ ...row, fontWeight: 700, fontSize: '12px', marginBottom: '6px' }}>
-                <span>DESCRIPCION</span>
-                <span>IMPORTE</span>
-              </div>
-
-              {/* Items */}
-              {sale.items.map((item, i) => {
-                const lineTotal = item.unit_price * item.quantity - item.discount
-                return (
-                  <div key={i} style={{ marginBottom: '8px' }}>
-                    <div style={row}>
-                      <span style={{ flex: 1, paddingRight: '8px', wordBreak: 'break-word', fontWeight: 700 }}>
-                        {item.quantity}x {item.product.name}
-                      </span>
-                      <span style={{ flexShrink: 0, fontWeight: 700 }}>{formatCurrency(lineTotal)}</span>
+                  {(business?.cuit || business?.iva_condition || business?.address || business?.phone) && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 10px', marginTop: '8px', textAlign: 'left' }}>
+                      {business?.cuit && (
+                        <div>
+                          <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>CUIT</div>
+                          <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{business.cuit}</div>
+                        </div>
+                      )}
+                      {business?.iva_condition && (
+                        <div>
+                          <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cond. IVA</div>
+                          <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{IVA_LABELS[business.iva_condition] ?? business.iva_condition}</div>
+                        </div>
+                      )}
+                      {business?.address && (
+                        <div>
+                          <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Domicilio</div>
+                          <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{business.address}</div>
+                        </div>
+                      )}
+                      {business?.phone && (
+                        <div>
+                          <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Teléfono</div>
+                          <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{business.phone}</div>
+                        </div>
+                      )}
                     </div>
-                    <div style={{ fontSize: '12px', fontWeight: 700, paddingLeft: '4px' }}>
-                      c/u {formatCurrency(item.unit_price)}
-                      {item.discount > 0 && <span>  dto -{formatCurrency(item.discount)}</span>}
-                    </div>
-                  </div>
-                )
-              })}
-
-              <div style={sep} />
-
-              {/* Totales */}
-              <div style={{ fontSize: '13px', fontWeight: 700, lineHeight: '1.7' }}>
-                {(sale.discount > 0 || (sale.shipping_amount ?? 0) > 0) && (
-                  <div style={row}><span>SUBTOTAL</span><span>{formatCurrency(itemsSubtotal)}</span></div>
-                )}
-                {sale.discount > 0 && (
-                  <div style={row}><span>DESCUENTO</span><span>-{formatCurrency(sale.discount)}</span></div>
-                )}
-                {(sale.shipping_amount ?? 0) > 0 && (
-                  <div style={row}><span>ENVIO</span><span>+{formatCurrency(sale.shipping_amount!)}</span></div>
-                )}
-                <div style={{ ...row, fontWeight: 700, fontSize: '15px', marginTop: '4px', borderTop: '1.5px solid #000', paddingTop: '5px' }}>
-                  <span>TOTAL</span>
-                  <span>{formatCurrency(sale.total)}</span>
+                  )}
                 </div>
-                {sale.payment_splits && sale.payment_splits.length > 1 ? (
-                  <div style={{ marginTop: '4px', fontSize: '12px', fontWeight: 700 }}>
-                    {sale.payment_splits.map((s, i) => (
-                      <div key={i} style={row}>
-                        <span>{getPaymentMethodLabel(s.method)}</span>
-                        <span>{formatCurrency(s.amount)}{s.method === 'credito' && (s.installments ?? 1) > 1 && ` (${s.installments} ctas)`}</span>
+
+                <hr style={sepStyle} />
+
+                {isInvoiced && invoice ? (
+                  /* ── LAYOUT FACTURA ARCA ── */
+                  <>
+                    {/* Tipo + N° de comprobante */}
+                    <div style={{ textAlign: 'center', padding: '4px 0' }}>
+                      <div style={{ fontSize: '16px', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#000' }}>
+                        {invoiceTypeLabel(invoice.invoice_type)}
+                      </div>
+                      {invoice.numero !== undefined && (
+                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#555', marginTop: '3px', fontFamily: 'monospace' }}>
+                          N° {String(business?.afip_punto_venta ?? 1).padStart(5, '0')}-{invoice.numero.toString().padStart(8, '0')}
+                        </div>
+                      )}
+                      <div style={{ fontSize: '10px', color: '#999', marginTop: '3px' }}>
+                        {formatDateTime(sale.created_at)}
+                      </div>
+                    </div>
+
+                    <hr style={sepStyle} />
+
+                    {/* Receptor */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 10px' }}>
+                      <div>
+                        <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Receptor</div>
+                        <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{invoice.receptor_name ?? customerName ?? 'Consumidor Final'}</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cond. IVA</div>
+                        <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{IVA_LABELS[invoice.receptor_iva_condition ?? 'CF'] ?? invoice.receptor_iva_condition}</div>
+                      </div>
+                      {invoice.receptor_cuit && (
+                        <div>
+                          <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>CUIT</div>
+                          <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{invoice.receptor_cuit}</div>
+                        </div>
+                      )}
+                      {invoice.receptor_address && (
+                        <div>
+                          <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Domicilio</div>
+                          <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{invoice.receptor_address}</div>
+                        </div>
+                      )}
+                    </div>
+
+                    <hr style={sepStyle} />
+
+                    {/* Columnas de items */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Descripción</span>
+                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Importe</span>
+                    </div>
+
+                    {/* Items de la factura */}
+                    {(invoice.invoice_items ?? []).map((item, i) => (
+                      <div key={i} style={{ marginBottom: '10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                          <span style={{ flex: 1, paddingRight: '10px', fontWeight: 500, color: '#111', lineHeight: 1.2 }}>
+                            {item.description}
+                          </span>
+                          <span style={{ flexShrink: 0, fontWeight: 700, color: '#000', lineHeight: 1.2 }}>{formatCurrency(item.subtotal)}</span>
+                        </div>
+                        <div style={{ fontSize: '10px', color: '#999', marginTop: '1px' }}>
+                          {item.quantity} × {formatCurrency(item.unit_price)}
+                        </div>
                       </div>
                     ))}
-                  </div>
+
+                    <hr style={sepStyle} />
+
+                    {/* Subtotales fiscales (solo Factura A) */}
+                    {invoice.invoice_type === 'A' && (
+                      <div style={{ fontSize: '11px', lineHeight: 1.9, marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666' }}>
+                          <span>Neto gravado</span><span>{formatCurrency(invoice.net_amount ?? 0)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666' }}>
+                          <span>IVA 21%</span><span>{formatCurrency(invoice.iva_amount ?? 0)}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Total */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', paddingTop: '2px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#000', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Total</span>
+                      <span style={{ fontSize: '22px', fontWeight: 800, color: '#000', letterSpacing: '-0.02em' }}>{formatCurrency(invoice.total_amount ?? sale.total)}</span>
+                    </div>
+
+                    {/* Forma de pago */}
+                    <div style={{ marginTop: '8px' }}>
+                      {sale.payment_splits && sale.payment_splits.length > 1 ? (
+                        <div style={{ fontSize: '11px', color: '#666', lineHeight: 1.8 }}>
+                          {sale.payment_splits.map((s, idx) => (
+                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>{getPaymentMethodLabel(s.method)}</span>
+                              <span style={{ fontWeight: 500, color: '#444' }}>
+                                {formatCurrency(s.amount)}
+                                {s.method === 'credito' && (s.installments ?? 1) > 1 && ` (${s.installments} ctas)`}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '11px', color: '#666' }}>
+                          <span style={{ fontWeight: 500, color: '#444' }}>
+                            {getPaymentMethodLabel(sale.payment_method)}
+                            {sale.payment_method === 'credito' && sale.installments > 1 && ` · ${sale.installments} cuotas`}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <hr style={sepStyle} />
+
+                    {/* CAE + QR ARCA */}
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                        Comprobante autorizado por ARCA
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#444', marginTop: '6px' }}>
+                        CAE: <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: '10px' }}>{invoice.afip_cae ?? invoice.cae}</span>
+                      </div>
+                      {(invoice.afip_cae_vto ?? invoice.cae_expiry) && (
+                        <div style={{ fontSize: '11px', color: '#777' }}>
+                          Vto.: {invoice.afip_cae_vto ?? invoice.cae_expiry}
+                        </div>
+                      )}
+                      {qrDataUrl && (
+                        <img src={qrDataUrl} style={{ width: '110px', height: '110px', display: 'block', margin: '12px auto 4px' }} alt="QR ARCA" />
+                      )}
+                      <div style={{ fontSize: '9px', color: '#ccc', marginBottom: '8px' }}>
+                        Verificar en afip.gob.ar/fe/qr
+                      </div>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170 58" width="90" height="31" style={{ display: 'block', margin: '0 auto' }}>
+                        <text x="85" y="38" textAnchor="middle" fontFamily="Arial Black,Arial" fontSize="44" fontWeight="900" fill="#000">ARCA</text>
+                        <text x="85" y="49" textAnchor="middle" fontFamily="Arial,sans-serif" fontSize="7.5" fill="#000" letterSpacing="1">AGENCIA DE RECAUDACION</text>
+                        <text x="85" y="58" textAnchor="middle" fontFamily="Arial,sans-serif" fontSize="7.5" fill="#000" letterSpacing="1">Y CONTROL ADUANERO</text>
+                      </svg>
+                    </div>
+
+                    <hr style={sepStyle} />
+
+                    <div style={{ textAlign: 'center', lineHeight: 1.8 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#333' }}>¡Gracias por su compra!</div>
+                      <div style={{ fontSize: '10px', color: '#ccc', marginTop: '2px', letterSpacing: '0.05em' }}>stockos.digital</div>
+                    </div>
+                  </>
                 ) : (
-                  <div style={{ marginTop: '4px', fontSize: '12px', fontWeight: 700 }}>
-                    PAGO: {getPaymentMethodLabel(sale.payment_method).toUpperCase()}
-                    {sale.payment_method === 'credito' && sale.installments > 1
-                      && ` (${sale.installments} cuotas)`}
-                  </div>
+                  /* ── LAYOUT TICKET SIMPLE ── */
+                  <>
+                    {/* Meta: sucursal / cajero / fecha / ticket# / cliente */}
+                    <div style={{ fontSize: '11px', lineHeight: 1.9 }}>
+                      {(branchName || registerName) && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                          <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Sucursal</span>
+                          <span style={{ fontWeight: 500, color: '#222' }}>{branchName ?? ''}{registerName ? ` · ${registerName}` : ''}</span>
+                        </div>
+                      )}
+                      {sellerName && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                          <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cajero</span>
+                          <span style={{ fontWeight: 500, color: '#222' }}>{sellerName}</span>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Fecha</span>
+                        <span style={{ fontWeight: 500, color: '#222' }}>{formatDateTime(sale.created_at)}</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Ticket</span>
+                        <span style={{ fontWeight: 700, color: '#000', fontFamily: 'monospace', fontSize: '12px' }}>
+                          #{sale.id.slice(-8).toUpperCase()}
+                        </span>
+                      </div>
+                      {customerName && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                          <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cliente</span>
+                          <span style={{ fontWeight: 500, color: '#222' }}>{customerName}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <hr style={sepStyle} />
+
+                    {/* Columnas de items */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Producto</span>
+                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Total</span>
+                    </div>
+
+                    {/* Items de la venta */}
+                    {sale.items.map((item, i) => {
+                      const lineTotal = item.unit_price * item.quantity - item.discount
+                      return (
+                        <div key={i} style={{ marginBottom: '10px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <span style={{ flex: 1, paddingRight: '10px', fontWeight: 500, color: '#111', lineHeight: 1.2 }}>
+                              {item.product.name}
+                            </span>
+                            <span style={{ flexShrink: 0, fontWeight: 700, color: '#000', lineHeight: 1.2 }}>{formatCurrency(lineTotal)}</span>
+                          </div>
+                          <div style={{ fontSize: '10px', color: '#999', marginTop: '1px' }}>
+                            {item.quantity} × {formatCurrency(item.unit_price)}
+                            {item.discount > 0 && <span> · dto -{formatCurrency(item.discount)}</span>}
+                          </div>
+                        </div>
+                      )
+                    })}
+
+                    <hr style={sepStyle} />
+
+                    {/* Subtotales opcionales */}
+                    {(sale.discount > 0 || (sale.shipping_amount ?? 0) > 0) && (
+                      <div style={{ fontSize: '11px', lineHeight: 1.9, marginBottom: '6px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666' }}>
+                          <span>Subtotal</span><span>{formatCurrency(itemsSubtotal)}</span>
+                        </div>
+                        {sale.discount > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#888' }}>
+                            <span>Descuento</span><span>-{formatCurrency(sale.discount)}</span>
+                          </div>
+                        )}
+                        {(sale.shipping_amount ?? 0) > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666' }}>
+                            <span>Envío</span><span>+{formatCurrency(sale.shipping_amount!)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Total */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', paddingTop: '2px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#000', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Total</span>
+                      <span style={{ fontSize: '22px', fontWeight: 800, color: '#000', letterSpacing: '-0.02em' }}>{formatCurrency(sale.total)}</span>
+                    </div>
+
+                    {/* Forma de pago */}
+                    <div style={{ marginTop: '8px' }}>
+                      {sale.payment_splits && sale.payment_splits.length > 1 ? (
+                        <div style={{ fontSize: '11px', color: '#666', lineHeight: 1.8 }}>
+                          {sale.payment_splits.map((s, idx) => (
+                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <span>{getPaymentMethodLabel(s.method)}</span>
+                              <span style={{ fontWeight: 500, color: '#444' }}>
+                                {formatCurrency(s.amount)}
+                                {s.method === 'credito' && (s.installments ?? 1) > 1 && ` (${s.installments} ctas)`}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '11px', color: '#666' }}>
+                          <span style={{ fontWeight: 500, color: '#444' }}>
+                            {getPaymentMethodLabel(sale.payment_method)}
+                            {sale.payment_method === 'credito' && sale.installments > 1 && ` · ${sale.installments} cuotas`}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    <hr style={sepStyle} />
+
+                    <div style={{ textAlign: 'center', fontSize: '10px', color: '#bbb', letterSpacing: '0.06em', padding: '2px 0' }}>
+                      NO VÁLIDO COMO FACTURA
+                    </div>
+
+                    <hr style={sepStyle} />
+
+                    <div style={{ textAlign: 'center', lineHeight: 1.8 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#333' }}>¡Gracias por su compra!</div>
+                      <div style={{ fontSize: '10px', color: '#ccc', marginTop: '2px', letterSpacing: '0.05em' }}>stockos.digital</div>
+                    </div>
+                  </>
                 )}
               </div>
-
-              <div style={sep} />
-
-              {/* Estado de facturación */}
-              {isInvoiced && invoice ? (
-                <div style={{ textAlign: 'center', fontSize: '12px', fontWeight: 700, lineHeight: '1.6' }}>
-                  <div style={{ fontWeight: 700, fontSize: '13px', letterSpacing: '0.03em' }}>
-                    {invoiceTypeLabel(invoice.invoice_type)}
-                  </div>
-                  {invoice.numero !== undefined && (
-                    <div>N°: {invoice.numero.toString().padStart(8, '0')}</div>
-                  )}
-                  <div>CAE: {invoice.afip_cae ?? invoice.cae}</div>
-                  {(invoice.afip_cae_vto ?? invoice.cae_expiry) && (
-                    <div>VTO. CAE: {invoice.afip_cae_vto ?? invoice.cae_expiry}</div>
-                  )}
-                  {invoice.receptor_name && <div>RECEPTOR: {invoice.receptor_name}</div>}
-                  {invoice.receptor_cuit && <div>CUIT: {invoice.receptor_cuit}</div>}
-                </div>
-              ) : (
-                <div style={{ textAlign: 'center', fontWeight: 700, padding: '2px 0', letterSpacing: '0.03em', fontSize: '12px' }}>
-                  *** NO VALIDO COMO FACTURA ***
-                </div>
-              )}
-
-              <div style={sep} />
-
-              {/* Footer */}
-              <div style={{ textAlign: 'center', fontSize: '12px', fontWeight: 700, lineHeight: '1.7' }}>
-                <div>GRACIAS POR SU COMPRA!</div>
-                <div>Powered by StockOS</div>
-              </div>
             </div>
-          </div>
           </div>
 
         </div>
@@ -620,7 +849,6 @@ export function POSTicket({
                 Ticket #{sale.id.slice(-8).toUpperCase()} · {formatCurrency(sale.total)}
               </div>
 
-              {/* Tipo de factura */}
               <div>
                 <label className="text-sm font-medium text-[var(--text2)] block mb-2">Tipo de factura *</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -641,7 +869,6 @@ export function POSTicket({
                 </p>
               </div>
 
-              {/* Condición IVA */}
               <div>
                 <label className="text-sm font-medium text-[var(--text2)] block mb-1">Condición IVA receptor</label>
                 <select value={receptorIva} onChange={e => setReceptorIva(e.target.value)}

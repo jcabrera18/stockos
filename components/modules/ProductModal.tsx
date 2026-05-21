@@ -75,14 +75,14 @@ const emptyForm = {
   initial_stock: '0',
   stock_min: '0',
   stock_max: '9999',
-  use_fixed_sell_price: false,
+  use_fixed_sell_price: true,
   unit: 'unidad',
   price_mode: 'fixed' as 'fixed' | 'custom',
 }
 
 const PRICE_MODES = [
-  { value: 'list'  as const, label: 'Por lista',     hint: 'Margen sobre costo' },
   { value: 'fixed' as const, label: 'Precio fijo',   hint: 'Vos definís el precio' },
+  { value: 'list'  as const, label: 'Por lista',     hint: 'Margen sobre costo' },
   { value: 'libre' as const, label: 'Precio libre',  hint: 'Cajero lo ingresa' },
 ]
 
@@ -658,10 +658,11 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
 
         {/* ── MODO COMPLETO / EDICIÓN ── */}
         {(!expressMode || isEdit) && (
-          <div className="divide-y divide-[var(--border)]">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 sm:gap-x-6">
 
-            {/* 1 ── Identificación */}
-            <div className="space-y-4 pb-6">
+            {/* ─── Columna izquierda: Identificación + Clasificación ─── */}
+            <div className="space-y-4 sm:border-r sm:border-[var(--border)] sm:pr-6">
+
               <SectionLabel>Identificación</SectionLabel>
 
               {renderBarcodeField(!isEdit)}
@@ -676,7 +677,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                 autoFocus={isEdit}
               />
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-2 gap-3">
                 <Input
                   label="SKU interno"
                   value={form.sku}
@@ -690,11 +691,10 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                   onChange={set('unit')}
                 />
               </div>
-            </div>
 
-            {/* 2 ── Clasificación */}
-            <div className="space-y-4 py-6">
-              <SectionLabel>Clasificación</SectionLabel>
+              <div className="pt-2">
+                <SectionLabel>Clasificación</SectionLabel>
+              </div>
 
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center justify-between">
@@ -716,51 +716,52 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                 />
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-[var(--text2)]">Proveedor</label>
-                    <button
-                      type="button"
-                      onClick={() => setSupplierSubModal(true)}
-                      className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
-                    >
-                      <Plus size={12} /> Nuevo
-                    </button>
-                  </div>
-                  <Select
-                    options={supplierOptions}
-                    value={form.supplier_id}
-                    onChange={set('supplier_id')}
-                    placeholder="Sin proveedor"
-                  />
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-[var(--text2)]">Proveedor</label>
+                  <button
+                    type="button"
+                    onClick={() => setSupplierSubModal(true)}
+                    className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+                  >
+                    <Plus size={12} /> Nuevo
+                  </button>
                 </div>
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-[var(--text2)]">Marca</label>
-                    <button
-                      type="button"
-                      onClick={() => { setNewBrandName(''); setBrandSubModal(true) }}
-                      className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
-                    >
-                      <Plus size={12} /> Nueva
-                    </button>
-                  </div>
-                  <Select
-                    options={brandOptions}
-                    value={form.brand_id}
-                    onChange={set('brand_id')}
-                    placeholder="Sin marca"
-                  />
-                </div>
+                <Select
+                  options={supplierOptions}
+                  value={form.supplier_id}
+                  onChange={set('supplier_id')}
+                  placeholder="Sin proveedor"
+                />
               </div>
+
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium text-[var(--text2)]">Marca</label>
+                  <button
+                    type="button"
+                    onClick={() => { setNewBrandName(''); setBrandSubModal(true) }}
+                    className="flex items-center gap-0.5 text-xs text-[var(--accent)] hover:opacity-80 transition-opacity"
+                  >
+                    <Plus size={12} /> Nueva
+                  </button>
+                </div>
+                <Select
+                  options={brandOptions}
+                  value={form.brand_id}
+                  onChange={set('brand_id')}
+                  placeholder="Sin marca"
+                />
+              </div>
+
             </div>
 
-            {/* 3 ── Costos y precios */}
-            <div className="space-y-4 py-6">
+            {/* ─── Columna derecha: Precios + Stock + Descripción ─── */}
+            <div className="space-y-4">
+
               <SectionLabel>Costos y precios</SectionLabel>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="grid grid-cols-3 gap-3">
                 <Input
                   ref={costPriceRef}
                   label="Costo neto"
@@ -779,15 +780,14 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                   onChange={set('vat_rate')}
                 />
                 <Input
-                  label="Costo con IVA"
+                  label="c/ IVA"
                   value={costWithVat ? String(costWithVat) : '0'}
                   readOnly
                   placeholder="0.00"
-                  hint="Calculado automáticamente"
+                  hint="Auto"
                 />
               </div>
 
-              {/* Segmented control: modo de precio de venta */}
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <label className="text-sm font-medium text-[var(--text2)]">Precio de venta</label>
@@ -816,7 +816,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                 </div>
               </div>
 
-              {/* Input precio fijo */}
               {currentPriceMode === 'fixed' && (
                 <Input
                   ref={sellPriceRef}
@@ -831,10 +830,9 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                 />
               )}
 
-              {/* Preview de listas — precios editables */}
               {currentPriceMode === 'list' && costWithVat > 0 && priceLists.length > 0 && (
-                <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface2)]/35 p-3.5 space-y-2">
-                  <div className="flex items-center justify-between">
+                <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface2)]/35 p-3 space-y-1.5">
+                  <div className="flex items-center justify-between mb-0.5">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text3)]">Precios por lista</p>
                     <p className="text-[10px] text-[var(--text3)]">Editá para redondear</p>
                   </div>
@@ -846,30 +844,30 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                     const isOverridden = overrideVal !== ''
                     return (
                       <div key={list.id} className={cn(
-                        'flex items-center gap-3 rounded-[var(--radius-md)] px-3 py-2 text-sm transition-colors',
+                        'flex items-center gap-2 rounded-[var(--radius-md)] px-2.5 py-1.5 text-sm transition-colors',
                         isOverridden
                           ? 'bg-[var(--accent)]/8 ring-1 ring-[var(--accent)]/25'
                           : 'bg-[var(--surface)]/75'
                       )}>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
-                            <p className="text-[var(--text2)] truncate">{list.name}</p>
+                            <p className="text-[var(--text2)] truncate text-xs">{list.name}</p>
                             {isOverridden && (
                               <span className="flex-shrink-0 text-[9px] font-semibold uppercase tracking-wide text-[var(--accent)] bg-[var(--accent)]/12 px-1 py-0.5 rounded">
-                                Personalizado
+                                Custom
                               </span>
                             )}
                           </div>
-                          <p className="text-xs text-[var(--text3)]">
+                          <p className="text-[10px] text-[var(--text3)]">
                             +{list.margin_pct}%
                             {isOverridden && (
                               <span className="ml-1 line-through opacity-50">${calculated.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
                             )}
-                            {' · '}ganancia ${gain.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                            {' · '}${gain.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                           </p>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
-                          <span className="text-[var(--text3)] text-sm">$</span>
+                          <span className="text-[var(--text3)] text-xs">$</span>
                           <input
                             type="number"
                             min="0"
@@ -886,7 +884,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                             }}
                             placeholder={calculated.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                             className={cn(
-                              'w-28 px-2 py-1 text-sm font-medium text-right rounded-[var(--radius-sm)] bg-[var(--surface)] border transition-colors focus:outline-none mono',
+                              'w-24 px-2 py-1 text-xs font-medium text-right rounded-[var(--radius-sm)] bg-[var(--surface)] border transition-colors focus:outline-none mono',
                               isOverridden
                                 ? 'border-[var(--accent)]/40 text-[var(--accent)] focus:border-[var(--accent)]'
                                 : 'border-[var(--border)] text-[var(--text2)] focus:border-[var(--accent)]'
@@ -908,14 +906,14 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                   })}
                 </div>
               )}
-            </div>
 
-            {/* 4 ── Stock */}
-            <div className="space-y-4 py-6">
-              <SectionLabel>Stock</SectionLabel>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="pt-2">
+                <SectionLabel>Stock</SectionLabel>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
                 <Input
-                  label="Stock inicial"
+                  label="Inicial"
                   type="number"
                   min="0"
                   step="1"
@@ -924,7 +922,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                   placeholder="0"
                 />
                 <Input
-                  label="Stock mínimo"
+                  label="Mínimo"
                   type="number"
                   min="0"
                   step="1"
@@ -932,10 +930,10 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                   onChange={set('stock_min')}
                   placeholder="0"
                   error={errors.stock_min}
-                  hint="Alerta de reposición"
+                  hint="Alerta"
                 />
                 <Input
-                  label="Stock máximo"
+                  label="Máximo"
                   type="number"
                   min="0"
                   step="1"
@@ -945,18 +943,19 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                   error={errors.stock_max}
                 />
               </div>
-            </div>
 
-            {/* 5 ── Descripción (opcional) */}
-            <div className="space-y-3 pt-6">
-              <SectionLabel>Descripción (opcional)</SectionLabel>
+              <div className="pt-2">
+                <SectionLabel>Descripción (opcional)</SectionLabel>
+              </div>
+
               <textarea
                 value={form.description}
                 onChange={set('description')}
                 placeholder="Descripción opcional del producto..."
-                rows={3}
+                rows={2}
                 className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] transition-colors resize-none"
               />
+
             </div>
 
           </div>
