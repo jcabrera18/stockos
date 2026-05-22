@@ -341,19 +341,18 @@ export function POSTicket({
 
     // Escalar font-sizes directamente en el HTML (CSS !important no gana a estilos inline en impresión)
     const printHtml = content.innerHTML
-      .replace(/font-size: 8px/g,  'font-size: 14px')
-      .replace(/font-size: 9px/g,  'font-size: 14px')
-      .replace(/font-size: 10px/g, 'font-size: 16px')
-      .replace(/font-size: 11px/g, 'font-size: 17px')
-      .replace(/font-size: 12px/g, 'font-size: 18px')
-      .replace(/font-size: 13px/g, 'font-size: 19px')
-      .replace(/font-size: 17px/g, 'font-size: 24px')
-      .replace(/font-size: 22px/g, 'font-size: 30px')
-      // Oscurecer grises claros que la térmica no imprime bien
-      .replace(/color: #bbb/g, 'color: #444')
-      .replace(/color: #aaa/g, 'color: #444')
-      .replace(/color: #ccc/g, 'color: #555')
-      .replace(/color: #999/g, 'color: #555')
+      .replace(/font-size: 8px/g,  'font-size: 22px')
+      .replace(/font-size: 9px/g,  'font-size: 22px')
+      .replace(/font-size: 10px/g, 'font-size: 24px')
+      .replace(/font-size: 11px/g, 'font-size: 26px')
+      .replace(/font-size: 12px/g, 'font-size: 28px')
+      .replace(/font-size: 13px/g, 'font-size: 28px')
+      .replace(/font-size: 17px/g, 'font-size: 36px')
+      .replace(/font-size: 22px/g, 'font-size: 44px')
+      // Todo en negro: reemplazar todos los colores grises/claros
+      .replace(/color: #(111|222|333|444|555|666|777|888|999|aaa|bbb|ccc|ddd|eee)/g, 'color: #000')
+      // Eliminar opacidades que crean gris visual aunque el color sea negro
+      .replace(/opacity: 0\.\d+/g, 'opacity: 1')
 
     win.document.write(`<!DOCTYPE html>
 <html>
