@@ -339,6 +339,22 @@ export function POSTicket({
     const win = window.open('', '_blank', 'width=350,height=800')
     if (!win) return
 
+    // Escalar font-sizes directamente en el HTML (CSS !important no gana a estilos inline en impresión)
+    const printHtml = content.innerHTML
+      .replace(/font-size: 8px/g,  'font-size: 14px')
+      .replace(/font-size: 9px/g,  'font-size: 14px')
+      .replace(/font-size: 10px/g, 'font-size: 16px')
+      .replace(/font-size: 11px/g, 'font-size: 17px')
+      .replace(/font-size: 12px/g, 'font-size: 18px')
+      .replace(/font-size: 13px/g, 'font-size: 19px')
+      .replace(/font-size: 17px/g, 'font-size: 24px')
+      .replace(/font-size: 22px/g, 'font-size: 30px')
+      // Oscurecer grises claros que la térmica no imprime bien
+      .replace(/color: #bbb/g, 'color: #444')
+      .replace(/color: #aaa/g, 'color: #444')
+      .replace(/color: #ccc/g, 'color: #555')
+      .replace(/color: #999/g, 'color: #555')
+
     win.document.write(`<!DOCTYPE html>
 <html>
 <head>
@@ -350,7 +366,7 @@ export function POSTicket({
     html, body { width: 100%; background: #fff; }
     body {
       font-family: system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
-      font-size: 15px;
+      font-size: 17px;
       font-weight: 400;
       line-height: 1.7;
       color: #000;
@@ -359,20 +375,9 @@ export function POSTicket({
     }
     body > div { width: 100% !important; max-width: 100% !important; box-shadow: none !important; padding: 8px 4px 14px !important; background: #fff !important; }
     hr { border: none !important; border-top: 1px dashed #666 !important; margin: 10px 0 !important; }
-    /* Aumentar tamaños mínimos para legibilidad térmica */
-    [style*="font-size: 8px"]  { font-size: 12px !important; }
-    [style*="font-size: 9px"]  { font-size: 12px !important; }
-    [style*="font-size: 10px"] { font-size: 13px !important; }
-    [style*="font-size: 11px"] { font-size: 14px !important; }
-    [style*="font-size: 12px"] { font-size: 15px !important; }
-    /* Oscurecer colores claros que la térmica no imprime bien */
-    [style*="color: #bbb"] { color: #555 !important; }
-    [style*="color: #aaa"] { color: #444 !important; }
-    [style*="color: #ccc"] { color: #666 !important; }
-    [style*="color: #999"] { color: #555 !important; }
   </style>
 </head>
-<body>${content.innerHTML}</body>
+<body>${printHtml}</body>
 </html>`)
     win.document.close()
     win.focus()
