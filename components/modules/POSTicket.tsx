@@ -350,15 +350,26 @@ export function POSTicket({
     html, body { width: 100%; background: #fff; }
     body {
       font-family: system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
-      font-size: 12px;
+      font-size: 15px;
       font-weight: 400;
-      line-height: 1.65;
+      line-height: 1.7;
       color: #000;
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
     body > div { width: 100% !important; max-width: 100% !important; box-shadow: none !important; padding: 8px 4px 14px !important; background: #fff !important; }
-    hr { border: none !important; border-top: 1px dashed #888 !important; margin: 8px 0 !important; }
+    hr { border: none !important; border-top: 1px dashed #666 !important; margin: 10px 0 !important; }
+    /* Aumentar tamaños mínimos para legibilidad térmica */
+    [style*="font-size: 8px"]  { font-size: 12px !important; }
+    [style*="font-size: 9px"]  { font-size: 12px !important; }
+    [style*="font-size: 10px"] { font-size: 13px !important; }
+    [style*="font-size: 11px"] { font-size: 14px !important; }
+    [style*="font-size: 12px"] { font-size: 15px !important; }
+    /* Oscurecer colores claros que la térmica no imprime bien */
+    [style*="color: #bbb"] { color: #555 !important; }
+    [style*="color: #aaa"] { color: #444 !important; }
+    [style*="color: #ccc"] { color: #666 !important; }
+    [style*="color: #999"] { color: #555 !important; }
   </style>
 </head>
 <body>${content.innerHTML}</body>
