@@ -339,18 +339,19 @@ export function POSTicket({
     const win = window.open('', '_blank', 'width=350,height=800')
     if (!win) return
 
-    // Escalar font-sizes directamente en el HTML (CSS !important no gana a estilos inline en impresión)
+    // Escalar font-sizes directamente en el HTML — orden de mayor a menor para evitar doble reemplazo
     const printHtml = content.innerHTML
-      .replace(/font-size: 8px/g,  'font-size: 22px')
-      .replace(/font-size: 9px/g,  'font-size: 22px')
-      .replace(/font-size: 10px/g, 'font-size: 24px')
-      .replace(/font-size: 11px/g, 'font-size: 26px')
-      .replace(/font-size: 12px/g, 'font-size: 28px')
-      .replace(/font-size: 13px/g, 'font-size: 28px')
-      .replace(/font-size: 17px/g, 'font-size: 36px')
       .replace(/font-size: 22px/g, 'font-size: 44px')
-      // Todo en negro: reemplazar todos los colores grises/claros
+      .replace(/font-size: 17px/g, 'font-size: 36px')
+      .replace(/font-size: 13px/g, 'font-size: 28px')
+      .replace(/font-size: 12px/g, 'font-size: 28px')
+      .replace(/font-size: 11px/g, 'font-size: 26px')
+      .replace(/font-size: 10px/g, 'font-size: 24px')
+      .replace(/font-size: 9px/g,  'font-size: 20px')
+      .replace(/font-size: 8px/g,  'font-size: 18px')
+      // Todo en negro: colores hex y rgb normalizados por el browser
       .replace(/color: #(111|222|333|444|555|666|777|888|999|aaa|bbb|ccc|ddd|eee)/g, 'color: #000')
+      .replace(/color: rgb\((\d{1,3}),\s*\1,\s*\1\)/g, 'color: #000')
       // Eliminar opacidades que crean gris visual aunque el color sea negro
       .replace(/opacity: 0\.\d+/g, 'opacity: 1')
 

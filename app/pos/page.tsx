@@ -40,6 +40,7 @@ interface CartItem {
   promo_label?: string
   promotion_id?: string | null
   status?: 'pending' | 'resolved' | 'error'
+  price_overridden?: boolean
 }
 
 interface PaymentSplit {
@@ -511,7 +512,7 @@ export default function POSPage() {
             setPendingQty(1); pendingQtyRef.current = 1
             setQuery(''); setResults([])
             setTimeout(() => searchRef.current?.focus(), 50)
-            if (existingItem.product.price_mode !== 'custom') {
+            if (existingItem.product.price_mode !== 'custom' && !existingItem.price_overridden) {
               const pricing = computeLocalPrice(existingItem.product, newQty)
               const promo = evaluatePromo(existingItem.product as Parameters<typeof evaluatePromo>[0], newQty, pricing.price, promotionsRef.current)
               if (existingItem.product.use_fixed_sell_price) {
@@ -563,7 +564,7 @@ export default function POSPage() {
             const promo = evaluatePromo(localResult.product as Parameters<typeof evaluatePromo>[0], newQty, localResult.pricing.price, promotionsRef.current)
             setCart(prev => prev.map(i =>
               i.product.id === localResult.product.id
-                ? { ...i, quantity: newQty, unit_price: localResult.pricing.price, applied_list: localResult.pricing.list_name, applied_margin: localResult.pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
+                ? { ...i, quantity: newQty, ...(i.price_overridden ? {} : { unit_price: localResult.pricing.price, applied_list: localResult.pricing.list_name, applied_margin: localResult.pricing.margin_pct }), discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id }
                 : i,
             ))
           } else {
@@ -621,13 +622,17 @@ export default function POSPage() {
                 .filter(i => i.product.id !== tempId)
                 .map(i => i.product.id === result.product.id ? { ...i, quantity: i.quantity + qty } : i)
             }
+            const pendingItem = prev.find(i => i.product.id === tempId)
+            const priceOverridden = pendingItem?.price_overridden ?? false
             const promo = evaluatePromo(result.product as Parameters<typeof evaluatePromo>[0], qty, result.pricing.price, promotionsRef.current)
             return prev.map(i => i.product.id === tempId ? {
               ...i,
               product: result.product,
-              unit_price: result.pricing.price,
-              applied_list: result.pricing.list_name,
-              applied_margin: result.pricing.margin_pct,
+              ...(priceOverridden ? {} : {
+                unit_price: result.pricing.price,
+                applied_list: result.pricing.list_name,
+                applied_margin: result.pricing.margin_pct,
+              }),
               discount: promo.discount,
               promo_label: promo.promo_label,
               promotion_id: promo.promotion_id,
@@ -747,9 +752,11 @@ export default function POSPage() {
         i.product.id === product.id
           ? {
               ...i,
-              unit_price:     resolvedPricing.price,
-              applied_list:   resolvedPricing.list_name,
-              applied_margin: resolvedPricing.margin_pct,
+              ...(i.price_overridden ? {} : {
+                unit_price:     resolvedPricing.price,
+                applied_list:   resolvedPricing.list_name,
+                applied_margin: resolvedPricing.margin_pct,
+              }),
               discount:       promo.discount,
               promo_label:    promo.promo_label,
               promotion_id:   promo.promotion_id,
@@ -764,7 +771,7 @@ export default function POSPage() {
     if (!item) return
     const newQty = Math.max(1, item.quantity + delta)
     setCart(prev => prev.map(i => i.product.id === id ? { ...i, quantity: newQty } : i))
-    if (item.product.price_mode === 'custom') return
+    if (item.product.price_mode === 'custom' || item.price_overridden) return
     const pricing = computeLocalPrice(item.product, newQty)
     const promo = evaluatePromo(
       item.product as Parameters<typeof evaluatePromo>[0],
@@ -782,7 +789,7 @@ export default function POSPage() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateItemPrice = useCallback((id: string, v: string) =>
-    setCart(prev => prev.map(i => i.product.id === id ? { ...i, unit_price: Math.max(0, Number(v) || 0) } : i)), [])
+    setCart(prev => prev.map(i => i.product.id === id ? { ...i, unit_price: Math.max(0, Number(v) || 0), price_overridden: true } : i)), [])
 
   const removeItem = useCallback((id: string) =>
     setCart(prev => prev.filter(i => i.product.id !== id)), [])
@@ -1234,7 +1241,7 @@ export default function POSPage() {
                             const promoLocal = evaluatePromo(localResultEnter.product as Parameters<typeof evaluatePromo>[0], newQtyLocal, localResultEnter.pricing.price, promotionsRef.current)
                             setCart(prev => prev.map(i =>
                               i.product.id === localResultEnter.product.id
-                                ? { ...i, quantity: newQtyLocal, unit_price: localResultEnter.pricing.price, applied_list: localResultEnter.pricing.list_name, applied_margin: localResultEnter.pricing.margin_pct, discount: promoLocal.discount, promo_label: promoLocal.promo_label, promotion_id: promoLocal.promotion_id }
+                                ? { ...i, quantity: newQtyLocal, ...(i.price_overridden ? {} : { unit_price: localResultEnter.pricing.price, applied_list: localResultEnter.pricing.list_name, applied_margin: localResultEnter.pricing.margin_pct }), discount: promoLocal.discount, promo_label: promoLocal.promo_label, promotion_id: promoLocal.promotion_id }
                                 : i,
                             ))
                           } else {
@@ -1277,8 +1284,10 @@ export default function POSPage() {
                             setCart(prev => {
                               const alreadyExists = prev.find(i => i.product.id === result.product.id)
                               if (alreadyExists) return prev.filter(i => i.product.id !== tempIdEnter).map(i => i.product.id === result.product.id ? { ...i, quantity: i.quantity + qtyEnter } : i)
+                              const pendingItemEnter = prev.find(i => i.product.id === tempIdEnter)
+                              const priceOverriddenEnter = pendingItemEnter?.price_overridden ?? false
                               const promo = evaluatePromo(result.product as Parameters<typeof evaluatePromo>[0], qtyEnter, result.pricing.price, promotionsRef.current)
-                              return prev.map(i => i.product.id === tempIdEnter ? { ...i, product: result.product, unit_price: result.pricing.price, applied_list: result.pricing.list_name, applied_margin: result.pricing.margin_pct, discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id, status: 'resolved' } : i)
+                              return prev.map(i => i.product.id === tempIdEnter ? { ...i, product: result.product, ...(priceOverriddenEnter ? {} : { unit_price: result.pricing.price, applied_list: result.pricing.list_name, applied_margin: result.pricing.margin_pct }), discount: promo.discount, promo_label: promo.promo_label, promotion_id: promo.promotion_id, status: 'resolved' } : i)
                             })
                           })
                           .catch(() => { pendingBarcodesRef.current.delete(trimmedQ); setCart(prev => prev.map(i => i.product.id === tempIdEnter ? { ...i, status: 'error' } : i)) })

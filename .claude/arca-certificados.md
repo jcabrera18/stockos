@@ -35,9 +35,11 @@ openssl req -new -key private.key \
 Ejemplo real:
 ```bash
 openssl req -new -key private.key \
-  -subj "/C=AR/O=El Economico SRL/CN=20123456789" \
+  -subj "/C=AR/O=Ana Karina Silva Fort/CN=27188629283" \
   -out request.csr
 ```
+
+
 
 Esto genera el archivo `request.csr` que se sube a ARCA.
 
