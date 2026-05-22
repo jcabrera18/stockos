@@ -345,7 +345,7 @@ export function POSTicket({
   <meta charset="utf-8">
   <title>Ticket</title>
   <style>
-    @page { size: 80mm auto; margin: 3mm 2mm; }
+    @page { size: 80mm auto; margin: 0mm; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 80mm; background: #fff; }
     body {
@@ -357,6 +357,7 @@ export function POSTicket({
       -webkit-print-color-adjust: exact;
       print-color-adjust: exact;
     }
+    body > div { width: 100% !important; max-width: 100% !important; box-shadow: none !important; padding: 10px 8px 16px !important; background: #fff !important; }
     hr { border: none !important; border-top: 1px dashed #888 !important; margin: 8px 0 !important; }
   </style>
 </head>
