@@ -221,7 +221,8 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
       })
       api.get<Product & { price_overrides?: { price_list_id: string; price: number }[] }>(`/api/products/${product.id}`)
         .then(full => {
-          setBarcodes((full.product_barcodes ?? []).map(b => b.barcode))
+          const bars = (full.product_barcodes ?? []).map(b => b.barcode)
+          setBarcodes(bars.length > 0 ? bars : (full.barcode ? [full.barcode] : []))
           const ovMap: Record<string, string> = {}
           for (const ov of (full.price_overrides ?? [])) {
             ovMap[ov.price_list_id] = String(ov.price)
