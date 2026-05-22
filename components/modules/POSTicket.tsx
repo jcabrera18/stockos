@@ -341,8 +341,11 @@ export function POSTicket({
 
     // Escalar font-sizes directamente en el HTML — orden de mayor a menor para evitar doble reemplazo
     const printHtml = content.innerHTML
+      .replace(/font-size: 26px/g, 'font-size: 52px')
       .replace(/font-size: 22px/g, 'font-size: 44px')
       .replace(/font-size: 17px/g, 'font-size: 36px')
+      .replace(/font-size: 15px/g, 'font-size: 32px')
+      .replace(/font-size: 14px/g, 'font-size: 30px')
       .replace(/font-size: 13px/g, 'font-size: 28px')
       .replace(/font-size: 12px/g, 'font-size: 28px')
       .replace(/font-size: 11px/g, 'font-size: 26px')
@@ -361,7 +364,7 @@ export function POSTicket({
   <meta charset="utf-8">
   <title>Ticket</title>
   <style>
-    @page { margin: 4mm 3mm; }
+    @page { margin: 1mm 3mm; }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; background: #fff; }
     body {
@@ -528,7 +531,7 @@ export function POSTicket({
               >
                 {/* Business header — siempre visible */}
                 <div style={{ textAlign: 'center', marginBottom: '4px' }}>
-                  <div style={{ fontSize: '17px', fontWeight: 700, letterSpacing: '0.01em', color: '#000' }}>
+                  <div style={{ fontSize: '17px', fontWeight: 400, letterSpacing: '0.01em', color: '#000', marginBottom: '8px' }}>
                     {business?.name}
                   </div>
                   {(business?.cuit || business?.iva_condition || business?.address || business?.phone) && (
@@ -758,12 +761,12 @@ export function POSTicket({
                       return (
                         <div key={i} style={{ marginBottom: '10px' }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <span style={{ flex: 1, paddingRight: '10px', fontWeight: 500, color: '#111', lineHeight: 1.2 }}>
+                            <span style={{ flex: 1, paddingRight: '10px', fontSize: '15px', fontWeight: 600, color: '#111', lineHeight: 1.2 }}>
                               {item.product.name}
                             </span>
-                            <span style={{ flexShrink: 0, fontWeight: 700, color: '#000', lineHeight: 1.2 }}>{formatCurrency(lineTotal)}</span>
+                            <span style={{ flexShrink: 0, fontSize: '15px', fontWeight: 700, color: '#000', lineHeight: 1.2 }}>{formatCurrency(lineTotal)}</span>
                           </div>
-                          <div style={{ fontSize: '10px', color: '#999', marginTop: '1px' }}>
+                          <div style={{ fontSize: '12px', color: '#999', marginTop: '1px' }}>
                             {item.quantity} × {formatCurrency(item.unit_price)}
                             {item.discount > 0 && <span> · dto -{formatCurrency(item.discount)}</span>}
                           </div>
@@ -794,8 +797,8 @@ export function POSTicket({
 
                     {/* Total */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', paddingTop: '2px' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#000', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Total</span>
-                      <span style={{ fontSize: '22px', fontWeight: 800, color: '#000', letterSpacing: '-0.02em' }}>{formatCurrency(sale.total)}</span>
+                      <span style={{ fontSize: '14px', fontWeight: 700, color: '#000', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Total</span>
+                      <span style={{ fontSize: '26px', fontWeight: 800, color: '#000', letterSpacing: '-0.02em' }}>{formatCurrency(sale.total)}</span>
                     </div>
 
                     {/* Forma de pago */}
