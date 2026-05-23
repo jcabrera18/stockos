@@ -152,7 +152,9 @@ export function POSTicket({
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.key === 'p' || e.key === 'P') { e.preventDefault(); handlePrint() }
       if (e.key === 'w' || e.key === 'W') { e.preventDefault(); handleShareWhatsApp() }
-      if ((e.key === 'f' || e.key === 'F') && invoice?.invoice_type === 'X') {
+      const canConvertOrRetry = invoice?.invoice_type === 'X' ||
+        (invoice && ['rejected', 'pending'].includes(invoice.afip_status) && ['A', 'B', 'C'].includes(invoice.invoice_type))
+      if ((e.key === 'f' || e.key === 'F') && canConvertOrRetry) {
         e.preventDefault(); openConvertModal()
       }
       if (e.key === 'Enter' || e.key === 'n' || e.key === 'N') {
@@ -174,7 +176,10 @@ export function POSTicket({
     ['A', 'B', 'C']
 
   const openConvertModal = () => {
-    setConvertType(allowedConvertTypes[0])
+    // Al reintentar, pre-llenar con el tipo actual del invoice si está permitido
+    const currentType = invoice?.invoice_type as 'A' | 'B' | 'C' | undefined
+    const defaultType = currentType && allowedConvertTypes.includes(currentType) ? currentType : allowedConvertTypes[0]
+    setConvertType(defaultType)
     setReceptorName(invoice?.receptor_name ?? customerName ?? '')
     setReceptorCuit(invoice?.receptor_cuit ?? '')
     setReceptorAddress(invoice?.receptor_address ?? '')
@@ -497,18 +502,25 @@ export function POSTicket({
                 <span>WhatsApp</span>
                 <kbd className="text-[10px] bg-white/20 border border-white/20 px-1.5 rounded font-sans leading-tight">W</kbd>
               </button>
-              <button
-                onClick={() => invoice?.invoice_type === 'X' ? openConvertModal() : undefined}
-                disabled={!invoice || invoice.invoice_type !== 'X'}
-                className="flex flex-col items-center justify-center gap-1 py-3 rounded-[var(--radius-md)] bg-white/10 border border-white/20 text-sm font-medium text-white hover:bg-white/20 transition-colors active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {!invoice
-                  ? <Loader2 size={15} className="animate-spin" />
-                  : <CreditCard size={15} />
-                }
-                <span>Facturar</span>
-                <kbd className="text-[10px] bg-white/10 border border-white/20 px-1.5 rounded font-sans leading-tight">F</kbd>
-              </button>
+              {(() => {
+                const canConvert = invoice?.invoice_type === 'X'
+                const canRetry = invoice && ['rejected', 'pending'].includes(invoice.afip_status) && ['A', 'B', 'C'].includes(invoice.invoice_type)
+                const isClickable = canConvert || canRetry
+                return (
+                  <button
+                    onClick={() => isClickable ? openConvertModal() : undefined}
+                    disabled={!invoice || !isClickable}
+                    className="flex flex-col items-center justify-center gap-1 py-3 rounded-[var(--radius-md)] bg-white/10 border border-white/20 text-sm font-medium text-white hover:bg-white/20 transition-colors active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {!invoice
+                      ? <Loader2 size={15} className="animate-spin" />
+                      : <CreditCard size={15} />
+                    }
+                    <span>{canRetry ? 'Reintentar' : 'Facturar'}</span>
+                    <kbd className="text-[10px] bg-white/10 border border-white/20 px-1.5 rounded font-sans leading-tight">F</kbd>
+                  </button>
+                )
+              })()}
             </div>
             <button
               onClick={onNewSale}

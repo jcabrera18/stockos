@@ -157,7 +157,9 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.key === 'p' || e.key === 'P') { e.preventDefault(); handlePrint() }
-      if ((e.key === 'f' || e.key === 'F') && invoice?.invoice_type === 'X') {
+      const canConvertOrRetry = invoice?.invoice_type === 'X' ||
+        (invoice && ['rejected', 'pending'].includes(invoice.afip_status) && ['A', 'B', 'C'].includes(invoice.invoice_type))
+      if ((e.key === 'f' || e.key === 'F') && canConvertOrRetry) {
         e.preventDefault(); openConvertModal()
       }
     }
@@ -167,7 +169,10 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
 
   const openConvertModal = () => {
     if (!invoice) return
-    setConvertType(allowedConvertTypes[0])
+    // Al reintentar, pre-llenar con el tipo actual del invoice si está permitido
+    const currentType = invoice.invoice_type as 'A' | 'B' | 'C'
+    const defaultType = allowedConvertTypes.includes(currentType) ? currentType : allowedConvertTypes[0]
+    setConvertType(defaultType)
     setReceptorName(invoice.receptor_name ?? customer?.full_name ?? '')
     setReceptorCuit(invoice.receptor_cuit ?? '')
     setReceptorAddress(invoice.receptor_address ?? '')
@@ -526,9 +531,9 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
                   </Button>
                 )}
                 {invoice && invoice.invoice_type !== 'X' && (invoice.afip_status === 'pending' || invoice.afip_status === 'rejected') && (
-                  <Button variant="secondary" onClick={handleAuthorize} disabled={authorizing}>
+                  <Button variant="secondary" onClick={openConvertModal}>
                     <Receipt size={15} />
-                    {authorizing ? 'Autorizando...' : 'Reintentar ARCA'}
+                    Reintentar ARCA
                   </Button>
                 )}
                 <Button variant="secondary" onClick={onClose}>Cerrar</Button>

@@ -226,7 +226,6 @@ function InvoicesPageInner() {
   const [receptorAddress, setReceptorAddress] = useState('')
   const [receptorIva, setReceptorIva] = useState('CF')
   const [converting, setConverting] = useState(false)
-  const [authorizing, setAuthorizing] = useState(false)
 
   const fetchInvoices = useCallback(async () => {
     setLoading(true)
@@ -293,20 +292,6 @@ function InvoicesPageInner() {
     }
   }, [data])
 
-  const handleAuthorize = async (invoice: Invoice) => {
-    setAuthorizing(true)
-    try {
-      const updated = await api.post<Invoice>(`/api/invoices/${invoice.id}/authorize`, {})
-      toast.success(`CAE obtenido: ${updated.afip_cae}`)
-      setSelectedInvoice({ ...updated, invoice_items: updated.invoice_items ?? invoice.invoice_items })
-      fetchInvoices()
-    } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error al autorizar en ARCA')
-    } finally {
-      setAuthorizing(false)
-    }
-  }
-
   const ivaCondition = user?.business?.iva_condition ?? ''
   // MO: solo C · RI: A y B · EX: B y C · cualquier otro: todos
   const allowedConvertTypes: ('A' | 'B' | 'C')[] =
@@ -318,7 +303,10 @@ function InvoicesPageInner() {
   const openConvert = (invoice: Invoice) => {
     const customer = invoice.customers as { full_name: string; document?: string } | undefined
     setConvertTarget(invoice)
-    setConvertType(allowedConvertTypes[0])
+    // Al reintentar, pre-llenar con el tipo actual si está permitido
+    const currentType = invoice.invoice_type as 'A' | 'B' | 'C'
+    const defaultType = allowedConvertTypes.includes(currentType) ? currentType : allowedConvertTypes[0]
+    setConvertType(defaultType)
     setReceptorName(invoice.receptor_name ?? customer?.full_name ?? '')
     setReceptorCuit(invoice.receptor_cuit ?? customer?.document ?? '')
     setReceptorAddress(invoice.receptor_address ?? '')
@@ -768,10 +756,11 @@ function InvoicesPageInner() {
               </div>
             </div>
 
-            {/* Botón autorizar en ARCA si está pendiente o falló */}
-            {(selectedInvoice.afip_status === 'pending' || selectedInvoice.afip_status === 'rejected') && (
-              <Button onClick={() => handleAuthorize(selectedInvoice)} disabled={authorizing} className="w-full">
-                {authorizing ? 'Autorizando en ARCA...' : selectedInvoice.afip_status === 'rejected' ? 'Reintentar autorización en ARCA' : 'Autorizar en ARCA'}
+            {/* Botón autorizar/reintentar en ARCA si está pendiente o falló */}
+            {(selectedInvoice.afip_status === 'pending' || selectedInvoice.afip_status === 'rejected') &&
+              selectedInvoice.invoice_type !== 'X' && (
+              <Button onClick={() => { setDetailModal(false); openConvert(selectedInvoice) }} className="w-full">
+                {selectedInvoice.afip_status === 'rejected' ? 'Reintentar autorización en ARCA' : 'Autorizar en ARCA'}
               </Button>
             )}
 
