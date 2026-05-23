@@ -111,6 +111,8 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
   // overridePrices: precio manual por lista (price_list_id → valor string editable)
   const [overridePrices, setOverridePrices] = useState<Record<string, string>>({})
+  const [overrideModes, setOverrideModes] = useState<Record<string, 'pesos' | 'pct'>>({})
+  const [overridePctValues, setOverridePctValues] = useState<Record<string, string>>({})
   const [supplierSubModal, setSupplierSubModal] = useState(false)
   const [brandSubModal, setBrandSubModal] = useState(false)
   const [newBrandName, setNewBrandName] = useState('')
@@ -234,6 +236,8 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
       setForm(emptyForm)
       setBarcodes([])
       setOverridePrices({})
+      setOverrideModes({})
+      setOverridePctValues({})
     }
     setNewBarcode('')
     setErrors({})
@@ -528,6 +532,19 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
       minimized={minimized}
       onMinimize={() => setMinimized(true)}
       onRestore={() => setMinimized(false)}
+      footer={
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
+          {!isEdit && (
+            <Button variant="secondary" onClick={handleSaveAndNew} loading={saving}>
+              Guardar y agregar otro
+            </Button>
+          )}
+          <Button onClick={handleSave} loading={saving}>
+            {isEdit ? 'Guardar cambios' : 'Crear producto'}
+          </Button>
+        </div>
+      }
     >
       <div className="space-y-5">
 
@@ -835,7 +852,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                 <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface2)]/35 p-3 space-y-1.5">
                   <div className="flex items-center justify-between mb-0.5">
                     <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text3)]">Precios por lista</p>
-                    <p className="text-[10px] text-[var(--text3)]">Editá para redondear</p>
+                    <p className="text-[10px] text-[var(--text3)]">Editá precio o porcentaje</p>
                   </div>
                   {priceLists.map(list => {
                     const calculated = Math.round(costWithVat * (1 + list.margin_pct / 100) * 100) / 100
@@ -843,6 +860,8 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                     const displayPrice = overrideVal !== '' ? Number(overrideVal) : calculated
                     const gain = displayPrice - costWithVat
                     const isOverridden = overrideVal !== ''
+                    const mode = overrideModes[list.id] ?? 'pesos'
+                    const pctVal = overridePctValues[list.id] ?? ''
                     return (
                       <div key={list.id} className={cn(
                         'flex items-center gap-2 rounded-[var(--radius-md)] px-2.5 py-1.5 text-sm transition-colors',
@@ -860,41 +879,132 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                             )}
                           </div>
                           <p className="text-[10px] text-[var(--text3)]">
-                            +{list.margin_pct}%
-                            {isOverridden && (
-                              <span className="ml-1 line-through opacity-50">${calculated.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+                            {mode === 'pct' && pctVal !== '' ? (
+                              <>
+                                +{pctVal}%{' '}
+                                <span className="text-[var(--text2)] font-medium">
+                                  = ${displayPrice.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                </span>
+                                <span className="ml-1 opacity-50">era +{list.margin_pct}%</span>
+                              </>
+                            ) : (
+                              <>
+                                +{list.margin_pct}%
+                                {isOverridden && mode === 'pesos' && (
+                                  <span className="ml-1 line-through opacity-50">${calculated.toLocaleString('es-AR', { minimumFractionDigits: 2 })}</span>
+                                )}
+                                {' · '}${gain.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                              </>
                             )}
-                            {' · '}${gain.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
                           </p>
                         </div>
                         <div className="flex items-center gap-1 flex-shrink-0">
-                          <span className="text-[var(--text3)] text-xs">$</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={overrideVal}
-                            onChange={e => {
-                              const v = e.target.value
-                              setOverridePrices(prev => {
-                                const next = { ...prev }
-                                if (v === '') delete next[list.id]
-                                else next[list.id] = v
-                                return next
-                              })
-                            }}
-                            placeholder={calculated.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
-                            className={cn(
-                              'w-24 px-2 py-1 text-xs font-medium text-right rounded-[var(--radius-sm)] bg-[var(--surface)] border transition-colors focus:outline-none mono',
-                              isOverridden
-                                ? 'border-[var(--accent)]/40 text-[var(--accent)] focus:border-[var(--accent)]'
-                                : 'border-[var(--border)] text-[var(--text2)] focus:border-[var(--accent)]'
-                            )}
-                          />
+                          {/* Toggle $ / % */}
+                          <div className="flex rounded border border-[var(--border)] overflow-hidden text-[9px] font-bold">
+                            <button
+                              type="button"
+                              title="Ingresar precio en pesos"
+                              onClick={() => {
+                                if (mode !== 'pesos') {
+                                  setOverrideModes(prev => { const n = { ...prev }; delete n[list.id]; return n })
+                                }
+                              }}
+                              className={cn(
+                                'px-1.5 py-0.5 transition-colors',
+                                mode === 'pesos'
+                                  ? 'bg-[var(--accent)] text-white'
+                                  : 'text-[var(--text3)] hover:bg-[var(--surface2)]'
+                              )}
+                            >$</button>
+                            <button
+                              type="button"
+                              title="Ingresar margen en porcentaje"
+                              onClick={() => {
+                                if (mode !== 'pct') {
+                                  setOverrideModes(prev => ({ ...prev, [list.id]: 'pct' }))
+                                  if (overrideVal !== '' && costWithVat > 0) {
+                                    const pct = ((Number(overrideVal) / costWithVat - 1) * 100).toFixed(2)
+                                    setOverridePctValues(prev => ({ ...prev, [list.id]: pct }))
+                                  }
+                                }
+                              }}
+                              className={cn(
+                                'px-1.5 py-0.5 border-l border-[var(--border)] transition-colors',
+                                mode === 'pct'
+                                  ? 'bg-[var(--accent)] text-white'
+                                  : 'text-[var(--text3)] hover:bg-[var(--surface2)]'
+                              )}
+                            >%</button>
+                          </div>
+
+                          {mode === 'pesos' ? (
+                            <>
+                              <span className="text-[var(--text3)] text-xs">$</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={overrideVal}
+                                onChange={e => {
+                                  const v = e.target.value
+                                  setOverridePrices(prev => {
+                                    const next = { ...prev }
+                                    if (v === '') delete next[list.id]
+                                    else next[list.id] = v
+                                    return next
+                                  })
+                                }}
+                                placeholder={calculated.toLocaleString('es-AR', { minimumFractionDigits: 2 })}
+                                className={cn(
+                                  'w-24 px-2 py-1 text-xs font-medium text-right rounded-[var(--radius-sm)] bg-[var(--surface)] border transition-colors focus:outline-none mono',
+                                  isOverridden
+                                    ? 'border-[var(--accent)]/40 text-[var(--accent)] focus:border-[var(--accent)]'
+                                    : 'border-[var(--border)] text-[var(--text2)] focus:border-[var(--accent)]'
+                                )}
+                              />
+                              {overrideVal !== '' && costWithVat > 0 && (
+                                <span className="text-[9px] font-mono text-[var(--text3)]">
+                                  = {((Number(overrideVal) / costWithVat - 1) * 100).toFixed(1)}%
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={pctVal}
+                                onChange={e => {
+                                  const v = e.target.value
+                                  setOverridePctValues(prev => ({ ...prev, [list.id]: v }))
+                                  if (v !== '' && !isNaN(Number(v)) && costWithVat > 0) {
+                                    const pricePesos = Math.round(costWithVat * (1 + Number(v) / 100) * 100) / 100
+                                    setOverridePrices(prev => ({ ...prev, [list.id]: String(pricePesos) }))
+                                  } else if (v === '') {
+                                    setOverridePrices(prev => { const n = { ...prev }; delete n[list.id]; return n })
+                                  }
+                                }}
+                                placeholder={list.margin_pct.toFixed(2)}
+                                className={cn(
+                                  'w-20 px-2 py-1 text-xs font-medium text-right rounded-[var(--radius-sm)] bg-[var(--surface)] border transition-colors focus:outline-none mono',
+                                  pctVal !== ''
+                                    ? 'border-[var(--accent)]/40 text-[var(--accent)] focus:border-[var(--accent)]'
+                                    : 'border-[var(--border)] text-[var(--text2)] focus:border-[var(--accent)]'
+                                )}
+                              />
+                              <span className="text-[var(--text3)] text-xs">%</span>
+                            </>
+                          )}
+
                           {isOverridden && (
                             <button
                               type="button"
-                              onClick={() => setOverridePrices(prev => { const next = { ...prev }; delete next[list.id]; return next })}
+                              onClick={() => {
+                                setOverridePrices(prev => { const n = { ...prev }; delete n[list.id]; return n })
+                                setOverridePctValues(prev => { const n = { ...prev }; delete n[list.id]; return n })
+                                setOverrideModes(prev => { const n = { ...prev }; delete n[list.id]; return n })
+                              }}
                               title="Restaurar precio calculado"
                               className="p-1 text-[var(--text3)] hover:text-[var(--danger,#ef4444)] transition-colors"
                             >
@@ -1016,21 +1126,6 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
             )}
           </div>
         )}
-
-        {/* Footer sticky */}
-        <div className="sticky bottom-0 -mx-4 sm:-mx-5 mt-5 border-t border-[var(--border)] bg-[var(--surface)]/95 px-4 pb-4 pt-3 backdrop-blur sm:px-5">
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
-            {!isEdit && (
-              <Button variant="secondary" onClick={handleSaveAndNew} loading={saving}>
-                Guardar y agregar otro
-              </Button>
-            )}
-            <Button onClick={handleSave} loading={saving}>
-              {isEdit ? 'Guardar cambios' : 'Crear producto'}
-            </Button>
-          </div>
-        </div>
 
       </div>
 

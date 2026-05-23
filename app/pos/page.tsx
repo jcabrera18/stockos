@@ -1346,7 +1346,7 @@ export default function POSPage() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-bold mono text-[var(--text)]">{formatCurrency(product.sell_price)}</p>
+                    <p className="text-sm font-bold mono text-[var(--text)]">{formatCurrency(product.price_mode === 'custom' ? product.sell_price : computeLocalPrice(product, 1).price)}</p>
                     <p className="text-xs text-[var(--text3)]">{product.unit}</p>
                   </div>
                 </button>
