@@ -1,4 +1,5 @@
 'use client'
+'use client'
 import { useEffect, useRef, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
@@ -7,6 +8,19 @@ import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import type { CustomerSummary, DeliveryZone, ClientCategory } from '@/app/customers/page'
+
+interface PriceList {
+  id: string
+  name: string
+}
+
+const IVA_CONDITIONS = [
+  { value: 'consumidor_final',      label: 'Consumidor Final' },
+  { value: 'responsable_inscripto', label: 'Responsable Inscripto' },
+  { value: 'monotributista',        label: 'Monotributista' },
+  { value: 'exento',                label: 'Exento' },
+  { value: 'no_responsable',        label: 'No Responsable' },
+]
 
 interface CustomerModalProps {
   open: boolean
@@ -41,6 +55,10 @@ const AR_PROVINCES = [
 const empty = {
   customer_code:      '',
   full_name:          '',
+  razon_social:       '',
+  nombre_fantasia:    '',
+  iva_condition:      '',
+  contact_name:       '',
   document_type:      '',
   document:           '',
   phone:              '',
@@ -55,6 +73,7 @@ const empty = {
   notes:              '',
   delivery_zone_id:   '',
   client_category_id: '',
+  price_list_id:      '',
 }
 
 export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModalProps) {
@@ -66,6 +85,7 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
 
   const [zones, setZones] = useState<DeliveryZone[]>([])
   const [categories, setCategories] = useState<ClientCategory[]>([])
+  const [priceLists, setPriceLists] = useState<PriceList[]>([])
 
   const focusNameInput = () => {
     requestAnimationFrame(() => nameInputRef.current?.focus())
@@ -77,11 +97,12 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
     focusNameInput()
   }
 
-  // Fetch zones and categories once on first open
+  // Fetch zones, categories and price lists once on first open
   useEffect(() => {
     if (!open) return
     api.get<DeliveryZone[]>('/api/delivery-zones').then(setZones).catch(() => {})
     api.get<ClientCategory[]>('/api/client-categories').then(setCategories).catch(() => {})
+    api.get<PriceList[]>('/api/price-lists').then(setPriceLists).catch(() => {})
   }, [open])
 
   useEffect(() => {
@@ -93,6 +114,10 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
         setForm({
           customer_code:      data.customer_code ?? '',
           full_name:          data.full_name,
+          razon_social:       data.razon_social ?? '',
+          nombre_fantasia:    data.nombre_fantasia ?? '',
+          iva_condition:      data.iva_condition ?? '',
+          contact_name:       data.contact_name ?? '',
           document_type:      data.document_type ?? '',
           document:           data.document ?? '',
           phone:              data.phone ?? '',
@@ -107,6 +132,7 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
           notes:              data.notes ?? '',
           delivery_zone_id:   data.delivery_zone_id ?? '',
           client_category_id: data.client_category_id ?? '',
+          price_list_id:      data.price_list_id ?? '',
         })
       })
       .catch(() => toast.error('Error al cargar datos del cliente'))
@@ -125,6 +151,10 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
       const payload = {
         customer_code:      form.customer_code.trim() || null,
         full_name:          form.full_name.trim(),
+        razon_social:       form.razon_social.trim() || null,
+        nombre_fantasia:    form.nombre_fantasia.trim() || null,
+        iva_condition:      form.iva_condition || null,
+        contact_name:       form.contact_name.trim() || null,
         document_type:      form.document_type || null,
         document:           form.document.trim() || null,
         phone:              form.phone.trim() || null,
@@ -139,6 +169,7 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
         notes:              form.notes.trim() || null,
         delivery_zone_id:   form.delivery_zone_id || null,
         client_category_id: form.client_category_id || null,
+        price_list_id:      form.price_list_id || null,
       }
       if (isEdit) {
         await api.patch(`/api/customers/${customer!.id}`, payload)
@@ -171,104 +202,98 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
 
   const zoneOptions = zones.map(z => ({ value: z.id, label: z.name }))
   const categoryOptions = categories.map(c => ({ value: c.id, label: c.name }))
+  const priceListOptions = priceLists.map(p => ({ value: p.id, label: p.name }))
 
   return (
-    <Modal open={open} onClose={onClose} title={isEdit ? 'Editar cliente' : 'Nuevo cliente'} size="lg">
-      <div className="space-y-4" onKeyDown={handleKeyDown}>
+    <Modal open={open} onClose={onClose} title={isEdit ? 'Editar cliente' : 'Nuevo cliente'} size="xl">
+      <div onKeyDown={handleKeyDown}>
 
-        {/* Datos básicos — 3 columnas */}
-        <section className="space-y-2">
-          <p className="text-xs font-semibold text-[var(--text3)] uppercase tracking-wider">Datos básicos</p>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2">
-              <Input ref={nameInputRef} label="Nombre y apellido *" value={form.full_name} onChange={set('full_name')}
-                placeholder="Ej: Juan García" error={errors.full_name} />
-            </div>
-            <Input label="SKU / Código" value={form.customer_code} onChange={set('customer_code')}
-              placeholder="Ej: CLI-001" />
-            <Select
-              label="Tipo de documento"
-              value={form.document_type}
-              onChange={set('document_type')}
-              options={DOCUMENT_TYPES}
-              placeholder="Seleccionar..."
-            />
-            <Input label="Número de documento" value={form.document} onChange={set('document')}
-              placeholder="Ej: 20-12345678-9" />
-            <Input label="Teléfono" value={form.phone} onChange={set('phone')} placeholder="+54 11 1234-5678" />
-            <div className="col-span-2">
-              <Input label="Email" type="email" value={form.email} onChange={set('email')} placeholder="cliente@email.com" />
-            </div>
-            <Input label="Fecha de nacimiento" type="date" value={form.birthdate} onChange={set('birthdate')} />
+        <div className="grid grid-cols-2 gap-x-6">
+
+          {/* ── Columna izquierda ── */}
+          <div className="space-y-4">
+
+            <section className="space-y-2">
+              <p className="text-xs font-semibold text-[var(--text3)] uppercase tracking-wider">Empresa</p>
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Razón social" value={form.razon_social} onChange={set('razon_social')}
+                  placeholder="Ej: García e Hijos S.R.L." />
+                <Input label="Nombre de fantasía" value={form.nombre_fantasia} onChange={set('nombre_fantasia')}
+                  placeholder="Ej: El Económico" />
+                <Input label="Persona de contacto" value={form.contact_name} onChange={set('contact_name')}
+                  placeholder="Ej: María García" />
+                <Select label="Condición IVA" value={form.iva_condition} onChange={set('iva_condition')}
+                  options={IVA_CONDITIONS} placeholder="Seleccionar..." />
+              </div>
+            </section>
+
+            <section className="space-y-2">
+              <p className="text-xs font-semibold text-[var(--text3)] uppercase tracking-wider">Datos básicos</p>
+              <div className="grid grid-cols-2 gap-3">
+                <Input ref={nameInputRef} label="Nombre y apellido *" value={form.full_name} onChange={set('full_name')}
+                  placeholder="Ej: Juan García" error={errors.full_name} />
+                <Input label="SKU / Código" value={form.customer_code} onChange={set('customer_code')}
+                  placeholder="Ej: CLI-001" />
+                <Select label="Tipo de documento" value={form.document_type} onChange={set('document_type')}
+                  options={DOCUMENT_TYPES} placeholder="Seleccionar..." />
+                <Input label="Número de documento" value={form.document} onChange={set('document')}
+                  placeholder="Ej: 20-12345678-9" />
+                <Input label="Teléfono" value={form.phone} onChange={set('phone')} placeholder="+54 11 1234-5678" />
+                <Input label="Email" type="email" value={form.email} onChange={set('email')} placeholder="cliente@email.com" />
+                <Input label="Fecha de nacimiento" type="date" value={form.birthdate} onChange={set('birthdate')} />
+              </div>
+            </section>
+
           </div>
-        </section>
 
-        {/* Clasificación + Crédito — 3 columnas en una fila */}
-        <section className="space-y-2">
-          <p className="text-xs font-semibold text-[var(--text3)] uppercase tracking-wider">Clasificación</p>
-          <div className="grid grid-cols-3 gap-3">
-            <Select
-              label="Zona de entrega"
-              value={form.delivery_zone_id}
-              onChange={set('delivery_zone_id')}
-              options={zoneOptions}
-              placeholder="Sin zona"
-            />
-            <Select
-              label="Categoría"
-              value={form.client_category_id}
-              onChange={set('client_category_id')}
-              options={categoryOptions}
-              placeholder="Sin categoría"
-            />
-            <Input
-              label="Límite de crédito"
-              type="number" min="0" step="0.01"
-              value={form.credit_limit}
-              onChange={set('credit_limit')}
-              placeholder="0 = sin límite"
-            />
-          </div>
-        </section>
+          {/* ── Columna derecha ── */}
+          <div className="space-y-4">
 
-        {/* Ubicación — 3 columnas */}
-        <section className="space-y-2">
-          <p className="text-xs font-semibold text-[var(--text3)] uppercase tracking-wider">Ubicación</p>
-          <div className="grid grid-cols-3 gap-3">
-            <Select
-              label="País"
-              value={form.country}
-              onChange={set('country')}
-              options={LATAM_COUNTRIES}
-              placeholder="Seleccionar..."
-            />
-            {isArgentina ? (
-              <Select
-                label="Provincia"
-                value={form.province}
-                onChange={set('province')}
-                options={AR_PROVINCES}
-                placeholder="Seleccionar..."
-              />
-            ) : (
-              <Input label="Provincia / Estado" value={form.province} onChange={set('province')}
-                placeholder="Ej: São Paulo" />
-            )}
-            <Input label="Localidad" value={form.locality} onChange={set('locality')} placeholder="Ej: Palermo" />
-            <div className="col-span-2">
-              <Input label="Dirección" value={form.address} onChange={set('address')}
-                placeholder="Calle, número, piso..." />
+            <section className="space-y-2">
+              <p className="text-xs font-semibold text-[var(--text3)] uppercase tracking-wider">Clasificación</p>
+              <div className="grid grid-cols-2 gap-3">
+                <Select label="Zona de entrega" value={form.delivery_zone_id} onChange={set('delivery_zone_id')}
+                  options={zoneOptions} placeholder="Sin zona" />
+                <Select label="Categoría" value={form.client_category_id} onChange={set('client_category_id')}
+                  options={categoryOptions} placeholder="Sin categoría" />
+                <Input label="Límite de crédito" type="number" min="0" step="0.01"
+                  value={form.credit_limit} onChange={set('credit_limit')} placeholder="0 = sin límite" />
+                {priceListOptions.length > 0 ? (
+                  <Select label="Lista de precios" value={form.price_list_id} onChange={set('price_list_id')}
+                    options={priceListOptions} placeholder="Sin lista asignada" />
+                ) : <div />}
+              </div>
+            </section>
+
+            <section className="space-y-2">
+              <p className="text-xs font-semibold text-[var(--text3)] uppercase tracking-wider">Ubicación</p>
+              <div className="grid grid-cols-2 gap-3">
+                <Select label="País" value={form.country} onChange={set('country')}
+                  options={LATAM_COUNTRIES} placeholder="Seleccionar..." />
+                {isArgentina ? (
+                  <Select label="Provincia" value={form.province} onChange={set('province')}
+                    options={AR_PROVINCES} placeholder="Seleccionar..." />
+                ) : (
+                  <Input label="Provincia / Estado" value={form.province} onChange={set('province')}
+                    placeholder="Ej: São Paulo" />
+                )}
+                <Input label="Localidad" value={form.locality} onChange={set('locality')} placeholder="Ej: Palermo" />
+                <Input label="Código postal" value={form.postal_code} onChange={set('postal_code')} placeholder="Ej: 1425" />
+                <div className="col-span-2">
+                  <Input label="Dirección" value={form.address} onChange={set('address')}
+                    placeholder="Calle, número, piso..." />
+                </div>
+              </div>
+            </section>
+
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-[var(--text2)]">Notas</label>
+              <textarea value={form.notes} onChange={set('notes')} rows={2}
+                placeholder="Observaciones del cliente..."
+                className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] resize-none" />
             </div>
-            <Input label="Código postal" value={form.postal_code} onChange={set('postal_code')} placeholder="Ej: 1425" />
-          </div>
-        </section>
 
-        {/* Notas */}
-        <div className="flex flex-col gap-1">
-          <label className="text-sm font-medium text-[var(--text2)]">Notas</label>
-          <textarea value={form.notes} onChange={set('notes')} rows={2}
-            placeholder="Observaciones del cliente..."
-            className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] resize-none" />
+          </div>
         </div>
 
         <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">

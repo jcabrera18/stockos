@@ -27,6 +27,10 @@ export interface CustomerSummary {
   business_id: string
   customer_code?: string
   full_name: string
+  razon_social?: string | null
+  nombre_fantasia?: string | null
+  iva_condition?: string | null
+  contact_name?: string | null
   document_type?: string
   document?: string
   phone?: string
@@ -49,6 +53,8 @@ export interface CustomerSummary {
   delivery_zone_color?: string | null
   client_category_id?: string | null
   client_category_name?: string | null
+  price_list_id?: string | null
+  price_list_name?: string | null
 }
 
 export interface DeliveryZone {
@@ -707,22 +713,27 @@ export default function CustomersPage() {
   }
 
   const PRINT_FIELDS: { key: string; label: string }[] = [
-    { key: 'customer_code', label: 'Código' },
-    { key: 'full_name', label: 'Nombre' },
-    { key: 'document', label: 'Documento' },
-    { key: 'phone', label: 'Teléfono' },
-    { key: 'email', label: 'Email' },
-    { key: 'address', label: 'Dirección' },
-    { key: 'locality', label: 'Localidad' },
-    { key: 'province', label: 'Provincia' },
-    { key: 'postal_code', label: 'Código postal' },
-    { key: 'delivery_zone_name', label: 'Zona de entrega' },
+    { key: 'customer_code',    label: 'Código' },
+    { key: 'full_name',        label: 'Nombre' },
+    { key: 'razon_social',     label: 'Razón social' },
+    { key: 'nombre_fantasia',  label: 'Nombre de fantasía' },
+    { key: 'contact_name',     label: 'Contacto' },
+    { key: 'iva_condition',    label: 'Condición IVA' },
+    { key: 'document',         label: 'Documento' },
+    { key: 'phone',            label: 'Teléfono' },
+    { key: 'email',            label: 'Email' },
+    { key: 'address',          label: 'Dirección' },
+    { key: 'locality',         label: 'Localidad' },
+    { key: 'province',         label: 'Provincia' },
+    { key: 'postal_code',      label: 'Código postal' },
+    { key: 'delivery_zone_name',   label: 'Zona de entrega' },
     { key: 'client_category_name', label: 'Categoría' },
-    { key: 'current_balance', label: 'Saldo' },
-    { key: 'credit_limit', label: 'Límite de crédito' },
-    { key: 'birthdate', label: 'Fecha de nacimiento' },
-    { key: 'is_active', label: 'Estado' },
-    { key: 'notes', label: 'Notas' },
+    { key: 'price_list_name',      label: 'Lista de precios' },
+    { key: 'current_balance',  label: 'Saldo' },
+    { key: 'credit_limit',     label: 'Límite de crédito' },
+    { key: 'birthdate',        label: 'Fecha de nacimiento' },
+    { key: 'is_active',        label: 'Estado' },
+    { key: 'notes',            label: 'Notas' },
   ]
 
   const togglePrintField = (key: string) => {
@@ -758,10 +769,19 @@ export default function CustomersPage() {
 
       const selected = PRINT_FIELDS.filter(f => fields.includes(f.key))
 
+      const IVA_LABELS: Record<string, string> = {
+        consumidor_final:      'Consumidor Final',
+        responsable_inscripto: 'Responsable Inscripto',
+        monotributista:        'Monotributista',
+        exento:                'Exento',
+        no_responsable:        'No Responsable',
+      }
+
       const formatCell = (customer: CustomerSummary, key: string): string => {
         const val = (customer as unknown as Record<string, unknown>)[key]
         if (val === null || val === undefined || val === '') return '—'
         if (key === 'is_active') return val ? 'Activo' : 'Inactivo'
+        if (key === 'iva_condition') return IVA_LABELS[String(val)] ?? String(val)
         if (key === 'current_balance' || key === 'credit_limit') {
           return `$${Number(val).toLocaleString('es-AR', { minimumFractionDigits: 2 })}`
         }

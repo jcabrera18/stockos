@@ -100,6 +100,14 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
   const [converting, setConverting] = useState(false)
   const [authorizing, setAuthorizing] = useState(false)
 
+  const ivaCondition = user?.business?.iva_condition ?? ''
+  // MO: solo C · RI: A y B · EX: B y C · sin configurar: todos
+  const allowedConvertTypes: ('A' | 'B' | 'C')[] =
+    ivaCondition === 'MO' ? ['C'] :
+    ivaCondition === 'RI' ? ['A', 'B'] :
+    ivaCondition === 'EX' ? ['B', 'C'] :
+    ['A', 'B', 'C']
+
   useEffect(() => {
     if (!open || !saleId) return
     setLoading(true)
@@ -120,7 +128,7 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
           const inv = await api.get<InvoiceSummary | null>(`/api/invoices/sale/${saleId}`)
           setInvoice(inv)
           if (autoConvert && inv?.invoice_type === 'X') {
-            setConvertType('B')
+            setConvertType(allowedConvertTypes[0])
             setReceptorName(inv.receptor_name ?? '')
             setReceptorCuit(inv.receptor_cuit ?? '')
             setReceptorAddress(inv.receptor_address ?? '')
@@ -159,7 +167,7 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
 
   const openConvertModal = () => {
     if (!invoice) return
-    setConvertType('B')
+    setConvertType(allowedConvertTypes[0])
     setReceptorName(invoice.receptor_name ?? customer?.full_name ?? '')
     setReceptorCuit(invoice.receptor_cuit ?? '')
     setReceptorAddress(invoice.receptor_address ?? '')
@@ -292,6 +300,10 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
 
   const handleConvert = async () => {
     if (!invoice) return
+    if (!allowedConvertTypes.includes(convertType)) {
+      toast.error(`Tu condición IVA (${IVA_LABELS[ivaCondition] ?? ivaCondition}) no permite emitir Factura ${convertType}`)
+      return
+    }
     if (convertType === 'A' && !receptorCuit) {
       toast.error('El CUIT del receptor es obligatorio para Factura A')
       return
@@ -538,8 +550,13 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
           {/* Tipo de factura */}
           <div>
             <label className="text-sm font-medium text-[var(--text2)] block mb-2">Tipo de factura *</label>
-            <div className="grid grid-cols-3 gap-2">
-              {(['A', 'B', 'C'] as const).map(t => (
+            {allowedConvertTypes.length === 1 && (
+              <p className="text-xs text-[var(--text3)] mb-2">
+                Tu condición IVA ({IVA_LABELS[ivaCondition] ?? ivaCondition}) solo permite emitir Factura {allowedConvertTypes[0]}.
+              </p>
+            )}
+            <div className={`grid gap-2 grid-cols-${allowedConvertTypes.length}`}>
+              {allowedConvertTypes.map(t => (
                 <button key={t} onClick={() => setConvertType(t)}
                   className={`py-2.5 text-sm font-semibold rounded-[var(--radius-md)] border transition-all ${convertType === t
                     ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
@@ -552,7 +569,7 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
             <p className="text-xs text-[var(--text3)] mt-1.5">
               {convertType === 'A' && 'Para empresas o responsables inscriptos en IVA'}
               {convertType === 'B' && 'Para consumidores finales con datos del comprador'}
-              {convertType === 'C' && 'Para monotributistas'}
+              {convertType === 'C' && 'Para monotributistas y exentos'}
             </p>
           </div>
 
