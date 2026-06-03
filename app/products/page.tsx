@@ -3,14 +3,14 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
-import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { TableSkeleton } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { useProductModal } from '@/contexts/ProductModalContext'
+import { ProductForm } from '@/components/modules/ProductForm'
 import { api } from '@/lib/api'
-import { formatCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import type { StockSummary, Product, Category, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import {
   Plus, Search, Package, Pencil, Trash2,
@@ -23,23 +23,23 @@ import { ProductPriceRulesModal } from '@/components/modules/ProductPriceRulesMo
 interface Supplier { id: string; name: string }
 
 const STOCK_STATUS_OPTIONS = [
-  { value: 'ok',        label: 'Stock OK' },
-  { value: 'bajo',      label: 'Stock bajo' },
-  { value: 'critico',   label: 'Stock crítico' },
+  { value: 'ok', label: 'Stock OK' },
+  { value: 'bajo', label: 'Stock bajo' },
+  { value: 'critico', label: 'Stock crítico' },
   { value: 'sin_stock', label: 'Sin stock' },
 ]
 
 const SORT_OPTIONS = [
-  { value: 'name',          label: 'Nombre' },
-  { value: 'sku',           label: 'SKU' },
-  { value: 'sell_price',    label: 'Precio venta' },
-  { value: 'cost_price',    label: 'Precio costo' },
+  { value: 'name', label: 'Nombre' },
+  { value: 'sku', label: 'SKU' },
+  { value: 'sell_price', label: 'Precio venta' },
+  { value: 'cost_price', label: 'Precio costo' },
 ]
 
 const selectClass = 'px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-40 disabled:cursor-not-allowed'
 
 type SortField = 'name' | 'sell_price' | 'cost_price' | 'stock_current' | 'sku'
-type SortDir   = 'asc' | 'desc'
+type SortDir = 'asc' | 'desc'
 
 function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortField; sortDir: SortDir }) {
   if (sortBy !== field) return <ArrowUpDown size={11} className="opacity-25 group-hover:opacity-60 transition-opacity" />
@@ -47,23 +47,27 @@ function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortFi
 }
 
 export default function ProductsPage() {
-  const { openProductModal } = useProductModal()
   const [data, setData] = useState<StockSummary[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [page, setPage] = useState(1)
-  const [limit, setLimit] = useState(20)
+  const [limit, setLimit] = useState(15)
   const [sortBy, setSortBy] = useState<SortField>('name')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [loading, setLoading] = useState(true)
   const [showFilters, setShowFilters] = useState(false)
 
+  // Panel / form state
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [formProduct, setFormProduct] = useState<Product | null>(null)
+  const [formStockCurrent, setFormStockCurrent] = useState<number | undefined>(undefined)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
   // Modales
-const [deleteModal, setDeleteModal] = useState(false)
+  const [deleteModal, setDeleteModal] = useState(false)
   const [deleteProduct, setDeleteProduct] = useState<StockSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
-
   const [priceRulesModal, setPriceRulesModal] = useState(false)
   const [priceRulesProduct, setPriceRulesProduct] = useState<Product | null>(null)
 
@@ -82,34 +86,31 @@ const [deleteModal, setDeleteModal] = useState(false)
   const [maxPrice, setMaxPrice] = useState('')
 
   // Refs para acceso síncrono en callbacks
-  const searchRef       = useRef(debouncedSearch)
-  const pageRef         = useRef(page)
-  const limitRef        = useRef(limit)
-  const sortByRef       = useRef(sortBy)
-  const sortDirRef      = useRef(sortDir)
-  const brandRef        = useRef(brandFilter)
-  const supplierRef     = useRef(supplierFilter)
-  const categoryRef     = useRef(categoryFilter)
-  const stockStatusRef  = useRef(stockStatusFilter)
-  const minPriceRef     = useRef(minPrice)
-  const maxPriceRef     = useRef(maxPrice)
-
-  // Detección de barcode: numérico de 8-14 dígitos
-  const isBarcode = (v: string) => /^\d{8,14}$/.test(v.trim())
+  const searchRef = useRef(debouncedSearch)
+  const pageRef = useRef(page)
+  const limitRef = useRef(15)
+  const sortByRef = useRef(sortBy)
+  const sortDirRef = useRef(sortDir)
+  const brandRef = useRef(brandFilter)
+  const supplierRef = useRef(supplierFilter)
+  const categoryRef = useRef(categoryFilter)
+  const stockStatusRef = useRef(stockStatusFilter)
+  const minPriceRef = useRef(minPrice)
+  const maxPriceRef = useRef(maxPrice)
   const fetchProductsRef = useRef<(() => Promise<void>) | undefined>(undefined)
+
+  const isBarcode = (v: string) => /^\d{8,14}$/.test(v.trim())
 
   // Debounce: skip para barcodes (búsqueda directa)
   useEffect(() => {
     if (isBarcode(search)) {
-      // Lookup directo sin debounce
       const trimmed = search.trim()
       api.get<Product>(`/api/products/barcode/${trimmed}`)
         .then(product => {
-          openProductModal(product, () => fetchProductsRef.current?.())
+          openEdit(product)
           setSearch('')
         })
         .catch(() => {
-          // No encontrado — hacer búsqueda normal en tabla
           setDebouncedSearch(trimmed)
         })
       return
@@ -117,14 +118,9 @@ const [deleteModal, setDeleteModal] = useState(false)
     const t = setTimeout(() => setDebouncedSearch(search), search ? 300 : 0)
     return () => clearTimeout(t)
   }, [search])
-  useEffect(() => {
-    const t = setTimeout(() => setMinPrice(minPriceInput), 400)
-    return () => clearTimeout(t)
-  }, [minPriceInput])
-  useEffect(() => {
-    const t = setTimeout(() => setMaxPrice(maxPriceInput), 400)
-    return () => clearTimeout(t)
-  }, [maxPriceInput])
+
+  useEffect(() => { const t = setTimeout(() => setMinPrice(minPriceInput), 400); return () => clearTimeout(t) }, [minPriceInput])
+  useEffect(() => { const t = setTimeout(() => setMaxPrice(maxPriceInput), 400); return () => clearTimeout(t) }, [maxPriceInput])
 
   // Sync refs
   useEffect(() => { searchRef.current = debouncedSearch }, [debouncedSearch])
@@ -139,17 +135,17 @@ const [deleteModal, setDeleteModal] = useState(false)
     setLoading(true)
     try {
       const res = await api.get<PaginatedResponse<StockSummary>>('/api/products', {
-        search:       searchRef.current     || undefined,
-        brand_id:     brandRef.current      || undefined,
-        supplier_id:  supplierRef.current   || undefined,
-        category_id:  categoryRef.current   || undefined,
+        search: searchRef.current || undefined,
+        brand_id: brandRef.current || undefined,
+        supplier_id: supplierRef.current || undefined,
+        category_id: categoryRef.current || undefined,
         stock_status: stockStatusRef.current || undefined,
-        min_price:    minPriceRef.current   ? Number(minPriceRef.current)  : undefined,
-        max_price:    maxPriceRef.current   ? Number(maxPriceRef.current)  : undefined,
-        sort_by:      sortByRef.current,
-        sort_dir:     sortDirRef.current,
-        page:         pageRef.current,
-        limit:        limitRef.current,
+        min_price: minPriceRef.current ? Number(minPriceRef.current) : undefined,
+        max_price: maxPriceRef.current ? Number(maxPriceRef.current) : undefined,
+        sort_by: sortByRef.current,
+        sort_dir: sortDirRef.current,
+        page: pageRef.current,
+        limit: limitRef.current,
       })
       setData(res.data)
       setPagination(res.pagination)
@@ -161,7 +157,6 @@ const [deleteModal, setDeleteModal] = useState(false)
   }, [])
   useEffect(() => { fetchProductsRef.current = fetchProducts }, [fetchProducts])
 
-  // Re-fetch cuando cambian filtros (reset a página 1)
   useEffect(() => {
     pageRef.current = 1
     setPage(1)
@@ -185,9 +180,9 @@ const [deleteModal, setDeleteModal] = useState(false)
 
   const handleSort = useCallback((field: SortField) => {
     const newDir: SortDir = sortByRef.current === field && sortDirRef.current === 'asc' ? 'desc' : 'asc'
-    sortByRef.current  = field
+    sortByRef.current = field
     sortDirRef.current = newDir
-    pageRef.current    = 1
+    pageRef.current = 1
     setSortBy(field)
     setSortDir(newDir)
     setPage(1)
@@ -227,16 +222,33 @@ const [deleteModal, setDeleteModal] = useState(false)
     return path.length ? path.join(' › ') : '—'
   }
 
+  const openEdit = (product: Product, stockCurrent?: number) => {
+    setFormProduct(product)
+    setFormStockCurrent(stockCurrent)
+    setSelectedId(product.id)
+    setPanelOpen(true)
+  }
+
   const handleEdit = async (item: StockSummary) => {
     try {
       const product = await api.get<Product>(`/api/products/${item.id}`)
-      openProductModal(product, () => fetchProductsRef.current?.())
+      openEdit(product, item.stock_current)
     } catch {
       toast.error('Error al cargar el producto')
     }
   }
 
-const handleDelete = async () => {
+  const handleNavigateToProduct = async (id: string) => {
+    try {
+      const product = await api.get<Product>(`/api/products/${id}`)
+      const summary = data.find(d => d.id === id)
+      openEdit(product, summary?.stock_current)
+    } catch {
+      toast.error('Error al cargar el producto')
+    }
+  }
+
+  const handleDelete = async () => {
     if (!deleteProduct) return
     setDeleting(true)
     try {
@@ -244,6 +256,11 @@ const handleDelete = async () => {
       toast.success('Producto eliminado')
       setDeleteModal(false)
       setDeleteProduct(null)
+      if (selectedId === deleteProduct.id) {
+        setPanelOpen(false)
+        setFormProduct(null)
+        setSelectedId(null)
+      }
       fetchProducts()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar')
@@ -253,138 +270,134 @@ const handleDelete = async () => {
   }
 
   const openCreate = () => {
-    openProductModal(null, () => fetchProductsRef.current?.())
+    setFormProduct(null)
+    setSelectedId(null)
+    setPanelOpen(true)
   }
 
-  return (
-    <AppShell>
-      <PageHeader
-        title="Productos"
-        description={`${pagination.total} productos`}
-        action={
-          <Button onClick={openCreate}>
-            <Plus size={15} /> Nuevo producto
-          </Button>
-        }
-      />
+  const closePanel = () => {
+    setPanelOpen(false)
+    setFormProduct(null)
+    setFormStockCurrent(undefined)
+    setSelectedId(null)
+  }
 
-      <div className="p-5 space-y-3">
-        {/* Búsqueda + botón filtros */}
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar por nombre, código de barras o SKU..."
-              className="w-full pl-9 pr-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
-            />
-          </div>
-          <button
-            onClick={() => setShowFilters(v => !v)}
-            className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] border transition-colors ${showFilters || activeFilterCount > 0 ? 'bg-[var(--accent)] border-[var(--accent)] text-white' : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text2)] hover:border-[var(--accent)]'}`}
-          >
-            <Filter size={14} />
-            Filtros
-            {activeFilterCount > 0 && (
-              <span className="bg-white/25 text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-        </div>
+  const tablePanel = (
+    <div className={cn(
+      'flex flex-col overflow-hidden transition-all',
+      panelOpen ? 'hidden md:flex md:w-[30%] md:border-r md:border-[var(--border)]' : 'w-full flex'
+    )}>
+      {/* Header */}
+      <div className="shrink-0">
+        <PageHeader
+          title="Productos"
+          description={`${pagination.total} productos`}
+          action={
+            <Button onClick={openCreate}>
+              <Plus size={15} /> Nuevo producto
+            </Button>
+          }
+        />
 
-        {/* Panel de filtros */}
-        {showFilters && (
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-
-              {/* Categoría con árbol de navegación */}
-              <div className="flex flex-col gap-1 sm:col-span-2 lg:col-span-1">
-                <label className="text-xs font-medium text-[var(--text3)]">Categoría</label>
-                <CategoryTreePicker
-                  categoryMap={categoryMap}
-                  childrenMap={childrenMap}
-                  value={categoryFilter}
-                  onChange={setCategoryFilter}
-                  rootLabel="Todas las categorías"
-                  selectClass={selectClass}
-                />
-              </div>
-
-              {/* Proveedor */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-[var(--text3)]">Proveedor</label>
-                <select value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)} className={selectClass}>
-                  <option value="">Todos</option>
-                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-              </div>
-
-              {/* Marca */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-[var(--text3)]">Marca</label>
-                <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} className={selectClass}>
-                  <option value="">Todas</option>
-                  {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
-              </div>
-
-              {/* Rango precio venta */}
-              <div className="flex flex-col gap-1 sm:col-span-2">
-                <label className="text-xs font-medium text-[var(--text3)]">Precio venta</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    min="0"
-                    value={minPriceInput}
-                    onChange={e => setMinPriceInput(e.target.value)}
-                    placeholder="Mínimo"
-                    className={`${selectClass} flex-1 min-w-0`}
-                  />
-                  <span className="text-xs text-[var(--text3)] flex-shrink-0">—</span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={maxPriceInput}
-                    onChange={e => setMaxPriceInput(e.target.value)}
-                    placeholder="Máximo"
-                    className={`${selectClass} flex-1 min-w-0`}
-                  />
-                </div>
-              </div>
-
-              {/* Ordenar por */}
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-[var(--text3)]">Ordenar por</label>
-                <div className="flex gap-1">
-                  <select
-                    value={sortBy}
-                    onChange={e => handleSort(e.target.value as SortField)}
-                    className={`${selectClass} flex-1 min-w-0`}
-                  >
-                    {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                  <button
-                    onClick={() => handleSort(sortBy)}
-                    title={sortDir === 'asc' ? 'Ascendente' : 'Descendente'}
-                    className="px-2.5 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)] hover:border-[var(--accent)] transition-colors"
-                  >
-                    {sortDir === 'asc' ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-                  </button>
-                </div>
-              </div>
+        {/* Búsqueda + filtros */}
+        <div className="px-5 pt-4 pb-4 space-y-3">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Buscar por nombre, código de barras o SKU..."
+                className="w-full pl-9 pr-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+              />
             </div>
-
-            {activeFilterCount > 0 && (
-              <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">
-                <X size={12} /> Limpiar filtros
-              </button>
-            )}
+            <button
+              onClick={() => setShowFilters(v => !v)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] border transition-colors ${showFilters || activeFilterCount > 0 ? 'bg-[var(--accent)] border-[var(--accent)] text-white' : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text2)] hover:border-[var(--accent)]'}`}
+            >
+              <Filter size={14} />
+              {!panelOpen && 'Filtros'}
+              {activeFilterCount > 0 && (
+                <span className="bg-white/25 text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
           </div>
-        )}
 
-        {/* Tabla */}
+          {showFilters && (
+            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 space-y-3">
+              <div className={cn('grid gap-3', panelOpen ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-4')}>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-[var(--text3)]">Categoría</label>
+                  <CategoryTreePicker
+                    categoryMap={categoryMap}
+                    childrenMap={childrenMap}
+                    value={categoryFilter}
+                    onChange={setCategoryFilter}
+                    rootLabel="Todas las categorías"
+                    selectClass={selectClass}
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-[var(--text3)]">Proveedor</label>
+                  <select value={supplierFilter} onChange={e => setSupplierFilter(e.target.value)} className={selectClass}>
+                    <option value="">Todos</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-[var(--text3)]">Marca</label>
+                  <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} className={selectClass}>
+                    <option value="">Todas</option>
+                    {brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </div>
+
+                {!panelOpen && (
+                  <div className="flex flex-col gap-1 sm:col-span-2">
+                    <label className="text-xs font-medium text-[var(--text3)]">Precio venta</label>
+                    <div className="flex items-center gap-2">
+                      <input type="number" min="0" value={minPriceInput} onChange={e => setMinPriceInput(e.target.value)} placeholder="Mínimo" className={`${selectClass} flex-1 min-w-0`} />
+                      <span className="text-xs text-[var(--text3)] flex-shrink-0">—</span>
+                      <input type="number" min="0" value={maxPriceInput} onChange={e => setMaxPriceInput(e.target.value)} placeholder="Máximo" className={`${selectClass} flex-1 min-w-0`} />
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-[var(--text3)]">Ordenar por</label>
+                  <div className="flex gap-1">
+                    <select value={sortBy} onChange={e => handleSort(e.target.value as SortField)} className={`${selectClass} flex-1 min-w-0`}>
+                      {SORT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    <button
+                      onClick={() => handleSort(sortBy)}
+                      title={sortDir === 'asc' ? 'Ascendente' : 'Descendente'}
+                      className="px-2.5 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text2)] hover:border-[var(--accent)] transition-colors"
+                    >
+                      {sortDir === 'asc' ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+
+              {activeFilterCount > 0 && (
+                <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">
+                  <X size={12} /> Limpiar filtros
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Tabla — scrollable */}
+      <div className={cn('overflow-y-auto', panelOpen ? 'px-3 pb-4' : 'px-5 pb-5')}>
         {loading ? <TableSkeleton rows={12} /> : data.length === 0 ? (
           <EmptyState
             icon={Package}
@@ -395,126 +408,146 @@ const handleDelete = async () => {
         ) : (
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm table-fixed">
                 <thead>
                   <tr className="border-b border-[var(--border)]">
-                    <th
-                      onClick={() => handleSort('name')}
-                      className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group"
-                    >
-                      <div className="flex items-center gap-1">
-                        Producto
-                        <SortIcon field="name" sortBy={sortBy} sortDir={sortDir} />
-                      </div>
+                    <th onClick={() => handleSort('name')} className="w-[30%] text-left px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group">
+                      <div className="flex items-center gap-1">Producto <SortIcon field="name" sortBy={sortBy} sortDir={sortDir} /></div>
                     </th>
-                    <th
-                      onClick={() => handleSort('sku')}
-                      className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group hidden lg:table-cell"
-                    >
-                      <div className="flex items-center gap-1">
-                        SKU
-                        <SortIcon field="sku" sortBy={sortBy} sortDir={sortDir} />
-                      </div>
-                    </th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Categoría</th>
-                    <th
-                      onClick={() => handleSort('cost_price')}
-                      className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group hidden sm:table-cell"
-                    >
-                      <div className="flex items-center justify-end gap-1">
-                        P. Costo
-                        <SortIcon field="cost_price" sortBy={sortBy} sortDir={sortDir} />
-                      </div>
-                    </th>
-                    <th
-                      onClick={() => handleSort('sell_price')}
-                      className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group"
-                    >
-                      <div className="flex items-center justify-end gap-1">
-                        P. Venta
-                        <SortIcon field="sell_price" sortBy={sortBy} sortDir={sortDir} />
-                      </div>
-                    </th>
-                    <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Stock</th>
-                    <th className="px-4 py-3" />
+                    {!panelOpen && (
+                      <th onClick={() => handleSort('sku')} className="w-[9%] text-left px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group hidden lg:table-cell">
+                        <div className="flex items-center gap-1">SKU <SortIcon field="sku" sortBy={sortBy} sortDir={sortDir} /></div>
+                      </th>
+                    )}
+                    {!panelOpen && <th className="w-[22%] text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Categoría</th>}
+                    {!panelOpen && (
+                      <th onClick={() => handleSort('cost_price')} className="w-[13%] text-right px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group hidden sm:table-cell">
+                        <div className="flex items-center justify-end gap-1">P. Costo <SortIcon field="cost_price" sortBy={sortBy} sortDir={sortDir} /></div>
+                      </th>
+                    )}
+                    {!panelOpen && (
+                      <th onClick={() => handleSort('sell_price')} className="w-[13%] text-right px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group">
+                        <div className="flex items-center justify-end gap-1">P. Venta <SortIcon field="sell_price" sortBy={sortBy} sortDir={sortDir} /></div>
+                      </th>
+                    )}
+                    {!panelOpen && <th className="w-[7%] text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Stock</th>}
+                    <th className="w-[6%] px-4 py-3" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
-                  {data.map(product => (
-                    <tr
-                      key={product.id}
-                      onClick={() => handleEdit(product)}
-                      className="hover:bg-[var(--surface2)] transition-colors cursor-pointer group"
-                    >
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-[var(--text)]">{product.name}</p>
-                        {product.barcode && (
-                          <p className="text-xs mono text-[var(--text3)]">{product.barcode}</p>
+                  {data.map(product => {
+                    const isSelected = selectedId === product.id
+                    return (
+                      <tr
+                        key={product.id}
+                        onClick={() => handleEdit(product)}
+                        className={cn(
+                          'hover:bg-[var(--surface2)] transition-colors cursor-pointer group',
+                          isSelected && 'bg-[var(--accent)]/8 hover:bg-[var(--accent)]/12'
                         )}
-                      </td>
-                      <td className="px-4 py-3 hidden lg:table-cell">
-                        {product.sku
-                          ? <span className="mono text-xs text-[var(--text2)]">{product.sku}</span>
-                          : <span className="text-xs text-[var(--text3)]">—</span>
-                        }
-                      </td>
-                      <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
-                        {getCategoryPath(product.category_id, categoryMap)}
-                      </td>
-                      <td className="px-4 py-3 text-right mono text-[var(--text2)] hidden sm:table-cell">
-                        {formatCurrency(product.cost_price)}
-                      </td>
-                      <td className="px-4 py-3 text-right mono font-medium text-[var(--text)]">
-                        {formatCurrency(product.use_fixed_sell_price ? product.sell_price : (product.default_list_price ?? product.sell_price))}
-                      </td>
-                      <td className="px-4 py-3 text-right hidden sm:table-cell">
-                        {(() => {
-                          const available = product.stock_available ?? (product.stock_current - (product.stock_reserved ?? 0))
-                          const color = available <= 0 ? 'text-[var(--danger,#ef4444)]' : available <= 5 ? 'text-[var(--warning,#f59e0b)]' : 'text-[var(--text)]'
-                          return <span className={`mono font-medium text-sm ${color}`}>{available}</span>
-                        })()}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={e => { e.stopPropagation(); handleEdit(product) }}
-                            title="Editar"
-                            className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            onClick={async e => {
-                              e.stopPropagation()
-                              const p = await api.get<Product>(`/api/products/${product.id}`)
-                              setPriceRulesProduct(p)
-                              setPriceRulesModal(true)
-                            }}
-                            title="Reglas de precio"
-                            className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
-                          >
-                            <Tag size={14} />
-                          </button>
-                          <button
-                            onClick={e => { e.stopPropagation(); setDeleteProduct(product); setDeleteModal(true) }}
-                            title="Eliminar"
-                            className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                      >
+                        <td className="px-4 py-3 min-w-0">
+                          <p className={cn('font-medium truncate', isSelected ? 'text-[var(--accent)]' : 'text-[var(--text)]')} title={product.name}>{product.name}</p>
+                          {!panelOpen && product.barcode && (
+                            <p className="text-xs mono text-[var(--text3)] truncate">{product.barcode}</p>
+                          )}
+                        </td>
+                        {!panelOpen && (
+                          <td className="px-4 py-3 hidden lg:table-cell">
+                            {product.sku ? <span className="mono text-xs text-[var(--text2)]">{product.sku}</span> : <span className="text-xs text-[var(--text3)]">—</span>}
+                          </td>
+                        )}
+                        {!panelOpen && (
+                          <td className="px-4 py-3 hidden md:table-cell min-w-0">
+                            <span className="block truncate text-[var(--text2)] text-sm" title={getCategoryPath(product.category_id, categoryMap)}>
+                              {getCategoryPath(product.category_id, categoryMap)}
+                            </span>
+                          </td>
+                        )}
+                        {!panelOpen && (
+                          <td className="px-4 py-3 text-right mono text-[var(--text2)] whitespace-nowrap hidden sm:table-cell">
+                            {formatCurrency(product.cost_price)}
+                          </td>
+                        )}
+                        {!panelOpen && (
+                          <td className="px-4 py-3 text-right mono font-medium text-[var(--text)] whitespace-nowrap">
+                            {formatCurrency(product.use_fixed_sell_price ? product.sell_price : (product.default_list_price ?? product.sell_price))}
+                          </td>
+                        )}
+                        {!panelOpen && (
+                          <td className="px-4 py-3 text-right hidden sm:table-cell">
+                            {(() => {
+                              const available = product.stock_available ?? (product.stock_current - (product.stock_reserved ?? 0))
+                              const color = available <= 0 ? 'text-[var(--danger,#ef4444)]' : available <= 5 ? 'text-[var(--warning,#f59e0b)]' : 'text-[var(--text)]'
+                              return <span className={`mono font-medium text-sm ${color}`}>{available}</span>
+                            })()}
+                          </td>
+                        )}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={e => { e.stopPropagation(); handleEdit(product) }}
+                              title="Editar"
+                              className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              onClick={async e => {
+                                e.stopPropagation()
+                                const p = await api.get<Product>(`/api/products/${product.id}`)
+                                setPriceRulesProduct(p)
+                                setPriceRulesModal(true)
+                              }}
+                              title="Reglas de precio"
+                              className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
+                            >
+                              <Tag size={14} />
+                            </button>
+                            <button
+                              onClick={e => { e.stopPropagation(); setDeleteProduct(product); setDeleteModal(true) }}
+                              title="Eliminar"
+                              className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
-            <Pagination pagination={pagination} onPageChange={handlePageChange} onLimitChange={handleLimitChange} />
+            <Pagination pagination={pagination} onPageChange={handlePageChange} />
           </div>
         )}
       </div>
+    </div>
+  )
 
-<ConfirmDialog
+  return (
+    <AppShell>
+      <div className="flex h-full overflow-hidden">
+
+        {tablePanel}
+
+        {/* Panel derecho — formulario */}
+        {panelOpen && (
+          <div className="w-full md:flex-1 overflow-y-auto">
+            <ProductForm
+              product={formProduct}
+              stockCurrent={formStockCurrent}
+              onSaved={() => fetchProductsRef.current?.()}
+              onClose={closePanel}
+              onNavigateToProduct={handleNavigateToProduct}
+            />
+          </div>
+        )}
+
+      </div>
+
+      <ConfirmDialog
         open={deleteModal}
         onClose={() => { setDeleteModal(false); setDeleteProduct(null) }}
         onConfirm={handleDelete}
@@ -530,7 +563,6 @@ const handleDelete = async () => {
         onClose={() => { setPriceRulesModal(false); setPriceRulesProduct(null) }}
         product={priceRulesProduct}
       />
-
     </AppShell>
   )
 }

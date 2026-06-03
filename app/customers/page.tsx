@@ -10,9 +10,10 @@ import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { TableSkeleton } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { CustomerModal } from '@/components/modules/CustomerModal'
+import { CustomerForm } from '@/components/modules/CustomerForm'
 import { PageLoader } from '@/components/ui/Spinner'
 import { api } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import type { PaginatedResponse, Pagination as PaginationType } from '@/types'
 import { Plus, Users, Search, Pencil, Trash2, ChevronUp, ChevronDown, ChevronsUpDown, MapPin, Tag, Printer } from 'lucide-react'
 import { toast } from 'sonner'
@@ -579,6 +580,11 @@ const TABS: { id: TabId; label: string }[] = [
 export default function CustomersPage() {
   const [activeTab, setActiveTab] = useState<TabId>('customers')
 
+  // ── Panel state ──
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [formCustomer, setFormCustomer] = useState<CustomerSummary | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+
   // ── Clientes state ──
   const [data, setData] = useState<CustomerSummary[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
@@ -594,8 +600,6 @@ export default function CustomersPage() {
   const [filterZones, setFilterZones] = useState<DeliveryZone[]>([])
   const [filterCategories, setFilterCategories] = useState<ClientCategory[]>([])
 
-  const [customerModal, setCustomerModal] = useState(false)
-  const [editCustomer, setEditCustomer] = useState<CustomerSummary | null>(null)
   const [deleteModal, setDeleteModal] = useState(false)
   const [deleteCustomer, setDeleteCustomer] = useState<CustomerSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
@@ -641,10 +645,28 @@ export default function CustomersPage() {
     api.get<ClientCategory[]>('/api/client-categories').then(setFilterCategories).catch(() => {})
   }, [])
 
-  const openCreateModal = useCallback(() => {
-    setEditCustomer(null)
-    setCustomerModal(true)
+  const openCreate = useCallback(() => {
+    setFormCustomer(null)
+    setSelectedId(null)
+    setPanelOpen(true)
   }, [])
+
+  const openEdit = useCallback((customer: CustomerSummary) => {
+    setFormCustomer(customer)
+    setSelectedId(customer.id)
+    setPanelOpen(true)
+  }, [])
+
+  const closePanel = useCallback(() => {
+    setPanelOpen(false)
+    setFormCustomer(null)
+    setSelectedId(null)
+  }, [])
+
+  const handleTabChange = (tab: TabId) => {
+    setActiveTab(tab)
+    if (tab !== 'customers') closePanel()
+  }
 
   const openPrintModal = useCallback(async () => {
     setPrintZoneFilter('')
@@ -706,6 +728,7 @@ export default function CustomersPage() {
       toast.success('Cliente desactivado')
       setDeleteModal(false)
       setDeleteCustomer(null)
+      if (selectedId === deleteCustomer.id) closePanel()
       fetchCustomers()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al desactivar')
@@ -869,7 +892,7 @@ export default function CustomersPage() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== 'n' || !e.altKey || customerModal || activeTab !== 'customers') return
+      if (e.key.toLowerCase() !== 'n' || !e.altKey || panelOpen || activeTab !== 'customers') return
       const target = e.target as HTMLElement | null
       const isTypingTarget =
         target instanceof HTMLInputElement ||
@@ -878,66 +901,78 @@ export default function CustomersPage() {
         !!target?.closest('[contenteditable="true"]')
       if (isTypingTarget) return
       e.preventDefault()
-      openCreateModal()
+      openCreate()
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [customerModal, openCreateModal, activeTab])
+  }, [panelOpen, openCreate, activeTab])
 
-  return (
-    <AppShell>
-      <PageHeader
-        title="Clientes"
-        description={activeTab === 'customers' ? `${pagination.total} clientes registrados` : activeTab === 'zones' ? 'Zonas de entrega' : 'Categorías de clientes'}
-        action={
-          activeTab === 'customers'
-            ? (
-              <div className="flex items-center gap-2">
-                <Button variant="secondary" onClick={openPrintModal}><Printer size={15} /> Imprimir clientes</Button>
-                <Button onClick={openCreateModal}><Plus size={15} /> Nuevo cliente</Button>
-              </div>
-            )
-            : undefined
-        }
-      />
+  const tablePanel = (
+    <div className={cn(
+      'flex flex-col overflow-hidden transition-all',
+      panelOpen ? 'hidden md:flex md:w-[30%] md:border-r md:border-[var(--border)]' : 'w-full flex'
+    )}>
+      {/* Header */}
+      <div className="shrink-0">
+        <PageHeader
+          title="Clientes"
+          description={
+            activeTab === 'customers'
+              ? `${pagination.total} clientes`
+              : activeTab === 'zones'
+                ? 'Zonas de entrega'
+                : 'Categorías de clientes'
+          }
+          action={
+            activeTab === 'customers'
+              ? (
+                <div className="flex items-center gap-2">
+                  {!panelOpen && (
+                    <Button variant="secondary" onClick={openPrintModal}><Printer size={15} /> Imprimir</Button>
+                  )}
+                  <Button onClick={openCreate}><Plus size={15} /> Nuevo cliente</Button>
+                </div>
+              )
+              : undefined
+          }
+        />
 
-      <div className="px-5 pt-4 pb-0">
-        <div className="flex gap-1 border-b border-[var(--border)]">
-          {TABS.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
-                activeTab === tab.id
-                  ? 'border-[var(--accent)] text-[var(--accent)]'
-                  : 'border-transparent text-[var(--text2)] hover:text-[var(--text)]'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+        {/* Tabs */}
+        <div className={cn('pt-4 pb-0', panelOpen ? 'px-3' : 'px-5')}>
+          <div className="flex gap-1 border-b border-[var(--border)]">
+            {TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => handleTabChange(tab.id)}
+                className={`px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                  activeTab === tab.id
+                    ? 'border-[var(--accent)] text-[var(--accent)]'
+                    : 'border-transparent text-[var(--text2)] hover:text-[var(--text)]'
+                }`}
+              >
+                {panelOpen ? tab.label.split(' ')[0] : tab.label}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
 
-      <div className="p-5 space-y-4">
-
-        {/* Tab: Clientes */}
+        {/* Filtros — solo en tab clientes */}
         {activeTab === 'customers' && (
-          <>
+          <div className={cn('pt-3 pb-3 space-y-2', panelOpen ? 'px-3' : 'px-5')}>
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex items-center gap-1 rounded-full bg-[var(--surface2)] border border-[var(--border)] p-0.5">
                 {(['all', 'active', 'inactive'] as StatusFilter[]).map(s => (
                   <button
                     key={s}
                     onClick={() => setStatusFilter(s)}
-                    className={`px-3 py-1 text-xs rounded-full transition-colors ${statusFilter === s ? 'bg-[var(--accent)] text-white' : 'text-[var(--text2)] hover:text-[var(--text)]'}`}
+                    className={`px-2 py-1 text-xs rounded-full transition-colors ${statusFilter === s ? 'bg-[var(--accent)] text-white' : 'text-[var(--text2)] hover:text-[var(--text)]'}`}
                   >
-                    {s === 'all' ? 'Todos' : s === 'active' ? 'Activos' : 'Inactivos'}
+                    {s === 'all' ? 'Todos' : s === 'active' ? 'Activos' : 'Inact.'}
                   </button>
                 ))}
               </div>
 
-              {filterZones.length > 0 && (
+              {!panelOpen && filterZones.length > 0 && (
                 <select
                   value={zoneFilter}
                   onChange={e => setZoneFilter(e.target.value)}
@@ -948,7 +983,7 @@ export default function CustomersPage() {
                 </select>
               )}
 
-              {filterCategories.length > 0 && (
+              {!panelOpen && filterCategories.length > 0 && (
                 <select
                   value={categoryFilter}
                   onChange={e => setCategoryFilter(e.target.value)}
@@ -959,23 +994,32 @@ export default function CustomersPage() {
                 </select>
               )}
 
-              <div className="relative ml-auto min-w-[130px]">
+              <div className="relative flex-1 min-w-[100px]">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
                 <input
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  placeholder="Buscar por nombre, SKU..."
+                  placeholder="Buscar..."
                   className="w-full pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
                 />
               </div>
             </div>
+          </div>
+        )}
+      </div>
 
+      {/* Contenido — scrollable */}
+      <div className={cn('overflow-y-auto flex-1', panelOpen ? 'px-3 pb-4' : 'px-5 pb-5')}>
+
+        {/* Tab: Clientes */}
+        {activeTab === 'customers' && (
+          <>
             {loading ? <TableSkeleton rows={10} /> : data.length === 0 ? (
               <EmptyState
                 icon={Users}
                 title="Sin clientes"
                 description="Agregá clientes para gestionar sus datos y cuentas corrientes."
-                action={<Button onClick={openCreateModal}><Plus size={15} /> Nuevo cliente</Button>}
+                action={<Button onClick={openCreate}><Plus size={15} /> Nuevo cliente</Button>}
               />
             ) : (
               <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
@@ -988,14 +1032,16 @@ export default function CustomersPage() {
                             Cliente <SortIcon field="full_name" />
                           </button>
                         </th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">
-                          <button onClick={() => toggleSort('customer_code')} className="flex items-center hover:text-[var(--text)] transition-colors">
-                            SKU <SortIcon field="customer_code" />
-                          </button>
-                        </th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Documento</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Teléfono</th>
-                        <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Email</th>
+                        {!panelOpen && (
+                          <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">
+                            <button onClick={() => toggleSort('customer_code')} className="flex items-center hover:text-[var(--text)] transition-colors">
+                              SKU <SortIcon field="customer_code" />
+                            </button>
+                          </th>
+                        )}
+                        {!panelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Documento</th>}
+                        {!panelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Teléfono</th>}
+                        {!panelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Email</th>}
                         <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">
                           <button onClick={() => toggleSort('is_active')} className="flex items-center mx-auto hover:text-[var(--text)] transition-colors">
                             Estado <SortIcon field="is_active" />
@@ -1005,66 +1051,84 @@ export default function CustomersPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--border)]">
-                      {sortedData.map(customer => (
-                        <tr
-                          key={customer.id}
-                          onClick={() => { setEditCustomer(customer); setCustomerModal(true) }}
-                          className="hover:bg-[var(--surface2)] transition-colors group cursor-pointer"
-                        >
-                          <td className="px-4 py-3">
-                            <p className="font-medium text-[var(--text)]">{customer.full_name}</p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              {customer.delivery_zone_name && (
-                                <span className="flex items-center gap-1 text-xs text-[var(--text3)]">
-                                  <span
-                                    className="w-2 h-2 rounded-full inline-block flex-shrink-0"
-                                    style={{ backgroundColor: customer.delivery_zone_color ?? 'var(--text3)' }}
-                                  />
-                                  {customer.delivery_zone_name}
-                                </span>
+                      {sortedData.map(customer => {
+                        const isSelected = selectedId === customer.id
+                        return (
+                          <tr
+                            key={customer.id}
+                            onClick={() => openEdit(customer)}
+                            className={cn(
+                              'hover:bg-[var(--surface2)] transition-colors group cursor-pointer',
+                              isSelected && 'bg-[var(--accent)]/8 hover:bg-[var(--accent)]/12'
+                            )}
+                          >
+                            <td className="px-4 py-3 min-w-0">
+                              <p className={cn('font-medium truncate', isSelected ? 'text-[var(--accent)]' : 'text-[var(--text)]')}>
+                                {customer.full_name}
+                              </p>
+                              {!panelOpen && (
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  {customer.delivery_zone_name && (
+                                    <span className="flex items-center gap-1 text-xs text-[var(--text3)]">
+                                      <span
+                                        className="w-2 h-2 rounded-full inline-block flex-shrink-0"
+                                        style={{ backgroundColor: customer.delivery_zone_color ?? 'var(--text3)' }}
+                                      />
+                                      {customer.delivery_zone_name}
+                                    </span>
+                                  )}
+                                  {customer.client_category_name && (
+                                    <span className="text-xs text-[var(--text3)]">{customer.client_category_name}</span>
+                                  )}
+                                </div>
                               )}
-                              {customer.client_category_name && (
-                                <span className="text-xs text-[var(--text3)]">{customer.client_category_name}</span>
-                              )}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 hidden sm:table-cell mono text-xs text-[var(--text2)]">
-                            {customer.customer_code ?? '—'}
-                          </td>
-                          <td className="px-4 py-3 mono text-[var(--text2)] text-xs hidden md:table-cell">
-                            {customer.document ?? '—'}
-                          </td>
-                          <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
-                            {customer.phone ?? '—'}
-                          </td>
-                          <td className="px-4 py-3 text-[var(--text2)] hidden lg:table-cell">
-                            {customer.email ?? '—'}
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <Badge variant={customer.is_active ? 'success' : 'default'}>
-                              {customer.is_active ? 'Activo' : 'Inactivo'}
-                            </Badge>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                              <button
-                                onClick={e => { e.stopPropagation(); setEditCustomer(customer); setCustomerModal(true) }}
-                                title="Editar"
-                                className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
-                              >
-                                <Pencil size={14} />
-                              </button>
-                              <button
-                                onClick={e => { e.stopPropagation(); setDeleteCustomer(customer); setDeleteModal(true) }}
-                                title="Eliminar"
-                                className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            {!panelOpen && (
+                              <td className="px-4 py-3 hidden sm:table-cell mono text-xs text-[var(--text2)]">
+                                {customer.customer_code ?? '—'}
+                              </td>
+                            )}
+                            {!panelOpen && (
+                              <td className="px-4 py-3 mono text-[var(--text2)] text-xs hidden md:table-cell">
+                                {customer.document ?? '—'}
+                              </td>
+                            )}
+                            {!panelOpen && (
+                              <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
+                                {customer.phone ?? '—'}
+                              </td>
+                            )}
+                            {!panelOpen && (
+                              <td className="px-4 py-3 text-[var(--text2)] hidden lg:table-cell">
+                                {customer.email ?? '—'}
+                              </td>
+                            )}
+                            <td className="px-4 py-3 text-center">
+                              <Badge variant={customer.is_active ? 'success' : 'default'}>
+                                {customer.is_active ? 'Activo' : 'Inactivo'}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={e => { e.stopPropagation(); openEdit(customer) }}
+                                  title="Editar"
+                                  className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
+                                >
+                                  <Pencil size={14} />
+                                </button>
+                                <button
+                                  onClick={e => { e.stopPropagation(); setDeleteCustomer(customer); setDeleteModal(true) }}
+                                  title="Desactivar"
+                                  className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1081,13 +1145,27 @@ export default function CustomersPage() {
         {activeTab === 'categories' && <ClientCategoriesTab />}
 
       </div>
+    </div>
+  )
 
-      <CustomerModal
-        open={customerModal}
-        onClose={() => { setCustomerModal(false); setEditCustomer(null) }}
-        onSaved={fetchCustomers}
-        customer={editCustomer}
-      />
+  return (
+    <AppShell>
+      <div className="flex h-full overflow-hidden">
+
+        {tablePanel}
+
+        {/* Panel derecho — formulario */}
+        {panelOpen && (
+          <div className="w-full md:flex-1 overflow-y-auto">
+            <CustomerForm
+              customer={formCustomer}
+              onSaved={fetchCustomers}
+              onClose={closePanel}
+            />
+          </div>
+        )}
+
+      </div>
 
       <ConfirmDialog
         open={deleteModal}
@@ -1103,7 +1181,6 @@ export default function CustomersPage() {
       <Modal open={printModal} onClose={() => setPrintModal(false)} title="Imprimir listado de clientes" size="sm">
         <div className="space-y-5">
 
-          {/* Filtros */}
           <div className="space-y-3">
             <p className="text-xs font-semibold text-[var(--text3)] uppercase tracking-wide">Filtros</p>
             <div className="grid grid-cols-1 gap-3">
@@ -1147,7 +1224,6 @@ export default function CustomersPage() {
             </div>
           </div>
 
-          {/* Columnas */}
           <div className="space-y-3 pt-3 border-t border-[var(--border)]">
             <p className="text-xs font-semibold text-[var(--text3)] uppercase tracking-wide">Columnas a incluir</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-2">
