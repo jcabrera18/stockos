@@ -1,36 +1,32 @@
 'use client'
 import Image from 'next/image'
+import Link from 'next/link'
 import { useRef, useEffect } from 'react'
-import { Star } from 'lucide-react'
+import { Handshake, MessageSquare, Tag, ArrowRight, MessageCircle } from 'lucide-react'
 
-const METRICS = [
-  { value: '+40%', label: 'más velocidad en caja' },
-  { value: '−65%', label: 'errores de stock' },
-  { value: '3.000+', label: 'tickets por semana' },
-  { value: '< 1h', label: 'para empezar a operar' },
+// Hechos verdaderos de la oferta de acceso anticipado — nada inventado.
+const FACTS = [
+  { value: '1 a 1', label: 'onboarding con vos, por WhatsApp' },
+  { value: 'Directo', label: 'hablás con quien hace el producto' },
+  { value: 'Sin', label: 'permanencia: cancelás cuando quieras' },
+  { value: '< 1h', label: 'para dejarlo configurado y operar' },
 ]
 
-const TESTIMONIALS = [
+const REASONS = [
   {
-    initials: 'MR',
-    name: 'Martín Rodríguez',
-    role: 'Dueño · Supermercado El Progreso',
-    location: 'Rosario, Santa Fe',
-    text: 'Antes tardábamos 3 minutos por cliente en caja. Hoy el escaneo va solo y la caja cierra sola al final del día. El ahorro de tiempo es real y se nota en la facturación.',
+    Icon: Handshake,
+    title: 'Te acompañamos uno a uno',
+    text: 'No te tiramos un sistema y chau. Te ayudamos a importar tus productos, a migrar del Excel y a configurar tus cajas, paso a paso por WhatsApp.',
   },
   {
-    initials: 'CF',
-    name: 'Claudia Ferreira',
-    role: 'Gerente de Operaciones · Autoservicio Familiar',
-    location: 'CABA',
-    text: 'Tenemos 2 locales y siempre perdíamos horas cruzando datos a mano. Con StockOS veo los dos en tiempo real desde el celular. No más planillas de Excel.',
+    Icon: MessageSquare,
+    title: 'Hablás con quien lo construye',
+    text: 'Tu uso real moldea el producto. Pedís una función o ves algo que falta, y lo discutimos en serio. Acá tu voz pesa de verdad.',
   },
   {
-    initials: 'DA',
-    name: 'Diego Alonso',
-    role: 'Dueño · Ferretería Central',
-    location: 'Córdoba Capital',
-    text: 'La gestión de stock entre el local y el depósito era un caos. Ahora todo entra al sistema en el momento y los errores de inventario bajaron a casi cero.',
+    Icon: Tag,
+    title: 'Tarifa de fundador',
+    text: 'Por entrar temprano arrancás con precio de lanzamiento, y lo mantenés mientras sigas siendo cliente. Sin sorpresas cuando crezcamos.',
   },
 ]
 
@@ -54,22 +50,31 @@ export function SocialProof() {
   }, [])
 
   return (
-    <section ref={ref} id="testimonials" className="py-28 px-6 border-t border-gray-100 bg-white">
+    <section ref={ref} id="early-access" className="py-28 px-6 border-t border-gray-100 bg-white">
       <div className="max-w-6xl mx-auto">
 
-        {/* Metrics + illustration banner */}
-        <div className="flex flex-col md:flex-row items-end gap-8 mb-20 rounded-3xl border border-gray-200 bg-gray-50 overflow-hidden section-fade">
+        {/* Honest early-access banner */}
+        <div className="flex flex-col md:flex-row items-center gap-8 mb-20 rounded-3xl border border-green-100 bg-gradient-to-br from-green-50 to-emerald-50/50 overflow-hidden section-fade">
           <div className="flex-1 p-8 md:p-12">
-            <p className="text-[#16a34a] text-xs font-semibold uppercase tracking-[0.15em] mb-6">
-              Resultados reales
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-green-200 bg-white text-green-700 text-xs font-medium mb-5 tracking-wide">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+              Acceso anticipado
+            </div>
+            <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 leading-tight mb-4">
+              Estamos arrancando con un{' '}
+              <span className="text-[#16a34a]">grupo chico de comercios</span>
+            </h2>
+            <p className="text-gray-600 text-[15px] leading-relaxed mb-7 max-w-md">
+              Si entrás ahora, no sos un número de cliente. Te acompañamos personalmente
+              y lo que usás en el día a día define lo que construimos. Sé de los primeros.
             </p>
-            <div className="grid grid-cols-2 gap-4">
-              {METRICS.map((m) => (
-                <div key={m.label} className="bg-white rounded-2xl border border-gray-200 p-5 shadow-sm">
-                  <p className="text-3xl font-bold text-[#16a34a] font-mono leading-none mb-2">
+            <div className="grid grid-cols-2 gap-3">
+              {FACTS.map((m) => (
+                <div key={m.label} className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm">
+                  <p className="text-2xl font-bold text-[#16a34a] font-mono leading-none mb-2">
                     {m.value}
                   </p>
-                  <p className="text-gray-500 text-sm leading-snug">{m.label}</p>
+                  <p className="text-gray-500 text-[12.5px] leading-snug">{m.label}</p>
                 </div>
               ))}
             </div>
@@ -87,43 +92,50 @@ export function SocialProof() {
         </div>
 
         {/* Header */}
-        <div className="text-center mb-12 section-fade" style={{ transitionDelay: '240ms' }}>
+        <div className="text-center mb-12 section-fade" style={{ transitionDelay: '120ms' }}>
           <p className="text-[#16a34a] text-xs font-semibold uppercase tracking-[0.15em] mb-4">
-            Testimonios
+            Por qué entrar ahora
           </p>
           <h2 className="text-3xl sm:text-4xl font-bold text-gray-900">
-            Lo que dicen los que ya lo usan
+            Lo que ganás siendo de los primeros
           </h2>
         </div>
 
-        {/* Cards */}
+        {/* Reasons */}
         <div className="grid md:grid-cols-3 gap-4">
-          {TESTIMONIALS.map((t, i) => (
+          {REASONS.map((r, i) => (
             <div
-              key={t.name}
+              key={r.title}
               className="flex flex-col p-6 rounded-2xl border border-gray-200 bg-white hover:shadow-md transition-all duration-200 section-fade"
-              style={{ transitionDelay: `${300 + i * 75}ms` }}
+              style={{ transitionDelay: `${180 + i * 75}ms` }}
             >
-              <div className="flex gap-0.5 mb-5">
-                {Array.from({ length: 5 }).map((_, j) => (
-                  <Star key={j} size={13} className="fill-amber-400 text-amber-400" />
-                ))}
+              <div className="w-11 h-11 rounded-xl bg-green-50 border border-green-200 flex items-center justify-center mb-5">
+                <r.Icon size={19} className="text-[#16a34a]" />
               </div>
-              <p className="text-gray-600 text-[13.5px] leading-relaxed flex-1 mb-6">
-                &ldquo;{t.text}&rdquo;
-              </p>
-              <div className="flex items-center gap-3 pt-4 border-t border-gray-100">
-                <div className="w-9 h-9 rounded-full bg-green-50 border border-green-200 flex items-center justify-center text-[#16a34a] text-xs font-bold shrink-0">
-                  {t.initials}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-gray-900 text-sm font-medium truncate">{t.name}</p>
-                  <p className="text-gray-400 text-xs truncate">{t.role}</p>
-                  <p className="text-gray-400 text-xs">{t.location}</p>
-                </div>
-              </div>
+              <h3 className="text-gray-900 font-semibold text-[16px] mb-2.5">{r.title}</h3>
+              <p className="text-gray-500 text-[13.5px] leading-relaxed">{r.text}</p>
             </div>
           ))}
+        </div>
+
+        {/* CTA */}
+        <div className="mt-12 flex flex-col sm:flex-row items-center justify-center gap-3 section-fade" style={{ transitionDelay: '420ms' }}>
+          <Link
+            href="/register"
+            className="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-[#16a34a] hover:bg-[#15803d] text-white rounded-xl font-semibold text-[15px] transition-all duration-200 hover:shadow-[0_8px_24px_rgba(22,163,74,0.35)] active:scale-[0.98]"
+          >
+            Quiero ser de los primeros
+            <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
+          </Link>
+          <a
+            href="https://wa.me/5493438445203?text=Hola!%20Quiero%20sumarme%20al%20acceso%20anticipado%20de%20StockOS."
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center gap-2 px-7 py-3.5 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-600 hover:text-gray-900 rounded-xl font-medium text-[15px] transition-all duration-200"
+          >
+            <MessageCircle size={14} />
+            Hablar por WhatsApp
+          </a>
         </div>
       </div>
     </section>

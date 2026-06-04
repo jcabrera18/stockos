@@ -2,13 +2,17 @@ import type { Metadata } from 'next'
 import { Navbar } from './components/Navbar'
 import { Hero } from './components/Hero'
 import { Problems } from './components/Problems'
+import { HowItWorks } from './components/HowItWorks'
 import { Features } from './components/Features'
+import { Showcase } from './components/Showcase'
+import { Comparison } from './components/Comparison'
 import { Differentials } from './components/Differentials'
 import { SocialProof } from './components/SocialProof'
 import { Pricing } from './components/Pricing'
 import { CTA } from './components/CTA'
 import { FAQ } from './components/FAQ'
 import { Footer } from './components/Footer'
+import { WhatsAppButton } from './components/WhatsAppButton'
 
 export const metadata: Metadata = {
   title: 'StockOS — Sistema de gestión para retail en Argentina y LATAM',
@@ -54,13 +58,17 @@ export default function LandingPage() {
       <Navbar />
       <Hero />
       <Problems />
+      <HowItWorks />
       <Features />
+      <Showcase />
+      <Comparison />
       <Differentials />
       <SocialProof />
       <Pricing />
       <CTA />
       <FAQ />
       <Footer />
+      <WhatsAppButton />
     </div>
   )
 }

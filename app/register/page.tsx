@@ -617,6 +617,14 @@ export default function RegisterPage() {
         return
       }
 
+      // Disparar el mail de confirmación de cuenta (no bloqueante).
+      // El usuario ya entra al sistema; el banner insiste hasta que confirme.
+      supabase.auth.resend({
+        type: 'signup',
+        email: merged.email.trim().toLowerCase(),
+        options: { emailRedirectTo: `${window.location.origin}/login` },
+      }).catch(() => {})
+
       setAnimKey(k => k + 1)
       setStep(3)
       setTimeout(() => router.replace('/dashboard'), 3000)

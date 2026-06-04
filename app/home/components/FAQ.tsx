@@ -9,7 +9,7 @@ const FAQS = [
   },
   {
     q: '¿Cuánto cuesta StockOS?',
-    a: 'Los planes se ajustan según la cantidad de sucursales y cajas. Podés empezar gratis para probarlo sin compromisos. Para conocer los valores actualizados escribinos al mail o al chat y te armamos una propuesta según tu operación.',
+    a: 'Tenés los precios completos acá arriba, sin letras chicas. Los 3 planes incluyen todo —ARCA, listas de precio, promociones, compras y cuenta corriente—; lo único que cambia es cuántas sucursales, cajas y depósitos manejás. Probás 30 días gratis, sin tarjeta, y te ayudamos a migrar tu catálogo del Excel.',
   },
   {
     q: '¿Funciona para facturación ARCA?',

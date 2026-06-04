@@ -6,9 +6,10 @@ import { BottomNav } from './BottomNav'
 import { ShoppingCart } from 'lucide-react'
 import { AuthProvider, useAuthContext } from '@/contexts/AuthContext'
 import { SubscriptionBanner } from './SubscriptionBanner'
+import { EmailConfirmBanner } from './EmailConfirmBanner'
 
 // Rutas que manejan su propio layout full-screen (no necesitan shell)
-const NO_SHELL = ['/login', '/register', '/pos', '/home']
+const NO_SHELL = ['/login', '/register', '/forgot-password', '/reset-password', '/pos', '/home']
 
 const POS_CART_KEY = 'stockos_pos_cart'
 
@@ -75,6 +76,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <BottomNav />
       <POSBadge />
       <SubscriptionBanner />
+      <EmailConfirmBanner />
     </div>
   )
 }

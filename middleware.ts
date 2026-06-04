@@ -24,7 +24,17 @@ export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
   // Rutas públicas — no verificar
-  if (pathname === '/login' || pathname === '/register' || pathname === '/home' || pathname.startsWith('/home/')) return response
+  // /reset-password debe ser pública: al abrir el link del email Supabase crea
+  // una sesión de recovery y, sin esto, el middleware lo trataría como logueado
+  // y lo redirigiría a su home antes de poder cambiar la contraseña.
+  if (
+    pathname === '/login' ||
+    pathname === '/register' ||
+    pathname === '/forgot-password' ||
+    pathname === '/reset-password' ||
+    pathname === '/home' ||
+    pathname.startsWith('/home/')
+  ) return response
 
   try {
     const supabase = createServerClient(
