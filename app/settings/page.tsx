@@ -80,6 +80,7 @@ export default function SettingsPage() {
   const [afipEnv, setAfipEnv]               = useState('homo')
   const [afipCert, setAfipCert]             = useState('')
   const [afipKey, setAfipKey]               = useState('')
+  const [monoLimit, setMonoLimit]           = useState('')
   const [savingAfip, setSavingAfip]         = useState(false)
 
   const [newUser, setNewUser] = useState({
@@ -115,7 +116,25 @@ export default function SettingsPage() {
     setIvaCondition(user.business?.iva_condition ?? 'MO')
     setPtoVenta(user.business?.afip_punto_venta ? String(user.business.afip_punto_venta) : '')
     setAfipEnv(user.business?.afip_environment ?? 'homo')
+    setMonoLimit(user.business?.monotributo_limite_anual != null ? String(user.business.monotributo_limite_anual) : '')
   }, [user])
+
+  // Acepta el formato de AFIP ($46.211.109,37) y lo convierte a un número plano (46211109.37).
+  // Punto = separador de miles, coma = decimal. También admite que el usuario escriba "68000000".
+  const normalizeMonoLimit = (raw: string): string => {
+    let s = raw.replace(/[^\d.,]/g, '')
+    if (s.includes('.') && s.includes(',')) {
+      // formato AR completo: puntos de miles + coma decimal
+      s = s.replace(/\./g, '').replace(',', '.')
+    } else if (s.includes(',')) {
+      // solo coma → decimal
+      s = s.replace(',', '.')
+    } else if (s.includes('.')) {
+      // solo puntos → separadores de miles
+      s = s.replace(/\./g, '')
+    }
+    return s
+  }
 
   const handleSaveBiz = async () => {
     setSavingBiz(true)
@@ -201,6 +220,7 @@ export default function SettingsPage() {
         iva_condition:    ivaCondition,
         afip_punto_venta: ptoVenta ? Number(ptoVenta) : null,
         afip_environment: afipEnv,
+        monotributo_limite_anual: monoLimit ? Number(monoLimit) : null,
       }
       if (afipCert.trim()) payload.afip_cert = afipCert.trim()
       if (afipKey.trim())  payload.afip_key  = afipKey.trim()
@@ -441,6 +461,35 @@ export default function SettingsPage() {
                       />
                     </div>
                   </div>
+
+                  {ivaCondition === 'MO' && (
+                    <div className="border-t border-[var(--border)] pt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                      <div>
+                        <p className="text-xs text-[var(--text3)] mb-1">Tope anual de facturación (monotributo)</p>
+                        <p className="text-xs text-[var(--text3)]">
+                          Límite de tu categoría actual. Se usa en Finanzas → Facturación para avisarte qué tan cerca estás de recategorizarte. Dejalo vacío para ocultar el medidor.{' '}
+                          <a
+                            href="https://www.afip.gob.ar/monotributo/categorias.asp"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[var(--accent)] hover:underline"
+                          >
+                            Ver categorías en AFIP →
+                          </a>
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-[var(--text3)] mb-1">Ingresos brutos</p>
+                        <Input
+                          type="text"
+                          inputMode="decimal"
+                          value={monoLimit}
+                          onChange={e => setMonoLimit(normalizeMonoLimit(e.target.value))}
+                          placeholder="Ej: 68000000 o 46.211.109,37"
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>

@@ -1,17 +1,20 @@
 import { cn } from '@/lib/utils'
 import type { LucideIcon } from 'lucide-react'
+import { ArrowUpRight, ArrowDownRight } from 'lucide-react'
 
 interface StatCardProps {
-  title:     string
-  value:     string | number
-  subtitle?: string
-  icon?:     LucideIcon
-  trend?:    { value: number; label: string }
-  accent?:   boolean
+  title:      string
+  value:      string | number
+  valueTitle?: string   // valor exacto para el tooltip nativo (hover)
+  subtitle?:  string
+  icon?:      LucideIcon
+  trend?:     { value: number; label: string }
+  delta?:     { value: number; label: string }  // comparativo con flecha
+  accent?:    boolean
   className?: string
 }
 
-export function StatCard({ title, value, subtitle, icon: Icon, trend, accent, className }: StatCardProps) {
+export function StatCard({ title, value, valueTitle, subtitle, icon: Icon, trend, delta, accent, className }: StatCardProps) {
   return (
     <div className={cn(
       'bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4',
@@ -21,14 +24,27 @@ export function StatCard({ title, value, subtitle, icon: Icon, trend, accent, cl
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-[var(--text3)] mb-1 truncate">{title}</p>
-          <p className={cn(
-            'text-2xl font-semibold mono tabular-nums truncate',
-            accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'
-          )}>
+          <p
+            title={valueTitle}
+            className={cn(
+              'text-2xl font-semibold mono tabular-nums truncate',
+              accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'
+            )}
+          >
             {value}
           </p>
+          {delta && (
+            <div className={cn(
+              'flex items-center gap-1 mt-1.5 text-xs font-medium',
+              delta.value >= 0 ? 'text-[var(--accent)]' : 'text-[var(--danger)]'
+            )}>
+              {delta.value >= 0 ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
+              <span className="mono">{delta.value >= 0 ? '+' : ''}{delta.value}%</span>
+              <span className="text-[var(--text3)] font-normal">{delta.label}</span>
+            </div>
+          )}
           {subtitle && (
-            <p className="text-xs text-[var(--text3)] mt-1">{subtitle}</p>
+            <p className="text-xs text-[var(--text3)] mt-1 truncate">{subtitle}</p>
           )}
           {trend && (
             <p className={cn(

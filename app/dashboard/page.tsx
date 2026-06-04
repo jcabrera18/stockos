@@ -7,11 +7,12 @@ import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { StatCardSkeleton, CardListSkeleton } from '@/components/ui/Skeleton'
 import { api } from '@/lib/api'
-import { formatCurrency, formatDateTime, getPaymentMethodLabel, getPeriodDates, getLocalWeekStart } from '@/lib/utils'
-import { TrendingUp, AlertTriangle, DollarSign, CreditCard, RefreshCw } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
+import { formatCurrency, formatCompactCurrency, formatAxisCurrency, formatNumber, formatDateTime, getPaymentMethodLabel, getPeriodDates, getLocalWeekStart } from '@/lib/utils'
+import { TrendingUp, AlertTriangle, DollarSign, CreditCard, RefreshCw, Receipt, Package, Store } from 'lucide-react'
 import {
-  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  Bar, ComposedChart, Area, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 
 // ─── Tipos ────────────────────────────────────────────────
@@ -21,10 +22,22 @@ interface RecentSale    { id: string; total: number; payment_method: string; cre
 interface CriticalItem  { id: string; name: string; stock_current: number; stock_min: number; supplier_name: string | null }
 interface WeekComp      { this_week: number; prev_week: number; diff_pct: number; this_count: number; prev_count: number }
 interface DailySale     { sale_date: string; total_sales: number; total_revenue: number; gross_margin: number }
+interface TopProduct    { name: string; revenue: number; units: number }
+interface TopCategory   { label: string; revenue: number }
+interface BranchSale    { branch_id: string; branch_name: string; revenue_today: number; sales_today: number }
 
 interface DashboardData {
   today_revenue:       number
   today_sales:         number
+  today_units:         number
+  yesterday_revenue:   number
+  yesterday_sales:     number
+  dod_pct:             number
+  today_margin:        number
+  today_margin_pct:    number
+  has_cost_data:       boolean
+  ticket_avg:          number
+  inventory_value:     number
   week_comparison:     WeekComp
   low_stock_alerts:    number
   accounts_receivable: number
@@ -32,6 +45,9 @@ interface DashboardData {
   payment_methods:     PaymentMethod[]
   recent_sales:        RecentSale[]
   critical_stock:      CriticalItem[]
+  top_products:        TopProduct[]
+  top_categories:      TopCategory[]
+  sales_by_branch:     BranchSale[]
 }
 
 // ─── Constantes ───────────────────────────────────────────
@@ -41,7 +57,7 @@ const PAYMENT_LABELS: Record<string, string> = {
   credito: 'Crédito', qr: 'QR', mixto: 'Mixto', cuenta_corriente: 'Cta. Cte.',
 }
 
-// ─── Tooltip hora ──────────────────────────────────────────
+// ─── Tooltips ──────────────────────────────────────────────
 const HourlyTooltip = ({ active, payload, label }: { active?: boolean; payload?: { value: number }[]; label?: string }) => {
   if (!active || !payload?.length) return null
   return (
@@ -52,47 +68,47 @@ const HourlyTooltip = ({ active, payload, label }: { active?: boolean; payload?:
   )
 }
 
-// ─── Comparativo card ──────────────────────────────────────
-const ComparisonCard = ({
-  title, current, prev, currentCount, prevCount, diffPct, labelCurrent, labelPrev,
-}: {
-  title: string; current: number; prev: number; currentCount: number; prevCount: number;
-  diffPct: number; labelCurrent: string; labelPrev: string;
-}) => (
-  <Card>
-    <CardHeader><CardTitle>{title}</CardTitle></CardHeader>
-    <div className="space-y-3">
-      <div>
-        <p className="text-xs text-[var(--text3)] mb-0.5">{labelCurrent}</p>
-        <p className="text-2xl font-bold mono text-[var(--accent)] truncate">{formatCurrency(current)}</p>
-        <p className="text-xs text-[var(--text3)] mt-0.5">{currentCount} ventas</p>
-      </div>
-      <div className="flex items-start justify-between pt-3 border-t border-[var(--border)]">
-        <div>
-          <p className="text-xs text-[var(--text3)]">{labelPrev}</p>
-          <p className="text-sm font-semibold mono text-[var(--text2)] truncate">{formatCurrency(prev)}</p>
-          <p className="text-xs text-[var(--text3)]">{prevCount} ventas</p>
+// ─── Mini ranking con barra (top productos / categorías) ───
+function RankList({ rows, max, sub }: {
+  rows: { key: string; label: string; revenue: number; sub?: string }[]
+  max: number
+  sub?: boolean
+}) {
+  if (rows.length === 0)
+    return <p className="text-sm text-[var(--text3)] text-center py-6">Sin datos esta semana</p>
+  return (
+    <div className="space-y-2.5">
+      {rows.map((r, i) => (
+        <div key={r.key}>
+          <div className="flex items-center justify-between gap-2 text-xs mb-1">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-[var(--text3)] mono w-3 flex-shrink-0">{i + 1}</span>
+              <span className="text-[var(--text2)] truncate">{r.label}</span>
+            </div>
+            <span className="mono font-semibold text-[var(--text)] flex-shrink-0" title={formatCurrency(r.revenue)}>
+              {formatCompactCurrency(r.revenue)}
+            </span>
+          </div>
+          <div className="h-1.5 bg-[var(--surface2)] rounded-full overflow-hidden">
+            <div className="h-full rounded-full transition-all"
+              style={{ width: `${max > 0 ? Math.max(r.revenue / max * 100, 2) : 0}%`, background: CHART_COLORS[i % CHART_COLORS.length] }} />
+          </div>
+          {sub && r.sub && <p className="text-[10px] text-[var(--text3)] mt-0.5 ml-5">{r.sub}</p>}
         </div>
-        <span className={`text-sm font-bold mono ${diffPct >= 0 ? 'text-[var(--accent)]' : 'text-[var(--danger)]'}`}>
-          {diffPct >= 0 ? '+' : ''}{diffPct}%
-        </span>
-      </div>
-      <div className="h-1.5 bg-[var(--surface2)] rounded-full overflow-hidden">
-        <div className="h-full rounded-full transition-all" style={{
-          width: `${prev > 0 ? Math.min(current / prev * 100, 150) : 100}%`,
-          background: diffPct >= 0 ? 'var(--accent)' : 'var(--danger)',
-        }} />
-      </div>
+      ))}
     </div>
-  </Card>
-)
+  )
+}
 
 // ═══════════════════════════════════════════════════════════
 export default function DashboardPage() {
-  const [data,       setData]       = useState<DashboardData | null>(null)
+  const { user } = useAuth()
+  const stockEnabled = user?.business?.stock_enabled ?? true
+
+  const [data,        setData]        = useState<DashboardData | null>(null)
   const [salesLast30, setSalesLast30] = useState<DailySale[]>([])
-  const [loading,    setLoading]    = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+  const [loading,     setLoading]     = useState(true)
+  const [refreshing,  setRefreshing]  = useState(false)
 
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -118,19 +134,42 @@ export default function DashboardPage() {
     return () => clearInterval(id)
   }, [fetchAll])
 
-  const hourlyData  = useMemo(() => data ? [...data.sales_by_hour]  : [], [data])
+  // v_sales_by_hour agrupa por hora UTC → rotamos a la hora local del navegador
+  // (Σ por hora-del-día: una venta en hora UTC H siempre cae en hora local H+offset).
+  const hourlyData = useMemo(() => {
+    const offset = -new Date().getTimezoneOffset() / 60 // -3 en AR
+    const local = Array.from({ length: 24 }, (_, h) => ({
+      hour: h, label: `${String(h).padStart(2, '0')}:00`, total_sales: 0, total_revenue: 0,
+    }))
+    for (const r of data?.sales_by_hour ?? []) {
+      const lh = (((r.hour + offset) % 24) + 24) % 24
+      local[lh].total_sales   += r.total_sales
+      local[lh].total_revenue += r.total_revenue
+    }
+    return local
+  }, [data])
   const paymentData = useMemo(() => data ? [...data.payment_methods] : [], [data])
   const dailyData   = useMemo(() => salesLast30.map(d => ({
     ...d,
-    label: d.sale_date.slice(5).replace('-', '/'), // "MM/DD" → "16/04"
+    label: d.sale_date.slice(5).replace('-', '/'),
   })), [salesLast30])
   const paymentColorMap = useMemo(() =>
     Object.fromEntries(paymentData.map((pm, i) => [pm.method, CHART_COLORS[i % CHART_COLORS.length]])),
   [paymentData])
-  const peakHour    = useMemo(
+  const peakHour = useMemo(
     () => hourlyData.reduce((max, h) => h.total_revenue > (max?.total_revenue ?? 0) ? h : max, hourlyData[0]),
     [hourlyData],
   )
+
+  const topProductRows = useMemo(() => (data?.top_products ?? []).map(p => ({
+    key: p.name, label: p.name, revenue: p.revenue, sub: `${formatNumber(p.units)} u.`,
+  })), [data])
+  const topCategoryRows = useMemo(() => (data?.top_categories ?? []).map(c => ({
+    key: c.label, label: c.label, revenue: c.revenue,
+  })), [data])
+  const maxProductRev  = useMemo(() => Math.max(1, ...topProductRows.map(r => r.revenue)), [topProductRows])
+  const maxCategoryRev = useMemo(() => Math.max(1, ...topCategoryRows.map(r => r.revenue)), [topCategoryRows])
+  const maxBranchRev   = useMemo(() => Math.max(1, ...(data?.sales_by_branch ?? []).map(b => b.revenue_today)), [data])
 
   const today = new Date().toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' })
 
@@ -142,17 +181,17 @@ export default function DashboardPage() {
         <div className="h-3.5 w-32 rounded bg-[var(--surface2)] animate-pulse mt-1.5 opacity-60" />
       </div>
       <div className="p-5 space-y-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)}
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+          {Array.from({ length: 5 }).map((_, i) => <StatCardSkeleton key={i} />)}
         </div>
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
           <div className="xl:col-span-2 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4">
             <div className="h-4 w-40 rounded bg-[var(--surface2)] animate-pulse mb-3" />
-            <div className="h-44 rounded bg-[var(--surface2)] animate-pulse opacity-50" />
+            <div className="h-52 rounded bg-[var(--surface2)] animate-pulse opacity-50" />
           </div>
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4">
             <div className="h-4 w-32 rounded bg-[var(--surface2)] animate-pulse mb-3" />
-            <div className="h-44 rounded bg-[var(--surface2)] animate-pulse opacity-50" />
+            <div className="h-52 rounded bg-[var(--surface2)] animate-pulse opacity-50" />
           </div>
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
@@ -162,8 +201,11 @@ export default function DashboardPage() {
     </AppShell>
   )
 
-  // ════════════════════════════════════════════════════════
-  const wc = data?.week_comparison
+  const hasMultiBranch = (data?.sales_by_branch?.length ?? 0) > 1
+
+  // Fila inferior: tráfico por hora (siempre) + sucursal (si multi) + stock (si stock_enabled)
+  const bottomCount = 1 + (hasMultiBranch ? 1 : 0) + (stockEnabled ? 1 : 0)
+  const bottomColsClass = bottomCount >= 3 ? 'lg:grid-cols-3' : bottomCount === 2 ? 'lg:grid-cols-2' : 'lg:grid-cols-1'
 
   return (
     <AppShell>
@@ -184,193 +226,108 @@ export default function DashboardPage() {
       <div className="p-5 space-y-6">
 
         {/* ══ KPIs ═══════════════════════════════════════════════ */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className={`grid grid-cols-2 md:grid-cols-3 ${stockEnabled ? 'xl:grid-cols-5' : 'xl:grid-cols-4'} gap-3`}>
           <StatCard
             title="Ventas hoy"
-            value={formatCurrency(data?.today_revenue ?? 0)}
-            subtitle={`${data?.today_sales ?? 0} transacciones`}
+            value={formatCompactCurrency(data?.today_revenue ?? 0)}
+            valueTitle={formatCurrency(data?.today_revenue ?? 0)}
+            subtitle={`${data?.today_sales ?? 0} ventas · ${formatNumber(data?.today_units ?? 0)} u.`}
+            delta={data ? { value: data.dod_pct, label: 'vs ayer' } : undefined}
             icon={DollarSign}
             accent
           />
           <StatCard
-            title="Esta semana"
-            value={formatCurrency(wc?.this_week ?? 0)}
-            subtitle={wc ? `${wc.diff_pct >= 0 ? '+' : ''}${wc.diff_pct}% vs semana anterior` : undefined}
+            title="Ganancia hoy"
+            value={data?.has_cost_data ? formatCompactCurrency(data?.today_margin ?? 0) : '—'}
+            valueTitle={data?.has_cost_data ? formatCurrency(data?.today_margin ?? 0) : 'Sin costos cargados'}
+            subtitle={data?.has_cost_data ? `${data?.today_margin_pct ?? 0}% de margen` : 'Cargá costos de productos'}
             icon={TrendingUp}
           />
           <StatCard
-            title="Alertas stock"
-            value={data?.low_stock_alerts ?? 0}
-            subtitle="Bajo mínimo"
-            icon={AlertTriangle}
-            className={(data?.low_stock_alerts ?? 0) > 0 ? 'border-[var(--danger)] bg-[var(--danger-subtle)]' : ''}
+            title="Ticket promedio"
+            value={formatCompactCurrency(data?.ticket_avg ?? 0)}
+            valueTitle={formatCurrency(data?.ticket_avg ?? 0)}
+            subtitle="Por venta · hoy"
+            icon={Receipt}
           />
+          {stockEnabled && (
+            <StatCard
+              title="Alertas stock"
+              value={data?.low_stock_alerts ?? 0}
+              subtitle="Productos bajo mínimo"
+              icon={AlertTriangle}
+              className={(data?.low_stock_alerts ?? 0) > 0 ? 'border-[var(--danger)] bg-[var(--danger-subtle)]' : ''}
+            />
+          )}
           <StatCard
             title="Cuentas corrientes"
-            value={formatCurrency(data?.accounts_receivable ?? 0)}
-            subtitle="Saldo pendiente"
+            value={formatCompactCurrency(data?.accounts_receivable ?? 0)}
+            valueTitle={formatCurrency(data?.accounts_receivable ?? 0)}
+            subtitle="Saldo por cobrar"
             icon={CreditCard}
             className={(data?.accounts_receivable ?? 0) > 0 ? 'border-amber-500/30 bg-amber-500/5' : ''}
           />
         </div>
 
-        {/* ══ Gráficos ════════════════════════════════════════════ */}
+        {/* ══ Héroe: tendencia 30 días + acción requerida ═════════ */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
 
-          {/* Tráfico por hora */}
+          {/* Tendencia 30 días */}
           <Card className="xl:col-span-2 flex flex-col">
             <CardHeader>
-              <CardTitle>Tráfico por hora</CardTitle>
-              {peakHour && peakHour.total_revenue > 0 && (
-                <span className="text-xs text-[var(--text3)]">Pico: {peakHour.label}</span>
-              )}
+              <CardTitle>Tendencia · últimos 30 días</CardTitle>
+              <span className="text-xs text-[var(--text3)]">Facturación y margen bruto</span>
             </CardHeader>
-            {hourlyData.every(h => h.total_revenue === 0) ? (
-              <p className="text-sm text-[var(--text3)] text-center py-8">Sin datos esta semana</p>
+            {dailyData.length === 0 ? (
+              <p className="text-sm text-[var(--text3)] text-center py-12">Sin datos en el período</p>
             ) : (
-              <div className="flex-1 min-h-0" style={{ minHeight: 160 }}>
+              <div style={{ height: 260 }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={hourlyData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                  <ComposedChart data={dailyData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                    <defs>
+                      <linearGradient id="revGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%"   stopColor="#16a34a" stopOpacity={0.25} />
+                        <stop offset="100%" stopColor="#16a34a" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                    <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--text3)' }} interval={2} />
-                    <YAxis tick={{ fontSize: 9, fill: 'var(--text3)' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} width={35} />
-                    <Tooltip content={<HourlyTooltip />} />
-                    <Bar dataKey="total_revenue" fill="#16a34a" radius={[3, 3, 0, 0]} />
-                  </BarChart>
+                    <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--text3)' }} interval={4} />
+                    <YAxis tick={{ fontSize: 9, fill: 'var(--text3)' }} tickFormatter={v => formatAxisCurrency(v)} width={44} />
+                    <Tooltip
+                      content={({ active, payload, label }) => {
+                        if (!active || !payload?.length) return null
+                        return (
+                          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 shadow-xl text-xs space-y-1">
+                            <p className="text-[var(--text3)] mb-1">{label}</p>
+                            {payload.map((p) => (
+                              <p key={p.dataKey as string} style={{ color: p.color }} className="font-semibold">
+                                {p.dataKey === 'total_revenue' ? 'Ventas' : 'Margen'}: {formatCurrency(Number(p.value ?? 0))}
+                              </p>
+                            ))}
+                          </div>
+                        )
+                      }}
+                    />
+                    <Area type="monotone" dataKey="total_revenue" stroke="#16a34a" strokeWidth={2} fill="url(#revGradient)" dot={false} activeDot={{ r: 4 }} />
+                    <Line type="monotone" dataKey="gross_margin"  stroke="#0ea5e9" strokeWidth={2} dot={false} activeDot={{ r: 4 }} strokeDasharray="4 2" />
+                  </ComposedChart>
                 </ResponsiveContainer>
               </div>
             )}
-          </Card>
-
-          {/* Métodos de pago */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Métodos de pago</CardTitle>
-              <span className="text-xs text-[var(--text3)]">Últimos 7 días</span>
-            </CardHeader>
-            {paymentData.length === 0 ? (
-              <p className="text-sm text-[var(--text3)] text-center py-8">Sin datos</p>
-            ) : (
-              <div className="flex flex-col gap-3">
-                <div className="flex justify-center">
-                  <div style={{ width: 140, height: 140 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={paymentData} dataKey="total" nameKey="method"
-                          cx="50%" cy="50%" innerRadius={35} outerRadius={60} paddingAngle={2}
-                        >
-                          {paymentData.map((pm) => (
-                            <Cell key={pm.method} fill={paymentColorMap[pm.method]} />
-                          ))}
-                        </Pie>
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (!active || !payload?.length) return null
-                            return (
-                              <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 shadow-xl text-xs">
-                                <p className="text-[var(--text3)] mb-1">{PAYMENT_LABELS[(payload[0] as { name?: string })?.name ?? ''] ?? payload[0]?.name}</p>
-                                <p className="font-semibold text-[var(--accent)]">{formatCurrency(Number(payload[0]?.value ?? 0))}</p>
-                              </div>
-                            )
-                          }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  {(() => {
-                    const pmTotal = paymentData.reduce((a, p) => a + p.total, 0)
-                    return [...paymentData].sort((a, b) => b.total - a.total).map((pm, i) => {
-                      const pct = pmTotal > 0 ? Math.round(pm.total / pmTotal * 100) : 0
-                      return (
-                        <div key={pm.method}>
-                          <div className="flex justify-between text-xs mb-0.5">
-                            <div className="flex items-center gap-1.5">
-                              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: paymentColorMap[pm.method] }} />
-                              <span className="text-[var(--text2)]">{PAYMENT_LABELS[pm.method] ?? pm.method}</span>
-                            </div>
-                            <span className="mono text-[var(--text3)]">{pct}%</span>
-                          </div>
-                          <div className="h-1 bg-[var(--surface2)] rounded-full overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${pct}%`, background: paymentColorMap[pm.method] }} />
-                          </div>
-                        </div>
-                      )
-                    })
-                  })()}
-                </div>
-              </div>
-            )}
-          </Card>
-        </div>
-
-        {/* ══ Evolución 30 días ═══════════════════════════════════ */}
-        {dailyData.length > 0 && (
-          <Card className="flex flex-col">
-            <CardHeader>
-              <CardTitle>Ventas últimos 30 días</CardTitle>
-              <span className="text-xs text-[var(--text3)]">Facturación y margen bruto</span>
-            </CardHeader>
-            <div style={{ height: 220 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={dailyData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                  <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--text3)' }} interval={4} />
-                  <YAxis tick={{ fontSize: 9, fill: 'var(--text3)' }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} width={38} />
-                  <Tooltip
-                    content={({ active, payload, label }) => {
-                      if (!active || !payload?.length) return null
-                      return (
-                        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 shadow-xl text-xs space-y-1">
-                          <p className="text-[var(--text3)] mb-1">{label}</p>
-                          {payload.map((p) => (
-                            <p key={p.dataKey as string} style={{ color: p.color }} className="font-semibold">
-                              {p.dataKey === 'total_revenue' ? 'Ventas' : 'Margen'}: {formatCurrency(Number(p.value ?? 0))}
-                            </p>
-                          ))}
-                        </div>
-                      )
-                    }}
-                  />
-                  <Legend
-                    formatter={(value) => (
-                      <span className="text-xs text-[var(--text2)]">
-                        {value === 'total_revenue' ? 'Ventas' : 'Margen bruto'}
-                      </span>
-                    )}
-                  />
-                  <Line type="monotone" dataKey="total_revenue" stroke="#16a34a" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-                  <Line type="monotone" dataKey="gross_margin"  stroke="#0ea5e9" strokeWidth={2} dot={false} activeDot={{ r: 4 }} strokeDasharray="4 2" />
-                </LineChart>
-              </ResponsiveContainer>
+            <div className="flex items-center gap-4 mt-3 pt-3 border-t border-[var(--border)] text-xs text-[var(--text3)]">
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-[#16a34a]" /> Ventas</span>
+              <span className="flex items-center gap-1.5"><span className="w-2.5 h-0.5 bg-[#0ea5e9]" /> Margen bruto</span>
             </div>
           </Card>
-        )}
 
-        {/* ══ Operativo ═══════════════════════════════════════════ */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-
-          {/* Comparativo semana */}
-          {wc && (
-            <ComparisonCard
-              title="Esta semana vs anterior"
-              current={wc.this_week}   prev={wc.prev_week}
-              currentCount={wc.this_count} prevCount={wc.prev_count}
-              diffPct={wc.diff_pct}
-              labelCurrent="Esta semana" labelPrev="Semana anterior"
-            />
-          )}
-
-          {/* Ventas recientes */}
-          <Card padding="none">
+          {/* Ventas recientes — al lado del gráfico de ventas */}
+          <Card padding="none" className="flex flex-col">
             <CardHeader className="px-4 pt-4 pb-3">
               <CardTitle>Ventas recientes</CardTitle>
             </CardHeader>
-            <div className="divide-y divide-[var(--border)]">
+            <div className="divide-y divide-[var(--border)] flex-1">
               {(data?.recent_sales ?? []).length === 0 ? (
-                <p className="text-sm text-[var(--text3)] text-center py-6 px-4">Sin ventas aún</p>
+                <p className="text-sm text-[var(--text3)] text-center py-8 px-4">Sin ventas aún</p>
               ) : (data?.recent_sales ?? []).map(sale => (
                 <div key={sale.id} className="flex items-center justify-between px-4 py-3">
                   <div>
@@ -382,30 +339,171 @@ export default function DashboardPage() {
               ))}
             </div>
           </Card>
+        </div>
 
-          {/* Stock crítico */}
-          <Card padding="none">
-            <CardHeader className="px-4 pt-4 pb-3">
-              <CardTitle>Stock crítico</CardTitle>
+        {/* ══ Qué se vende: top productos / categorías / pagos ════ */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Top productos</CardTitle>
+              <span className="text-xs text-[var(--text3)]">7 días · por facturación</span>
             </CardHeader>
-            <div className="divide-y divide-[var(--border)]">
-              {(data?.critical_stock ?? []).length === 0 ? (
-                <p className="text-sm text-[var(--text3)] text-center py-6 px-4">Todo el stock en orden ✓</p>
-              ) : (data?.critical_stock ?? []).map(item => (
-                <div key={item.id} className="flex items-center justify-between px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-[var(--text)] truncate">{item.name}</p>
-                    <p className="text-xs text-[var(--text3)]">{item.supplier_name ?? 'Sin proveedor'}</p>
-                  </div>
-                  <div className="text-right flex-shrink-0 ml-2">
-                    <p className="text-sm font-bold mono text-[var(--danger)]">{item.stock_current}</p>
-                    <p className="text-xs text-[var(--text3)]">mín: {item.stock_min}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <RankList rows={topProductRows} max={maxProductRev} sub />
           </Card>
 
+          <Card>
+            <CardHeader>
+              <CardTitle>Top categorías</CardTitle>
+              <span className="text-xs text-[var(--text3)]">7 días · por facturación</span>
+            </CardHeader>
+            <RankList rows={topCategoryRows} max={maxCategoryRev} />
+          </Card>
+
+          {/* Métodos de pago — donut + leyenda (sin barras redundantes) */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Métodos de pago</CardTitle>
+              <span className="text-xs text-[var(--text3)]">Últimos 7 días</span>
+            </CardHeader>
+            {paymentData.length === 0 ? (
+              <p className="text-sm text-[var(--text3)] text-center py-8">Sin datos</p>
+            ) : (
+              <div className="flex items-center gap-4">
+                <div style={{ width: 120, height: 120 }} className="flex-shrink-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={paymentData} dataKey="total" nameKey="method" cx="50%" cy="50%" innerRadius={32} outerRadius={56} paddingAngle={2}>
+                        {paymentData.map((pm) => <Cell key={pm.method} fill={paymentColorMap[pm.method]} />)}
+                      </Pie>
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (!active || !payload?.length) return null
+                          return (
+                            <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 shadow-xl text-xs">
+                              <p className="text-[var(--text3)] mb-1">{PAYMENT_LABELS[(payload[0] as { name?: string })?.name ?? ''] ?? payload[0]?.name}</p>
+                              <p className="font-semibold text-[var(--accent)]">{formatCurrency(Number(payload[0]?.value ?? 0))}</p>
+                            </div>
+                          )
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  {(() => {
+                    const pmTotal = paymentData.reduce((a, p) => a + p.total, 0)
+                    return [...paymentData].sort((a, b) => b.total - a.total).map((pm) => {
+                      const pct = pmTotal > 0 ? Math.round(pm.total / pmTotal * 100) : 0
+                      return (
+                        <div key={pm.method} className="flex items-center justify-between gap-2 text-xs">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: paymentColorMap[pm.method] }} />
+                            <span className="text-[var(--text2)] truncate">{PAYMENT_LABELS[pm.method] ?? pm.method}</span>
+                          </div>
+                          <span className="mono text-[var(--text3)] flex-shrink-0">{pct}%</span>
+                        </div>
+                      )
+                    })
+                  })()}
+                </div>
+              </div>
+            )}
+          </Card>
+        </div>
+
+        {/* ══ Operación: hora / sucursal / stock ══════════════════ */}
+        <div className={`grid grid-cols-1 ${bottomColsClass} gap-3`}>
+
+          {/* Tráfico por hora */}
+          <Card className="flex flex-col">
+            <CardHeader>
+              <CardTitle>Tráfico por hora</CardTitle>
+              {peakHour && peakHour.total_revenue > 0 && (
+                <span className="text-xs text-[var(--text3)]">Pico: {peakHour.label}</span>
+              )}
+            </CardHeader>
+            {hourlyData.every(h => h.total_revenue === 0) ? (
+              <p className="text-sm text-[var(--text3)] text-center py-8 flex-1">Sin datos esta semana</p>
+            ) : (
+              <div className="flex-1 min-h-0" style={{ minHeight: 180 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={hourlyData} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize: 9, fill: 'var(--text3)' }} interval={2} />
+                    <YAxis tick={{ fontSize: 9, fill: 'var(--text3)' }} tickFormatter={v => formatAxisCurrency(v)} width={40} />
+                    <Tooltip content={<HourlyTooltip />} />
+                    <Bar dataKey="total_revenue" fill="#16a34a" radius={[3, 3, 0, 0]} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Card>
+
+          {/* Ventas por sucursal (solo si hay más de una) */}
+          {hasMultiBranch && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Ventas por sucursal</CardTitle>
+                <span className="text-xs text-[var(--text3)]">Hoy</span>
+              </CardHeader>
+              <div className="space-y-3">
+                {(data?.sales_by_branch ?? []).map((b, i) => (
+                  <div key={b.branch_id}>
+                    <div className="flex items-center justify-between gap-2 text-xs mb-1">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <Store size={12} className="text-[var(--text3)] flex-shrink-0" />
+                        <span className="text-[var(--text2)] truncate">{b.branch_name}</span>
+                      </div>
+                      <span className="mono font-semibold text-[var(--text)] flex-shrink-0" title={formatCurrency(b.revenue_today)}>
+                        {formatCompactCurrency(b.revenue_today)}
+                      </span>
+                    </div>
+                    <div className="h-1.5 bg-[var(--surface2)] rounded-full overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${maxBranchRev > 0 ? Math.max(b.revenue_today / maxBranchRev * 100, 2) : 0}%`, background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                    </div>
+                    <p className="text-[10px] text-[var(--text3)] mt-0.5 ml-5">{b.sales_today} ventas</p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
+          {/* Stock: crítico + capital inmovilizado (solo si controla inventario) */}
+          {stockEnabled && (
+            <Card padding="none" className="flex flex-col">
+              <CardHeader className="px-4 pt-4 pb-3">
+                <CardTitle>Stock crítico</CardTitle>
+                {(data?.low_stock_alerts ?? 0) > 0 && (
+                  <Badge variant="danger">{data?.low_stock_alerts} alertas</Badge>
+                )}
+              </CardHeader>
+              <div className="divide-y divide-[var(--border)] flex-1">
+                {(data?.critical_stock ?? []).length === 0 ? (
+                  <p className="text-sm text-[var(--text3)] text-center py-8 px-4">Todo el stock en orden ✓</p>
+                ) : (data?.critical_stock ?? []).map(item => (
+                  <div key={item.id} className="flex items-center justify-between px-4 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-[var(--text)] truncate">{item.name}</p>
+                      <p className="text-xs text-[var(--text3)] truncate">{item.supplier_name ?? 'Sin proveedor'}</p>
+                    </div>
+                    <div className="text-right flex-shrink-0 ml-2">
+                      <p className="text-sm font-bold mono text-[var(--danger)]">{item.stock_current}</p>
+                      <p className="text-xs text-[var(--text3)]">mín: {item.stock_min}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="px-4 py-3 border-t border-[var(--border)] flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-xs text-[var(--text3)]">
+                  <Package size={13} /> Capital en stock
+                </span>
+                <span className="text-sm font-semibold mono text-[var(--text)]" title={formatCurrency(data?.inventory_value ?? 0)}>
+                  {formatCompactCurrency(data?.inventory_value ?? 0)}
+                </span>
+              </div>
+            </Card>
+          )}
         </div>
       </div>
     </AppShell>

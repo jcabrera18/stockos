@@ -21,6 +21,7 @@ interface UserProfile {
     iva_condition:          string
     afip_punto_venta:       number | null
     afip_environment:       string
+    monotributo_limite_anual: number | null
     stock_enabled:          boolean
     subscription: {
       plan:               string

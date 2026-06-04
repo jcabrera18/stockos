@@ -34,6 +34,29 @@ export function formatNumber(n: number | string): string {
   return new Intl.NumberFormat('es-AR').format(Number(n))
 }
 
+// Moneda compacta para KPIs/charts — solo abrevia en millones (donde rompe el
+// layout). Los miles se muestran completos: un comerciante piensa en "mil", no "k".
+// $15.847.392 → "$15,8M" · $980.500 → "$980.500" · $4.300 → "$4.300"
+// El valor exacto siempre se preserva con formatCurrency() en tooltips/title.
+export function formatCompactCurrency(amount: number | string): string {
+  const n = Number(amount)
+  const abs = Math.abs(n)
+  const sign = n < 0 ? '-' : ''
+  if (abs >= 1_000_000)
+    return `${sign}$${(abs / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 1 })}M`
+  return `${sign}$${Math.round(abs).toLocaleString('es-AR')}`
+}
+
+// Solo para ejes de gráficos: brevedad máxima (k/M es convención universal en charts).
+// No usar en KPIs/headlines — ahí va formatCompactCurrency().
+export function formatAxisCurrency(amount: number | string): string {
+  const n = Number(amount)
+  const abs = Math.abs(n)
+  if (abs >= 1_000_000) return `$${(n / 1_000_000).toLocaleString('es-AR', { maximumFractionDigits: 1 })}M`
+  if (abs >= 1_000)     return `$${Math.round(n / 1_000)}k`
+  return `$${Math.round(n)}`
+}
+
 export function getStockStatusColor(status: string): string {
   switch (status) {
     case 'sin_stock': return 'var(--danger)'
