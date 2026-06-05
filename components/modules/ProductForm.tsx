@@ -523,7 +523,11 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
           </button>
         </div>
       )}
-      <p className="text-xs text-[var(--text3)]">Escaneá o pegá el código</p>
+      <p className="text-xs text-[var(--text3)]">
+        {barcodes.length === 0
+          ? 'Si no ingresás un código de barras, StockOS generará uno automáticamente.'
+          : 'Escaneá o pegá el código'}
+      </p>
     </div>
   )
 
