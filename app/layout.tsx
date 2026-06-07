@@ -7,6 +7,7 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'], display: 'swap' })
 import { Toaster } from 'sonner'
 import { AppShellWrapper } from '@/components/layout/AppShellWrapper'
+import { OfflineBanner } from '@/components/layout/OfflineBanner'
 import { PostHogProvider } from '@/components/PostHogProvider'
 
 const BASE_URL = 'https://stockos.digital'
@@ -73,6 +74,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </AppShellWrapper>
           </PostHogProvider>
         </Suspense>
+        <OfflineBanner />
         <Toaster
           position="bottom-right"
           toastOptions={{

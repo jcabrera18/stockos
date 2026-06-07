@@ -4,6 +4,43 @@ import { createClient } from '@/lib/supabase/client'
 import { api } from '@/lib/api'
 import { posthog } from '@/lib/posthog'
 
+// Detecta fallos de red (no de auth) para decidir si caer al perfil cacheado.
+// Inlineado a propósito: importarlo de lib/sales-queue arrastraría Dexie al
+// bundle de todas las páginas (AuthContext está siempre montado).
+function isNetworkError(err: unknown): boolean {
+  if (err instanceof DOMException && (err.name === 'TimeoutError' || err.name === 'AbortError')) return true
+  if (!(err instanceof TypeError)) return false
+  const msg = err.message.toLowerCase()
+  return msg.includes('fetch') || msg.includes('network') || msg.includes('load failed')
+}
+
+// Perfil cacheado para login offline: tras una carga exitosa lo guardamos en
+// localStorage; si en una carga posterior /api/auth/me falla por red (offline o
+// Supabase/Railway caído) y hay una sesión previa, operamos con este perfil en
+// vez de mandar al usuario a /login. Ver .claude/OFFLINE_PLAN.md (P1).
+const PROFILE_CACHE_KEY = 'stockos_profile'
+
+function readCachedProfile(): UserProfile | null {
+  try {
+    const raw = localStorage.getItem(PROFILE_CACHE_KEY)
+    return raw ? (JSON.parse(raw) as UserProfile) : null
+  } catch {
+    return null
+  }
+}
+
+function writeCachedProfile(profile: UserProfile) {
+  try {
+    localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile))
+  } catch { }
+}
+
+function clearCachedProfile() {
+  try {
+    localStorage.removeItem(PROFILE_CACHE_KEY)
+  } catch { }
+}
+
 interface UserProfile {
   id:           string
   business_id:  string
@@ -55,6 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const profile = await api.get<UserProfile>('/api/auth/me')
       hasProfileRef.current = true
       setUser(profile)
+      writeCachedProfile(profile)
       if (posthog.__loaded) {
         posthog.identify(profile.id, {
           email:       profile.email,
@@ -66,9 +104,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : ''
-      // Solo limpiar sesión si es un error de autenticación genuino (no token),
-      // no ante errores de red transitorios o Railway cold starts.
-      if (msg === 'No autenticado' || !hasProfileRef.current) {
+      const offline = typeof navigator !== 'undefined' && !navigator.onLine
+      const cached = readCachedProfile()
+
+      // Login offline (P1): si falla por red (offline / Supabase / Railway caído)
+      // y hay un perfil cacheado de una sesión previa, operamos con él en vez de
+      // desloguear. No aplica si el error es 'No autenticado' (no hay sesión real).
+      if (cached && msg !== 'No autenticado' && (offline || isNetworkError(err))) {
+        hasProfileRef.current = true
+        setUser(cached)
+      } else if (msg === 'No autenticado' || !hasProfileRef.current) {
+        // Error de auth genuino (sin token) o primer arranque sin perfil ni caché.
         hasProfileRef.current = false
         setUser(null)
       }
@@ -96,6 +142,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     if (posthog.__loaded) posthog.reset()
+    clearCachedProfile()
     await supabase.auth.signOut()
     setUser(null)
     window.location.replace('/login')

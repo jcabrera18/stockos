@@ -1072,6 +1072,17 @@ export default function POSPage() {
     setTimeout(() => searchRef.current?.focus(), 100)
   }
 
+  // Navegación saliente del POS protegida: sin internet, salir dispara un fetch de
+  // RSC que falla y deja al usuario en la pantalla del dino del navegador. Mientras
+  // no haya Service Worker, bloqueamos la salida y mantenemos al cajero en el POS.
+  const leavePOS = useCallback((path: string) => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      toast.warning('Sin conexión — seguís en el POS. Podés vender; se sincroniza al volver internet.')
+      return
+    }
+    router.push(path)
+  }, [router])
+
   const cartItemCount = cart.reduce((a, i) => a + i.quantity, 0)
 
   return (
@@ -1082,7 +1093,7 @@ export default function POSPage() {
 
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)] bg-[var(--surface)]">
-          <button onClick={() => router.push('/sales')}
+          <button onClick={() => leavePOS('/sales')}
             className="p-1.5 rounded-[var(--radius-md)] hover:bg-[var(--surface2)] text-[var(--text3)] hover:text-[var(--text)] transition-colors">
             <ChevronLeft size={18} />
           </button>
@@ -1118,7 +1129,7 @@ export default function POSPage() {
               <AlertTriangle size={14} className="flex-shrink-0" />
               <span className="font-medium">La caja no está abierta.</span>
             </div>
-            <button onClick={() => router.push('/cash-register')}
+            <button onClick={() => leavePOS('/cash-register')}
               className="text-xs font-semibold text-[var(--danger)] underline flex-shrink-0">
               Abrir caja →
             </button>
@@ -2099,7 +2110,7 @@ export default function POSPage() {
         sale={completedSale ?? { id: '', total: 0, subtotal: 0, discount: 0, payment_method: 'efectivo', installments: 1, items: [], created_at: new Date().toISOString() }}
         invoiceId={completedSale?.invoice_id}
         onNewSale={handleNewSale}
-        onClose={() => router.push('/sales')}
+        onClose={() => leavePOS('/sales')}
         customerPhone={selectedCustomer?.phone}
         customerName={selectedCustomer?.full_name}
         business={user?.business ?? undefined}

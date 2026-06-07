@@ -6,6 +6,13 @@ type FetchOptions = RequestInit & {
   params?: Record<string, string | number | boolean | undefined>
 }
 
+// Error de la API que conserva el status HTTP y el body completo de la respuesta,
+// para que los callers puedan recuperar datos estructurados (ej. invoice_id en un 409).
+export type ApiError = Error & {
+  status?: number
+  body?: Record<string, unknown>
+}
+
 // Timeout base por intento. Tras una inactividad larga (ej. POS abierto horas)
 // la primera request puede tardar más por el cold start del backend en Railway
 // y/o por el refresh del token de Supabase, así que damos margen y reintentamos.
@@ -102,8 +109,11 @@ export async function apiFetch<T = unknown>(
       }
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }))
-        throw new Error(err.error ?? 'Error en la API')
+        const body = await res.json().catch(() => ({ error: res.statusText }))
+        const error = new Error(body.error ?? 'Error en la API') as ApiError
+        error.status = res.status
+        error.body = body
+        throw error
       }
 
       if (res.status === 204) return undefined as T

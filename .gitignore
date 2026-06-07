@@ -40,6 +40,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# serwist (service worker generado en build)
+public/sw.js
+public/sw.js.map
+public/swe-worker-*.js
+
 # claude
 CLAUDE.md
 .claude/security-review.md

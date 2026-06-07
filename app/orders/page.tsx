@@ -12,7 +12,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { Pagination } from '@/components/ui/Pagination'
 import { api } from '@/lib/api'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
 import type { Product, Pagination as PaginationType } from '@/types'
 import type { PriceList } from '@/app/price-lists/page'
 import {
@@ -22,7 +22,6 @@ import {
 } from 'lucide-react'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
-import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
 import { useAuth } from '@/hooks/useAuth'
 import { usePOSSync } from '@/hooks/usePOSSync'
 import { searchProductsLocal } from '@/lib/pos-cache'
@@ -64,13 +63,15 @@ interface OrderDetail extends OrderSummary {
   order_items: {
     id: string
     product_id: string
+    product_name?: string
     quantity: number
     unit_price: number
     discount: number
     subtotal: number
-    products: { name: string; barcode?: string; unit: string }
+    products: { name: string; barcode?: string; unit: string } | null
   }[]
   warehouses?: { name: string }
+  users?: { full_name: string }
   customers?: { full_name: string; current_balance: number; document?: string; phone?: string }
   invoices?: { id: string; invoice_type: string; numero: number; afip_status: string } | null
 }
@@ -176,6 +177,8 @@ export default function OrdersPage() {
 
   // Confirmación cancelación
   const [cancelConfirmOrder, setCancelConfirmOrder] = useState<{ id: string; customer_name: string } | null>(null)
+  // Confirmación de "Confirmar pedido"
+  const [confirmOrder, setConfirmOrder] = useState<{ id: string; customer_name: string } | null>(null)
 
   // Cobro parcial
   const [paymentModal, setPaymentModal] = useState(false)
@@ -192,7 +195,10 @@ export default function OrdersPage() {
   const [selectedCustomerBalance, setSelectedCustomerBalance] = useState<number>(0)
   const [selectedCustomerCreditLimit, setSelectedCustomerCreditLimit] = useState<number>(0)
   const [quickCustomerModal, setQuickCustomerModal] = useState(false)
+  const [qcForm, setQcForm] = useState({ full_name: '', document: '', phone: '', credit_limit: '' })
+  const [qcSaving, setQcSaving] = useState(false)
   const customerSearchRequestRef = useRef(0)
+  const draftLoadedRef = useRef(false)
 
   // Lista de carga (picking)
   interface PickingItem {
@@ -463,9 +469,9 @@ export default function OrdersPage() {
     const biz = authUser?.business
     const rows = (d.order_items ?? []).map(i =>
       `<tr>
-        <td>${i.products.name}${i.products.barcode ? `<br><span class="small">${i.products.barcode}</span>` : ''}</td>
+        <td>${i.products?.name ?? i.product_name ?? '(producto eliminado)'}${i.products?.barcode ? `<br><span class="small">${i.products.barcode}</span>` : ''}</td>
         <td class="center">${i.quantity}</td>
-        <td class="center">${i.products.unit}</td>
+        <td class="center">${i.products?.unit ?? ''}</td>
       </tr>`
     ).join('')
     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito</title>
@@ -519,7 +525,7 @@ export default function OrdersPage() {
       <div class="box">
         <div class="label">Detalle</div>
         ${d.warehouse_name ? `<div class="sub">Depósito: ${d.warehouse_name}</div>` : ''}
-        ${d.seller_name ? `<div class="sub">Vendedor: ${d.seller_name}</div>` : ''}
+        ${(d.seller_name || d.users?.full_name) ? `<div class="sub">Vendedor: ${d.seller_name || d.users?.full_name}</div>` : ''}
         <div class="sub">Pedido: ${d.id.slice(0, 8).toUpperCase()}</div>
       </div>
     </div>
@@ -553,8 +559,8 @@ export default function OrdersPage() {
     }
     const rows = (d.order_items ?? []).map(i =>
       `<tr>
-        <td>${i.products.name}${i.products.barcode ? `<br><span class="small">${i.products.barcode}</span>` : ''}</td>
-        <td class="center">${i.quantity} ${i.products.unit}</td>
+        <td>${i.products?.name ?? i.product_name ?? '(producto eliminado)'}${i.products?.barcode ? `<br><span class="small">${i.products.barcode}</span>` : ''}</td>
+        <td class="center">${i.quantity} ${i.products?.unit ?? ''}</td>
         <td class="right">${Number(i.unit_price).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
         <td class="right">${Number(i.subtotal).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
       </tr>`
@@ -614,7 +620,7 @@ export default function OrdersPage() {
 
     ${pending > 0 ? `<div class="saldo"><span>Saldo pendiente de cobro de este pedido</span><span class="amt">${pending.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</span></div>` : ''}
     ${d.notes ? `<p style="font-size:12px;color:#555;margin-bottom:20px"><em>Notas: ${d.notes}</em></p>` : ''}
-    ${d.seller_name ? `<p style="font-size:11px;color:#888">Vendedor: ${d.seller_name}</p>` : ''}
+    ${(d.seller_name || d.users?.full_name) ? `<p style="font-size:11px;color:#888">Vendedor: ${d.seller_name || d.users?.full_name}</p>` : ''}
 
     <div class="footer">
       <div class="sign">Firma cliente</div>
@@ -675,7 +681,8 @@ export default function OrdersPage() {
         setWarehouseId(sellerWarehouseId)
       } else {
         const def = wh.find(w => w.is_default)
-        if (def) setWarehouseId(def.id)
+        // No pisar un depósito ya restaurado desde el borrador
+        setWarehouseId(current => current || def?.id || '')
       }
       setPriceListId(current => current || pl.find(list => list.is_default)?.id || pl[0]?.id || '')
       // Construir mapa de overrides para uso sin re-render
@@ -688,6 +695,48 @@ export default function OrdersPage() {
       priceOverridesRef.current = ovMap
     }).catch(() => { })
   }, [])
+
+  // ─── Borrador del nuevo pedido (persistente) ─────────────
+  const DRAFT_KEY = 'stockos_order_draft'
+
+  // Restaurar borrador al montar
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY)
+      if (raw) {
+        const d = JSON.parse(raw)
+        if (Array.isArray(d.cart)) setCart(d.cart)
+        if (d.selectedCustomerId) {
+          setSelectedCustomerId(d.selectedCustomerId)
+          setCustomerName(d.customerName || '')
+          setSelectedCustomerBalance(Number(d.selectedCustomerBalance) || 0)
+          setSelectedCustomerCreditLimit(Number(d.selectedCustomerCreditLimit) || 0)
+        }
+        if (d.warehouseId) setWarehouseId(d.warehouseId)
+        if (d.priceListId) setPriceListId(d.priceListId)
+        if (d.orderNotes) setOrderNotes(d.orderNotes)
+        if (d.orderDiscount) setOrderDiscount(d.orderDiscount)
+        if (d.payAlreadyCollected) setPayAlreadyCollected(true)
+        if (d.collectedMethod) setCollectedMethod(d.collectedMethod)
+        if (d.collectedAmount) setCollectedAmount(d.collectedAmount)
+      }
+    } catch { /* ignore */ }
+    draftLoadedRef.current = true
+  }, [])
+
+  // Guardar borrador ante cualquier cambio relevante
+  useEffect(() => {
+    if (!draftLoadedRef.current) return
+    const hasContent = cart.length > 0 || !!selectedCustomerId || !!orderNotes.trim()
+    if (!hasContent) { localStorage.removeItem(DRAFT_KEY); return }
+    try {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
+        cart, selectedCustomerId, customerName, selectedCustomerBalance, selectedCustomerCreditLimit,
+        warehouseId, priceListId, orderNotes, orderDiscount, payAlreadyCollected, collectedMethod, collectedAmount,
+      }))
+    } catch { /* ignore */ }
+  }, [cart, selectedCustomerId, customerName, selectedCustomerBalance, selectedCustomerCreditLimit,
+    warehouseId, priceListId, orderNotes, orderDiscount, payAlreadyCollected, collectedMethod, collectedAmount])
 
   // Búsqueda de productos para el pedido
   useEffect(() => {
@@ -760,6 +809,7 @@ export default function OrdersPage() {
   }, [customerQuery])
 
   const openDetail = async (id: string) => {
+    setNewOrderModal(false)
     setDetailModal(true)
     setLoadingDetail(true)
     setDetailInvoice(null)
@@ -831,7 +881,49 @@ export default function OrdersPage() {
     setCustomerQuery(''); setCustomerResults([]); setSelectedCustomerId(null)
     setSelectedCustomerBalance(0); setSelectedCustomerCreditLimit(0)
     setCustomerName(''); setQuickCustomerModal(false)
+    setQcForm({ full_name: '', document: '', phone: '', credit_limit: '' })
     setPriceListId(getDefaultPriceListId())
+    try { localStorage.removeItem(DRAFT_KEY) } catch { /* ignore */ }
+  }
+
+  // Abre el panel SIN resetear: si hay un borrador en curso, lo retoma
+  const openNewOrder = () => {
+    setDetailModal(false); setDetail(null); setDetailInvoice(null)
+    setNewOrderModal(true)
+  }
+
+  // Cierra el panel manteniendo el borrador (no se pierde lo cargado)
+  const closeNewOrder = () => {
+    setQuickCustomerModal(false)
+    setNewOrderModal(false)
+  }
+
+  // Descarta el borrador por completo y cierra
+  const discardNewOrder = () => {
+    resetOrderForm()
+    setNewOrderModal(false)
+  }
+
+  const handleQuickCreate = async () => {
+    if (!qcForm.full_name.trim()) { toast.error('El nombre es obligatorio'); return }
+    setQcSaving(true)
+    try {
+      const customer = await api.post<{ id: string; full_name: string; current_balance: number; credit_limit: number }>('/api/customers', {
+        full_name: qcForm.full_name.trim(),
+        document: qcForm.document.trim() || null,
+        phone: qcForm.phone.trim() || null,
+        credit_limit: Number(qcForm.credit_limit) || 0,
+      })
+      toast.success(`Cliente "${customer.full_name}" creado`)
+      setSelectedCustomerId(customer.id)
+      setCustomerName(customer.full_name)
+      setSelectedCustomerBalance(Number(customer.current_balance))
+      setSelectedCustomerCreditLimit(Number(customer.credit_limit))
+      setCustomerQuery(''); setCustomerResults([])
+      setQuickCustomerModal(false)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al crear el cliente')
+    } finally { setQcSaving(false) }
   }
 
   const cartStockIssues = stockEnabled ? cart.filter(i => i.quantity > (i.product.stock_current ?? 0)) : []
@@ -908,7 +1000,16 @@ export default function OrdersPage() {
       setDeliverOrderId(null)
       setDeliverAmount(''); setDeliverNotes('')
       fetchOrders()
-      if (detail?.id === deliverOrderId) setDetailModal(false)
+      if (detail?.id === deliverOrderId) {
+        const updated = await api.get<OrderDetail>(`/api/orders/${deliverOrderId}`)
+        setDetail(updated)
+        if (updated.invoices) setDetailInvoice(updated.invoices)
+        else if (updated.sale_id) {
+          api.get<{ id: string; invoice_type: string; numero: number } | null>(`/api/invoices/sale/${updated.sale_id}`)
+            .then(inv => { if (inv) setDetailInvoice(inv) })
+            .catch(() => { })
+        }
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al confirmar entrega')
     } finally { setDelivering(false) }
@@ -937,68 +1038,73 @@ export default function OrdersPage() {
     } finally { setRegisteringPayment(false) }
   }
 
-  // ─── Acciones disponibles por estado ─────────────────────
-  const getActions = (order: OrderSummary) => {
-    const actions = []
-    if (order.status === 'pending') {
-      actions.push({ label: 'Confirmar', action: 'confirm', variant: 'success' as const })
-      actions.push({ label: 'Cancelar', action: 'cancel', variant: 'danger' as const })
-    }
-    if (order.status === 'confirmed') {
-      actions.push({ label: 'Confirmar entrega', action: 'deliver_modal', variant: 'success' as const })
-    }
-    if (['unpaid', 'partial'].includes(order.payment_status) && order.status !== 'cancelled') {
-      actions.push({ label: 'Registrar cobro', action: 'payment_modal', variant: 'default' as const })
-    }
-    return actions
-  }
+  const sidePanelOpen = detailModal || newOrderModal
 
   return (
     <AppShell>
-      <PageHeader
-        title="Pedidos"
-        description={`${pagination.total} pedidos`}
-        action={
-          <>
-            <Button variant="secondary" onClick={openPickingList}>
-              <ClipboardList size={15} /> <span className="hidden sm:inline">Lista de carga</span>
-            </Button>
-            <Button variant="secondary" onClick={openByClientList}>
-              <FileText size={15} /> <span className="hidden sm:inline">Por cliente</span>
-            </Button>
-            <Button onClick={() => setNewOrderModal(true)}>
-              <Plus size={15} /> Nuevo pedido
-            </Button>
-          </>
-        }
-      />
-
-      <div className="p-5 space-y-4">
-        {/* Filtros */}
-        <div className="flex flex-wrap gap-2 items-center">
-          {([['', 'Todos'], ['pending', 'Pendientes'], ['confirmed', 'Confirmados'],
-          ['delivered', 'Entregados']] as [string, string][]).map(([val, label]) => (
-            <button key={val} onClick={() => setStatusFilter(val as OrderStatus | '')}
-              className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${statusFilter === val
-                ? 'bg-[var(--accent)] text-white'
-                : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-                }`}>
-              {label}
-            </button>
-          ))}
-          <div className="relative ml-auto">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
-            <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Buscar cliente..."
-              className="pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+      <div className="flex h-full overflow-hidden">
+        <div className={cn(
+          'flex flex-col overflow-hidden transition-all',
+          sidePanelOpen ? 'hidden md:flex md:w-[30%] md:border-r md:border-[var(--border)]' : 'w-full flex'
+        )}>
+          <div className="shrink-0">
+            <PageHeader
+              title="Pedidos"
+              description={`${pagination.total} pedidos`}
+              action={
+                <>
+                  {!sidePanelOpen && (
+                    <>
+                      <Button variant="secondary" onClick={openPickingList}>
+                        <ClipboardList size={15} /> <span className="hidden sm:inline">Lista de carga</span>
+                      </Button>
+                      <Button variant="secondary" onClick={openByClientList}>
+                        <FileText size={15} /> <span className="hidden sm:inline">Por cliente</span>
+                      </Button>
+                    </>
+                  )}
+                  {!newOrderModal && (
+                    <Button onClick={openNewOrder}>
+                      <Plus size={15} /> <span className={cn(detailModal && 'hidden lg:inline')}>{cart.length > 0 ? 'Retomar pedido' : 'Nuevo pedido'}</span>
+                    </Button>
+                  )}
+                </>
+              }
             />
           </div>
-          <div className="relative">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
-            <input value={idSearch} onChange={e => setIdSearch(e.target.value)}
-              placeholder="N° remito..."
-              className="pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] w-32 font-mono"
-            />
+
+          <div className="overflow-y-auto flex-1 p-5 space-y-4">
+        {/* Filtros */}
+        <div className="space-y-2">
+          {/* Estado */}
+          <div className="flex items-center gap-1 rounded-full bg-[var(--surface2)] border border-[var(--border)] p-0.5 w-fit max-w-full overflow-x-auto">
+            {([['', 'Todos'], ['pending', 'Pendientes'], ['confirmed', 'Confirmados'],
+            ['delivered', 'Entregados']] as [string, string][]).map(([val, label]) => (
+              <button key={val} onClick={() => setStatusFilter(val as OrderStatus | '')}
+                className={`px-3 py-1 text-xs rounded-full font-medium whitespace-nowrap transition-colors ${statusFilter === val
+                  ? 'bg-[var(--accent)] text-white'
+                  : 'text-[var(--text2)] hover:text-[var(--text)]'
+                  }`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          {/* Búsqueda */}
+          <div className="flex gap-2">
+            <div className="relative flex-1 min-w-0">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
+              <input value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Buscar cliente..."
+                className="w-full pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+            <div className="relative flex-1 min-w-0">
+              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
+              <input value={idSearch} onChange={e => setIdSearch(e.target.value)}
+                placeholder="N° remito..."
+                className="w-full pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] font-mono"
+              />
+            </div>
           </div>
         </div>
 
@@ -1006,86 +1112,71 @@ export default function OrdersPage() {
         {loading ? <PageLoader /> : orders.length === 0 ? (
           <EmptyState icon={Package} title="Sin pedidos"
             description="Los vendedores pueden crear pedidos desde el botón 'Nuevo pedido'."
-            action={<Button onClick={() => setNewOrderModal(true)}><Plus size={15} />Nuevo pedido</Button>}
+            action={<Button onClick={openNewOrder}><Plus size={15} />Nuevo pedido</Button>}
           />
         ) : (
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[640px]">
+              <table className={cn('w-full text-sm', !sidePanelOpen && 'min-w-[640px]')}>
                 <thead>
                   <tr className="border-b border-[var(--border)]">
-                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">N° Remito</th>
+                    {!sidePanelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">N° Remito</th>}
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Cliente</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Vendedor</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Depósito</th>
+                    {!sidePanelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Vendedor</th>}
+                    {!sidePanelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Depósito</th>}
                     <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Estado</th>
-                    <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Pago</th>
+                    {!sidePanelOpen && <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Pago</th>}
                     <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Total</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Fecha</th>
+                    {!sidePanelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Fecha</th>}
                     <th className="px-4 py-3" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
                   {orders.filter(o => !idSearch || o.id.slice(0, 8).toUpperCase().includes(idSearch.toUpperCase())).map(order => {
-                    const actions = getActions(order)
                     return (
                       <tr key={order.id}
                         onClick={() => openDetail(order.id)}
-                        className="hover:bg-[var(--surface2)] transition-colors cursor-pointer group">
-                        <td className="px-4 py-3 hidden sm:table-cell">
-                          <span className="font-mono text-xs text-[var(--text2)] tracking-wider">{order.id.slice(0, 8).toUpperCase()}</span>
-                        </td>
+                        className={cn(
+                          'hover:bg-[var(--surface2)] transition-colors cursor-pointer group',
+                          detail?.id === order.id && 'bg-[var(--accent)]/8 hover:bg-[var(--accent)]/12'
+                        )}>
+                        {!sidePanelOpen && (
+                          <td className="px-4 py-3 hidden sm:table-cell">
+                            <span className="font-mono text-xs text-[var(--text2)] tracking-wider">{order.id.slice(0, 8).toUpperCase()}</span>
+                          </td>
+                        )}
                         <td className="px-4 py-3">
                           <p className="font-medium text-[var(--text)]">{order.customer_name}</p>
                           {order.customer_address && (
                             <p className="text-xs text-[var(--text3)] truncate max-w-[160px]">{order.customer_address}</p>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">{order.seller_name ?? '—'}</td>
-                        <td className="px-4 py-3 text-[var(--text2)] hidden lg:table-cell">{order.warehouse_name ?? '—'}</td>
+                        {!sidePanelOpen && <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">{order.seller_name ?? '—'}</td>}
+                        {!sidePanelOpen && <td className="px-4 py-3 text-[var(--text2)] hidden lg:table-cell">{order.warehouse_name ?? '—'}</td>}
                         <td className="px-4 py-3 text-center">
                           <Badge variant={STATUS_VARIANTS[order.status]}>{STATUS_LABELS[order.status]}</Badge>
                         </td>
-                        <td className="px-4 py-3 text-center">
-                          <Badge variant={
-                            order.payment_status === 'paid' ? 'success' :
-                              order.payment_status === 'partial' ? 'warning' :
-                                order.payment_status === 'credit' ? 'default' : 'danger'
-                          }>
-                            {PAYMENT_STATUS_LABELS[order.payment_status]}
-                          </Badge>
-                        </td>
+                        {!sidePanelOpen && (
+                          <td className="px-4 py-3 text-center">
+                            <Badge variant={
+                              order.payment_status === 'paid' ? 'success' :
+                                order.payment_status === 'partial' ? 'warning' :
+                                  order.payment_status === 'credit' ? 'default' : 'danger'
+                            }>
+                              {PAYMENT_STATUS_LABELS[order.payment_status]}
+                            </Badge>
+                          </td>
+                        )}
                         <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)]">
                           {formatCurrency(order.total)}
                         </td>
-                        <td className="px-4 py-3 text-xs text-[var(--text3)] hidden sm:table-cell">
-                          {formatDateTime(order.created_at)}
-                        </td>
+                        {!sidePanelOpen && (
+                          <td className="px-4 py-3 text-xs text-[var(--text3)] hidden sm:table-cell">
+                            {formatDateTime(order.created_at)}
+                          </td>
+                        )}
                         <td className="px-4 py-3">
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                            onClick={e => e.stopPropagation()}>
-                            {actions.slice(0, 1).map(a => (
-                              <button key={a.action}
-                                onClick={() => {
-                                  if (a.action === 'deliver_modal') {
-                                    setDeliverOrderId(order.id); setDeliverModal(true)
-                                  } else if (a.action === 'payment_modal') {
-                                    setPaymentOrderId(order.id)
-                                    setPaymentOrderPending(Math.max(0, Number(order.total) - Number(order.paid_amount)))
-                                    setPaymentModal(true)
-                                  } else if (a.action === 'cancel') {
-                                    setCancelConfirmOrder({ id: order.id, customer_name: order.customer_name })
-                                  } else {
-                                    handleAction(order.id, a.action)
-                                  }
-                                }}
-                                className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${a.variant === 'success' ? 'bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white' :
-                                  a.variant === 'danger' ? 'bg-[var(--danger-subtle)] text-[var(--danger)]' :
-                                    'bg-[var(--surface2)] text-[var(--text2)]'
-                                  }`}>
-                                {a.label}
-                              </button>
-                            ))}
+                          <div className="flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
                             <ChevronRight size={14} className="text-[var(--text3)]" />
                           </div>
                         </td>
@@ -1098,67 +1189,122 @@ export default function OrdersPage() {
             <Pagination pagination={pagination} onPageChange={handlePageChange} />
           </div>
         )}
-      </div>
+          </div>
+        </div>
 
-      {/* ── Modal detalle ── */}
-      <Modal open={detailModal} onClose={() => { setDetailModal(false); setDetail(null); setDetailInvoice(null) }}
-        title="Detalle del pedido" size="lg">
+        {/* ── Panel detalle ── */}
+        {detailModal && (
+          <div className="w-full md:flex-1 overflow-y-auto flex flex-col">
+            <div className="shrink-0 flex items-center justify-between px-5 py-3.5 border-b border-[var(--border)] sticky top-0 bg-[var(--surface)] z-10">
+              <h2 className="text-sm font-semibold text-[var(--text)]">Detalle del pedido</h2>
+              <button
+                onClick={() => { setDetailModal(false); setDetail(null); setDetailInvoice(null) }}
+                className="p-1.5 rounded-md text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 p-5">
         {loadingDetail ? (
           <div className="flex justify-center py-8">
             <div className="w-6 h-6 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
           </div>
         ) : detail && (
           <div className="space-y-4">
-            {/* Status timeline */}
-            <div className="flex items-center gap-1 overflow-x-auto pb-1">
-              {detail.status === 'cancelled' ? (
-                <>
-                  {(['pending', 'confirmed', 'delivered'] as OrderStatus[]).map((s, i) => (
-                    <div key={s} className="flex items-center gap-1 flex-shrink-0">
-                      <div className="px-2 py-1 rounded text-xs font-medium bg-[var(--surface2)] text-[var(--text3)]">
-                        {STATUS_LABELS[s]}
+            {/* Status stepper interactivo */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-1 overflow-x-auto pb-1">
+                {detail.status === 'cancelled' ? (
+                  <>
+                    {(['pending', 'confirmed', 'delivered'] as OrderStatus[]).map((s, i) => (
+                      <div key={s} className="flex items-center gap-1 flex-shrink-0">
+                        <div className="px-2.5 py-1 rounded-full text-xs font-medium bg-[var(--surface2)] text-[var(--text3)]">
+                          {STATUS_LABELS[s]}
+                        </div>
+                        {i < 2 && <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />}
                       </div>
-                      {i < 2 && <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />}
+                    ))}
+                    <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />
+                    <div className="px-2.5 py-1 rounded-full text-xs font-medium bg-[var(--danger-subtle)] text-[var(--danger)]">
+                      Cancelado
                     </div>
-                  ))}
-                  <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />
-                  <div className="px-2 py-1 rounded text-xs font-medium bg-[var(--danger-subtle)] text-[var(--danger)]">
-                    Cancelado
-                  </div>
-                </>
-              ) : (
-                (['pending', 'confirmed', 'delivered'] as OrderStatus[]).map((s, i) => {
+                  </>
+                ) : (() => {
                   const statuses: OrderStatus[] = ['pending', 'confirmed', 'delivered']
                   const currentIdx = statuses.indexOf(detail.status)
-                  const stepIdx = statuses.indexOf(s)
-                  const done = stepIdx < currentIdx
-                  const current = s === detail.status
-                  return (
-                    <div key={s} className="flex items-center gap-1 flex-shrink-0">
-                      <div className={`px-2 py-1 rounded text-xs font-medium ${current ? 'bg-[var(--accent)] text-white' :
-                        done ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' :
-                          'bg-[var(--surface2)] text-[var(--text3)]'
-                        }`}>
-                        {STATUS_LABELS[s]}
+                  const NEXT_LABELS: Partial<Record<OrderStatus, string>> = { confirmed: 'Confirmar', delivered: 'Entregar' }
+                  const advance = (target: OrderStatus) => {
+                    if (target === 'confirmed') setConfirmOrder({ id: detail.id, customer_name: detail.customer_name })
+                    else if (target === 'delivered') { setDeliverOrderId(detail.id); setDeliverModal(true) }
+                  }
+                  return statuses.map((s, i) => {
+                    const done = i < currentIdx
+                    const current = i === currentIdx
+                    const isNext = i === currentIdx + 1
+                    return (
+                      <div key={s} className="flex items-center gap-1 flex-shrink-0">
+                        {isNext ? (
+                          <button
+                            onClick={() => advance(s)}
+                            className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border border-dashed border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white hover:border-solid transition-colors">
+                            {NEXT_LABELS[s] ?? STATUS_LABELS[s]}
+                            <ChevronRight size={12} />
+                          </button>
+                        ) : (
+                          <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${current ? 'bg-[var(--accent)] text-white' :
+                            done ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' :
+                              'bg-[var(--surface2)] text-[var(--text3)]'
+                            }`}>
+                            {done && (
+                              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                                <path d="M1 4L3.5 6.5L9 1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            )}
+                            {STATUS_LABELS[s]}
+                          </div>
+                        )}
+                        {i < 2 && <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />}
                       </div>
-                      {i < 2 && <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />}
-                    </div>
-                  )
-                })
+                    )
+                  })
+                })()}
+              </div>
+              {/* Timeline de fechas */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-[var(--text3)]">
+                <span>Creado <span className="font-medium text-[var(--text2)]">{formatDateTime(detail.created_at)}</span></span>
+                {detail.confirmed_at && <span>· Confirmado <span className="font-medium text-[var(--text2)]">{formatDateTime(detail.confirmed_at)}</span></span>}
+                {detail.dispatched_at && <span>· Despachado <span className="font-medium text-[var(--text2)]">{formatDateTime(detail.dispatched_at)}</span></span>}
+                {detail.delivered_at && <span>· Entregado <span className="font-medium text-[var(--text2)]">{formatDateTime(detail.delivered_at)}</span></span>}
+              </div>
+              {detail.status === 'pending' && (
+                <button
+                  onClick={() => setCancelConfirmOrder({ id: detail.id, customer_name: detail.customer_name })}
+                  className="text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">
+                  Cancelar pedido
+                </button>
               )}
             </div>
 
             {/* Info cliente + pago */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3 space-y-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Cliente */}
+              <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3.5 flex flex-col gap-1.5">
                 <p className="text-xs text-[var(--text3)]">Cliente</p>
-                <p className="text-sm font-semibold text-[var(--text)]">{detail.customer_name}</p>
-                {detail.customer_address && <p className="text-xs text-[var(--text2)]">{detail.customer_address}</p>}
-                {detail.customer_phone && <p className="text-xs text-[var(--text2)]">{detail.customer_phone}</p>}
+                <p className="text-sm font-semibold text-[var(--text)] leading-tight">{detail.customer_name}</p>
+                <div className="flex flex-col gap-0.5 text-xs text-[var(--text2)]">
+                  {detail.customers?.document && <span>DNI/CUIT: <span className="mono">{detail.customers.document}</span></span>}
+                  {(detail.customer_phone || detail.customers?.phone) && <span>Tel: {detail.customer_phone || detail.customers?.phone}</span>}
+                  {detail.customer_address && <span>{detail.customer_address}</span>}
+                </div>
+                {detail.customers?.current_balance !== undefined && detail.customers?.current_balance !== null && (
+                  <span className={`mt-auto self-start inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${Number(detail.customers.current_balance) > 0 ? 'bg-[var(--danger-subtle)] text-[var(--danger)]' : 'bg-[var(--accent-subtle)] text-[var(--accent)]'}`}>
+                    Saldo en cuenta: {formatCurrency(detail.customers.current_balance)}
+                  </span>
+                )}
               </div>
-              <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3 space-y-1">
-                <p className="text-xs text-[var(--text3)]">Pago</p>
-                <div className="flex items-center gap-2">
+              {/* Pago */}
+              <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3.5 flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-[var(--text3)]">Pago</p>
                   <Badge variant={
                     detail.payment_status === 'paid' ? 'success' :
                       detail.payment_status === 'partial' ? 'warning' :
@@ -1167,50 +1313,81 @@ export default function OrdersPage() {
                     {PAYMENT_STATUS_LABELS[detail.payment_status]}
                   </Badge>
                 </div>
-                {Number(detail.paid_amount) > 0 && (
-                  <p className="text-xs text-[var(--text2)]">
-                    Cobrado: <span className="font-semibold text-[var(--accent)]">{formatCurrency(detail.paid_amount)}</span>
-                    {' '}de {formatCurrency(detail.total)}
-                  </p>
-                )}
+                {(() => {
+                  const pending = Math.max(0, Number(detail.total) - Number(detail.paid_amount))
+                  return detail.payment_status === 'paid' ? (
+                    <div>
+                      <p className="text-[11px] text-[var(--text3)]">Total cobrado</p>
+                      <p className="text-xl font-bold mono text-[var(--accent)] leading-tight">{formatCurrency(detail.total)}</p>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <p className="text-[11px] text-[var(--text3)]">Pendiente de cobro</p>
+                        <p className="text-xl font-bold mono text-[var(--danger)] leading-tight">{formatCurrency(pending)}</p>
+                      </div>
+                      {Number(detail.paid_amount) > 0 && (
+                        <p className="text-xs text-[var(--text2)]">Cobrado {formatCurrency(detail.paid_amount)} de {formatCurrency(detail.total)}</p>
+                      )}
+                    </>
+                  )
+                })()}
                 {detail.payment_method && (
                   <p className="text-xs text-[var(--text3)]">{PAYMENT_METHODS.find(m => m.value === detail.payment_method)?.label}</p>
                 )}
               </div>
             </div>
 
-            {/* Info adicional */}
-            <div className="flex gap-2 flex-wrap text-xs text-[var(--text3)]">
-              {detail.seller_name && <span>Vendedor: <strong>{detail.seller_name}</strong></span>}
-              {detail.warehouse_name && <span>· Depósito: <strong>{detail.warehouse_name}</strong></span>}
-              {detail.price_list_id && <span>· Lista: <strong>{getPriceListLabel(detail.price_list_id)}</strong></span>}
-              <span>· {formatDateTime(detail.created_at)}</span>
-              <span>· Remito: <strong className="mono">{detail.id.slice(0, 8).toUpperCase()}</strong></span>
+            {/* Info adicional — chips */}
+            <div className="flex gap-1.5 flex-wrap">
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--surface2)] text-[11px] text-[var(--text3)]">
+                Remito <strong className="mono font-semibold text-[var(--text2)]">{detail.id.slice(0, 8).toUpperCase()}</strong>
+              </span>
+              {detail.price_list_id && (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--surface2)] text-[11px] text-[var(--text3)]">
+                  Lista <strong className="font-semibold text-[var(--text2)]">{getPriceListLabel(detail.price_list_id)}</strong>
+                </span>
+              )}
+              {(detail.seller_name || detail.users?.full_name) && (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--surface2)] text-[11px] text-[var(--text3)]">
+                  Vendedor <strong className="font-semibold text-[var(--text2)]">{detail.seller_name || detail.users?.full_name}</strong>
+                </span>
+              )}
+              {detail.warehouse_name && (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--surface2)] text-[11px] text-[var(--text3)]">
+                  Depósito <strong className="font-semibold text-[var(--text2)]">{detail.warehouse_name}</strong>
+                </span>
+              )}
               {detail.sale_id && (
-                <span>· Venta: <strong className="text-[var(--accent)]">#{detail.sale_id.slice(0, 8).toUpperCase()}</strong></span>
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--accent-subtle)] text-[11px] text-[var(--accent)]">
+                  Venta <strong className="mono font-semibold">#{detail.sale_id.slice(0, 8).toUpperCase()}</strong>
+                </span>
               )}
               {detailInvoice && (
-                <span>· Comprobante: <strong className="text-[var(--accent)]">{detailInvoice.invoice_type}-{String(detailInvoice.numero).padStart(5, '0')}</strong></span>
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--accent-subtle)] text-[11px] text-[var(--accent)]">
+                  Comprobante <strong className="font-semibold">{detailInvoice.invoice_type}-{String(detailInvoice.numero).padStart(5, '0')}</strong>
+                </span>
               )}
             </div>
 
             {/* Tabla de ítems */}
             <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] mb-4">
-              <div className="hidden sm:block overflow-x-auto">
+              <div className="hidden sm:block overflow-auto max-h-[320px]">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-[var(--border)]">
-                      <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)]">Producto</th>
-                      <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Cant.</th>
-                      <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Precio</th>
-                      <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Subtotal</th>
+                      <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)] sticky top-0 bg-[var(--surface2)] z-10">Producto</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)] sticky top-0 bg-[var(--surface2)] z-10">Cant.</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)] sticky top-0 bg-[var(--surface2)] z-10">Precio</th>
+                      <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)] sticky top-0 bg-[var(--surface2)] z-10">Subtotal</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--border)]">
                     {detail.order_items?.map(item => (
                       <tr key={item.id}>
                         <td className="px-3 py-2.5">
-                          <p className="font-medium text-[var(--text)]">{item.products?.name ?? '(producto eliminado)'}</p>
+                          <p className="font-medium text-[var(--text)]">{item.products?.name ?? item.product_name ?? '(producto eliminado)'}</p>
+                          {item.products?.barcode && <p className="text-[11px] text-[var(--text3)] mono">{item.products.barcode}</p>}
                         </td>
                         <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">{item.quantity} {item.products?.unit ?? ''}</td>
                         <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">{formatCurrency(item.unit_price)}</td>
@@ -1226,8 +1403,10 @@ export default function OrdersPage() {
                       </tr>
                     )}
                     <tr className="border-t-2 border-[var(--border)]">
-                      <td colSpan={3} className="px-3 py-2.5 text-sm font-semibold">Total</td>
-                      <td className="px-3 py-2.5 text-right mono font-bold text-[var(--accent)]">{formatCurrency(detail.total)}</td>
+                      <td colSpan={3} className="px-3 py-2.5 text-sm font-semibold sticky bottom-0 bg-[var(--surface2)]">
+                        Total <span className="font-normal text-[var(--text3)]">· {detail.order_items?.length ?? 0} {(detail.order_items?.length ?? 0) === 1 ? 'ítem' : 'ítems'}</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-right mono font-bold text-[var(--accent)] sticky bottom-0 bg-[var(--surface2)]">{formatCurrency(detail.total)}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -1238,11 +1417,11 @@ export default function OrdersPage() {
                     <span className="text-right">Subtotal</span>
                   </div>
                   <div className="border-b border-[var(--border)]" />
-                  <div className="space-y-3 divide-y divide-[var(--border)]">
+                  <div className="space-y-3 divide-y divide-[var(--border)] max-h-[300px] overflow-y-auto">
                     {detail.order_items?.map(item => (
                       <div key={item.id} className="space-y-1">
                         <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-medium text-[var(--text)]">{item.products?.name ?? '(producto eliminado)'}</p>
+                          <p className="text-sm font-medium text-[var(--text)]">{item.products?.name ?? item.product_name ?? '(producto eliminado)'}</p>
                           <span className="mono text-[var(--text2)]">{formatCurrency(item.subtotal)}</span>
                         </div>
                         <div className="flex flex-wrap gap-3 text-xs text-[var(--text3)]">
@@ -1271,7 +1450,10 @@ export default function OrdersPage() {
             </div>
 
             {detail.notes && (
-              <p className="text-sm text-[var(--text2)] italic px-1">"{detail.notes}"</p>
+              <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3 space-y-1">
+                <p className="text-xs text-[var(--text3)]">Nota</p>
+                <p className="text-sm text-[var(--text2)] italic">"{detail.notes}"</p>
+              </div>
             )}
 
             {/* Cambiar depósito — solo en pending */}
@@ -1302,105 +1484,118 @@ export default function OrdersPage() {
             )}
 
             {/* Acciones del detalle */}
-            <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
-              <div className="space-y-2">
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => printOrder(detail)}
-                    className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors border border-[var(--border)]">
-                    <Printer size={14} /> Imprimir
-                  </button>
-                  <button
-                    onClick={() => printRemito(detail)}
-                    className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors border border-[var(--border)]">
-                    <FileText size={14} /> Remito
-                  </button>
-                  {detail.sale_id && (
-                    <button
-                      onClick={() => setSaleDetailId(detail.sale_id!)}
-                      className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors border border-[var(--border)]">
-                      <Receipt size={14} /> Ver venta
-                    </button>
-                  )}
-                  {detailInvoice && (
-                    <button
-                      onClick={() => router.push(`/invoices?open=${detailInvoice.id}`)}
-                      className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors border border-[var(--border)]">
-                      <FileText size={14} /> Comprobante {detailInvoice.invoice_type}-{String(detailInvoice.numero).padStart(5, '0')}
-                    </button>
-                  )}
-                  {detail.status !== 'pending' && detail.status !== 'cancelled' && (!detailInvoice || detailInvoice.invoice_type === 'X') && (
-                    detailInvoice?.invoice_type === 'X' ? (
-                      <button
-                        onClick={() => setConvertInvoiceId(detailInvoice.id)}
-                        className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors">
-                        <Receipt size={14} /> Facturar
-                      </button>
-                    ) : (
-                      <button
-                        onClick={async () => {
-                          try {
-                            const inv = await api.post<{ id: string }>(`/api/orders/${detail.id}/invoice`, {})
-                            setConvertInvoiceId(inv.id)
-                          } catch (err: unknown) {
-                            toast.error(err instanceof Error ? err.message : 'Error al generar comprobante')
-                          }
-                        }}
-                        className="flex flex-1 min-w-[150px] items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors">
-                        <Receipt size={14} /> Facturar
-                      </button>
-                    )
-                  )}
+            {(() => {
+              const canPay = (detail.payment_status === 'unpaid' || detail.payment_status === 'partial') && detail.status !== 'cancelled'
+              const canInvoice = detail.status !== 'pending' && detail.status !== 'cancelled' && (!detailInvoice || detailInvoice.invoice_type === 'X')
+              return (
+                <div className="sticky bottom-0 z-10 -mx-5 mt-4 border-t border-[var(--border)] bg-[var(--surface)] px-5 pt-4 pb-5">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+                    {/* Documentos */}
+                    <div className="space-y-1.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text3)]">Documentos</p>
+                      <div className="flex flex-wrap gap-1">
+                        <button
+                          onClick={() => printOrder(detail)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[var(--radius-md)] text-[var(--text2)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors">
+                          <Printer size={14} /> Imprimir
+                        </button>
+                        <button
+                          onClick={() => printRemito(detail)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[var(--radius-md)] text-[var(--text2)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors">
+                          <FileText size={14} /> Remito
+                        </button>
+                        {detail.sale_id && (
+                          <button
+                            onClick={() => setSaleDetailId(detail.sale_id!)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[var(--radius-md)] text-[var(--text2)] hover:text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors">
+                            <Receipt size={14} /> Ver venta
+                          </button>
+                        )}
+                        {detailInvoice && (
+                          <button
+                            onClick={() => router.push(`/invoices?open=${detailInvoice.id}`)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[var(--radius-md)] text-[var(--text2)] hover:text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors">
+                            <FileText size={14} /> {detailInvoice.invoice_type}-{String(detailInvoice.numero).padStart(5, '0')}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Acciones primarias */}
+                    {(canPay || canInvoice) && (
+                      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                        {canPay && (
+                          <button
+                            onClick={() => {
+                              setPaymentOrderId(detail.id)
+                              setPaymentOrderPending(Math.max(0, Number(detail.total) - Number(detail.paid_amount)))
+                              setPaymentModal(true)
+                            }}
+                            className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--surface2)] text-[var(--text2)] border border-[var(--border)] hover:bg-[var(--surface3)] transition-colors">
+                            Registrar cobro
+                          </button>
+                        )}
+                        {canInvoice && (
+                          detailInvoice?.invoice_type === 'X' ? (
+                            <button
+                              onClick={() => setConvertInvoiceId(detailInvoice.id)}
+                              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors">
+                              <Receipt size={14} /> Facturar
+                            </button>
+                          ) : (
+                            <button
+                              onClick={async () => {
+                                // Refresca el pedido para que detailInvoice quede sincronizado
+                                // (si el usuario cierra el modal de conversión, el comprobante ya existe).
+                                const syncDetail = () =>
+                                  api.get<OrderDetail>(`/api/orders/${detail.id}`)
+                                    .then(d => { setDetail(d); if (d.invoices) setDetailInvoice(d.invoices) })
+                                    .catch(() => {})
+                                try {
+                                  const inv = await api.post<{ id: string }>(`/api/orders/${detail.id}/invoice`, {})
+                                  setConvertInvoiceId(inv.id)
+                                  void syncDetail()
+                                } catch (err: unknown) {
+                                  // El pedido ya tenía comprobante (ej. se generó y se cerró el modal sin querer):
+                                  // recuperamos el invoice_id existente y abrimos el modal en vez de mostrar error.
+                                  const existingId = (err as { body?: { invoice_id?: string } })?.body?.invoice_id
+                                  if (existingId) {
+                                    setConvertInvoiceId(existingId)
+                                    void syncDetail()
+                                  } else {
+                                    toast.error(err instanceof Error ? err.message : 'Error al generar comprobante')
+                                  }
+                                }
+                              }}
+                              className="inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-colors">
+                              <Receipt size={14} /> Facturar
+                            </button>
+                          )
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2 justify-end">
-                  {getActions(detail).map(a => (
-                    <button key={a.action}
-                      onClick={() => {
-                        if (a.action === 'deliver_modal') {
-                          setDeliverOrderId(detail.id); setDeliverModal(true)
-                        } else if (a.action === 'payment_modal') {
-                          setPaymentOrderId(detail.id)
-                          setPaymentOrderPending(Math.max(0, Number(detail.total) - Number(detail.paid_amount)))
-                          setPaymentModal(true)
-                        } else if (a.action === 'cancel') {
-                          setCancelConfirmOrder({ id: detail.id, customer_name: detail.customer_name })
-                        } else {
-                          handleAction(detail.id, a.action)
-                        }
-                      }}
-                      className={`px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium transition-colors ${a.variant === 'success' ? 'bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]' :
-                        a.variant === 'danger' ? 'bg-[var(--danger-subtle)] text-[var(--danger)] border border-[var(--danger)]' :
-                          'bg-[var(--surface2)] text-[var(--text2)] border border-[var(--border)]'
-                        }`}>
-                      {a.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              )
+            })()}
+          </div>
+        )}
             </div>
           </div>
         )}
-      </Modal>
 
-      {/* ── Modal nuevo pedido ── */}
-      <Modal open={newOrderModal} onClose={() => { resetOrderForm(); setNewOrderModal(false) }}
-        title="Nuevo pedido" size="lg">
-        <div className="space-y-4">
-
-          <QuickCustomerModal
-            open={quickCustomerModal}
-            onClose={() => setQuickCustomerModal(false)}
-            initialName={trimmedCustomerQuery}
-            onCreated={(customer) => {
-              setSelectedCustomerId(customer.id)
-              setCustomerName(customer.full_name)
-              setSelectedCustomerBalance(Number(customer.current_balance))
-              setSelectedCustomerCreditLimit(Number(customer.credit_limit))
-              setCustomerQuery('')
-              setCustomerResults([])
-              setQuickCustomerModal(false)
-            }}
-          />
+        {/* ── Panel nuevo pedido ── */}
+        {newOrderModal && (
+          <div className="w-full md:flex-1 overflow-y-auto flex flex-col">
+            <div className="shrink-0 flex items-center justify-between px-4 sm:px-5 py-3.5 border-b border-[var(--border)] sticky top-0 bg-[var(--surface)] z-10">
+              <h2 className="text-sm font-semibold text-[var(--text)]">Nuevo pedido</h2>
+              <button
+                onClick={closeNewOrder}
+                className="p-1.5 rounded-md text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="flex-1 p-4 sm:p-5 space-y-4">
 
           {/* Datos del cliente */}
           <div className="grid grid-cols-1 gap-3">
@@ -1420,6 +1615,37 @@ export default function OrdersPage() {
                   <button
                     onClick={() => { setSelectedCustomerId(null); setCustomerName(''); setCustomerQuery(''); setSelectedCustomerBalance(0); setSelectedCustomerCreditLimit(0) }}
                     className="text-xs text-[var(--text3)] hover:text-[var(--danger)]">✕</button>
+                </div>
+              ) : quickCustomerModal ? (
+                <div className="space-y-3 rounded-[var(--radius-md)] border border-[var(--accent)] bg-[var(--accent-subtle)]/40 p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-[var(--text)]">Nuevo cliente</p>
+                    <button onClick={() => setQuickCustomerModal(false)}
+                      className="text-xs text-[var(--text3)] hover:text-[var(--text)]">✕</button>
+                  </div>
+                  <Input label="Nombre y apellido *" value={qcForm.full_name}
+                    onChange={e => setQcForm(f => ({ ...f, full_name: e.target.value }))}
+                    placeholder="Ej: Juan García" autoFocus />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Input label="CUIT / DNI" value={qcForm.document}
+                      onChange={e => setQcForm(f => ({ ...f, document: e.target.value }))}
+                      placeholder="20-12345678-9" />
+                    <Input label="Teléfono" value={qcForm.phone}
+                      onChange={e => setQcForm(f => ({ ...f, phone: e.target.value }))}
+                      placeholder="11-1234-5678" />
+                  </div>
+                  <Input label="Límite de crédito" type="number" min="0" step="1000"
+                    value={qcForm.credit_limit}
+                    onChange={e => setQcForm(f => ({ ...f, credit_limit: e.target.value }))}
+                    placeholder="0 = sin límite" hint="Podés modificarlo después desde Clientes" />
+                  <div className="flex gap-2">
+                    <Button variant="secondary" className="flex-1" onClick={() => setQuickCustomerModal(false)} disabled={qcSaving}>
+                      Cancelar
+                    </Button>
+                    <Button className="flex-1" onClick={handleQuickCreate} loading={qcSaving}>
+                      Crear y seleccionar
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <div className="relative">
@@ -1464,7 +1690,7 @@ export default function OrdersPage() {
                             </button>
                           ))}
                           <button
-                            onClick={() => setQuickCustomerModal(true)}
+                            onClick={() => { setQcForm({ full_name: trimmedCustomerQuery, document: '', phone: '', credit_limit: '' }); setQuickCustomerModal(true) }}
                             className="w-full flex items-center gap-2 px-3 py-2.5 bg-[var(--surface)] hover:bg-[var(--accent-subtle)] transition-colors text-left border-t border-[var(--border)]">
                             <Plus size={14} className="text-[var(--accent)]" />
                             <span className="text-sm font-medium text-[var(--accent)]">Crear cliente &quot;{trimmedCustomerQuery}&quot;</span>
@@ -1483,7 +1709,7 @@ export default function OrdersPage() {
                                   Crealo ahora mismo sin salir del pedido.
                                 </p>
                                 <button
-                                  onClick={() => setQuickCustomerModal(true)}
+                                  onClick={() => { setQcForm({ full_name: trimmedCustomerQuery, document: '', phone: '', credit_limit: '' }); setQuickCustomerModal(true) }}
                                   className="mt-3 inline-flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--accent)] px-3 py-2 text-xs font-medium text-white hover:bg-[var(--accent-hover)] transition-colors">
                                   <Plus size={13} />
                                   Crear cliente rápido
@@ -1501,7 +1727,7 @@ export default function OrdersPage() {
           </div>
 
           {/* Depósito + lista de precio */}
-          <div className={`grid gap-3 ${sellerWarehouseId ? 'grid-cols-1' : 'grid-cols-2'}`}>
+          <div className={`grid gap-3 ${sellerWarehouseId ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
             {!sellerWarehouseId && (
               <Select label="Depósito"
                 options={warehouses.map(w => ({ value: w.id, label: w.name }))}
@@ -1588,70 +1814,63 @@ export default function OrdersPage() {
           {/* Carrito del pedido */}
           {cart.length > 0 && (
             <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden mb-4">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--border)]">
-                    <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)]">Producto</th>
-                    <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Cant.</th>
-                    <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Precio</th>
-                    <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Subtotal</th>
-                    <th className="px-3 py-2" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--border)]">
-                  {cart.map(item => {
-                    const hasStockIssue = stockEnabled && item.quantity > (item.product.stock_current ?? 0)
-                    return (
-                      <tr key={item.product.id} className={hasStockIssue ? 'bg-[var(--danger-subtle)]' : ''}>
-                        <td className="px-3 py-2">
-                          <p className="font-medium text-[var(--text)]">{item.product.name}</p>
+              <div className="divide-y divide-[var(--border)]">
+                {cart.map(item => {
+                  const hasStockIssue = stockEnabled && item.quantity > (item.product.stock_current ?? 0)
+                  return (
+                    <div key={item.product.id} className={`p-3 ${hasStockIssue ? 'bg-[var(--danger-subtle)]' : ''}`}>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="min-w-0">
+                          <p className="font-medium text-[var(--text)] text-sm leading-tight">{item.product.name}</p>
                           {hasStockIssue && (
                             <p className="text-xs text-[var(--danger)] font-medium mt-0.5">
                               ⚠ Stock disponible: {item.product.stock_current ?? 0}
                             </p>
                           )}
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <button onClick={() => updateCartQty(item.product.id, -1)}
-                              className="p-1 rounded hover:bg-[var(--surface2)] hover:text-[var(--accent)] transition-colors">
-                              <Minus size={11} />
-                            </button>
-                            <input
-                              type="number"
-                              min="1"
-                              value={item.quantity || ''}
-                              onChange={e => setCartQty(item.product.id, e.target.value)}
-                              onBlur={() => normalizeCartQty(item.product.id)}
-                              onFocus={e => e.target.select()}
-                              className="w-12 text-sm mono text-center bg-[var(--surface)] border border-[var(--border)] rounded px-1 py-0.5 focus:outline-none focus:border-[var(--accent)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            />
-                            <button onClick={() => updateCartQty(item.product.id, 1)}
-                              className="p-1 rounded hover:bg-[var(--surface2)] hover:text-[var(--accent)] transition-colors">
-                              <Plus size={11} />
-                            </button>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-right">
+                        </div>
+                        <button onClick={() => removeFromCart(item.product.id)}
+                          className="p-1 -m-1 text-[var(--text3)] hover:text-[var(--danger)] flex-shrink-0">
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* Cantidad */}
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => updateCartQty(item.product.id, -1)}
+                            className="w-7 h-7 flex items-center justify-center rounded-md bg-[var(--surface)] border border-[var(--border)] hover:text-[var(--accent)] transition-colors">
+                            <Minus size={13} />
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.quantity || ''}
+                            onChange={e => setCartQty(item.product.id, e.target.value)}
+                            onBlur={() => normalizeCartQty(item.product.id)}
+                            onFocus={e => e.target.select()}
+                            className="w-12 h-7 text-sm mono text-center bg-[var(--surface)] border border-[var(--border)] rounded-md focus:outline-none focus:border-[var(--accent)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <button onClick={() => updateCartQty(item.product.id, 1)}
+                            className="w-7 h-7 flex items-center justify-center rounded-md bg-[var(--surface)] border border-[var(--border)] hover:text-[var(--accent)] transition-colors">
+                            <Plus size={13} />
+                          </button>
+                        </div>
+                        {/* Precio unitario */}
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-[var(--text3)]">$</span>
                           <input type="number" min="0" step="0.01" value={item.unit_price}
                             onChange={e => updateCartPrice(item.product.id, e.target.value)}
-                            className="w-20 text-xs mono text-right bg-[var(--surface)] border border-[var(--border)] rounded px-1.5 py-1 focus:outline-none focus:border-[var(--accent)]"
+                            className="w-24 h-7 text-sm mono text-right bg-[var(--surface)] border border-[var(--border)] rounded-md px-2 focus:outline-none focus:border-[var(--accent)]"
                           />
-                        </td>
-                        <td className="px-3 py-2 text-right mono text-sm font-semibold">
+                        </div>
+                        {/* Subtotal */}
+                        <span className="mono text-sm font-semibold text-[var(--text)] ml-auto whitespace-nowrap">
                           {formatCurrency(item.unit_price * item.quantity)}
-                        </td>
-                        <td className="px-3 py-2">
-                          <button onClick={() => removeFromCart(item.product.id)}
-                            className="text-[var(--text3)] hover:text-[var(--danger)]">
-                            <Trash2 size={13} />
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+                        </span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
               <div className="px-3 py-2 border-t border-[var(--border)] flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-[var(--text3)]">Descuento:</span>
@@ -1695,7 +1914,7 @@ export default function OrdersPage() {
               </span>
             </label>
             {payAlreadyCollected && (
-              <div className="grid grid-cols-2 gap-3 pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                 <Select label="Método de cobro"
                   options={PAYMENT_METHODS}
                   value={collectedMethod}
@@ -1708,18 +1927,20 @@ export default function OrdersPage() {
             )}
           </div>
 
-          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-2 border-t border-[var(--border)]">
-            <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={() => { resetOrderForm(); setNewOrderModal(false) }} disabled={savingOrder}>
-                Cancelar
-              </Button>
-              <Button onClick={handleCreateOrder} loading={savingOrder} disabled={cart.length === 0}>
-                Crear pedido {cart.length > 0 ? `· ${formatCurrency(cartTotal)}` : ''}
-              </Button>
+              <div className="sticky bottom-0 -mx-4 sm:-mx-5 px-4 sm:px-5 bg-[var(--surface)] pt-3 pb-4 mt-2 border-t border-[var(--border)]">
+                <div className="flex gap-2">
+                  <Button variant="secondary" className="flex-1 sm:flex-none" onClick={discardNewOrder} disabled={savingOrder}>
+                    Descartar
+                  </Button>
+                  <Button className="flex-1" onClick={handleCreateOrder} loading={savingOrder} disabled={cart.length === 0}>
+                    Crear pedido {cart.length > 0 ? `· ${formatCurrency(cartTotal)}` : ''}
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </Modal>
+        )}
+      </div>
 
       {/* ── Modal confirmar entrega ── */}
       <Modal open={deliverModal} onClose={() => { setDeliverModal(false); setDeliverOrderId(null) }}
@@ -2109,6 +2330,35 @@ export default function OrdersPage() {
                 }}
                 className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--danger)] text-white hover:opacity-90">
                 Cancelar pedido
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Confirmación de confirmar pedido ── */}
+      {confirmOrder && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setConfirmOrder(null)} />
+          <div className="relative bg-[var(--surface)] rounded-[var(--radius-lg)] p-6 w-full max-w-sm shadow-xl">
+            <h3 className="text-base font-semibold text-[var(--text)] mb-2">Confirmar pedido</h3>
+            <p className="text-sm text-[var(--text2)] mb-5">
+              ¿Confirmás el pedido de <span className="font-medium text-[var(--text)]">{confirmOrder.customer_name}</span>?
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setConfirmOrder(null)}
+                className="px-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] text-[var(--text2)] border border-[var(--border)]">
+                Volver
+              </button>
+              <button
+                onClick={async () => {
+                  const { id } = confirmOrder
+                  setConfirmOrder(null)
+                  await handleAction(id, 'confirm')
+                }}
+                className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]">
+                Confirmar pedido
               </button>
             </div>
           </div>
