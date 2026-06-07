@@ -270,25 +270,28 @@ export default function CashRegisterPage() {
                             </div>
                             <Badge variant="success">Abierta</Badge>
                           </div>
-                          <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] px-3">
                             {[
                               { label: 'Fondo', value: r.opening_amount, accent: false },
-                              { label: 'Efectivo', value: r.system_efectivo, accent: false },
+                              { label: 'Efectivo', value: r.system_efectivo, accent: true },
                               { label: 'Débito', value: r.system_debito, accent: false },
                               { label: 'Crédito', value: r.system_credito, accent: false },
                               { label: 'Transferencia', value: r.system_transferencia, accent: false },
                               { label: 'QR', value: r.system_qr, accent: false },
                               { label: 'Cta. Cte.', value: (r as CashRegister & { system_cuenta_corriente?: number }).system_cuenta_corriente ?? 0, accent: false },
-                              { label: 'Total', value: r.system_total, accent: false },
-                            ].map(card => (
-                              <div key={card.label}
-                                className={`rounded p-2 ${card.accent ? 'bg-[var(--accent-subtle)]' : 'bg-[var(--surface2)]'}`}>
-                                <p className={`text-[10px] ${card.accent ? 'text-[var(--accent)]' : 'text-[var(--text3)]'}`}>{card.label}</p>
-                                <p className={`mono font-semibold ${card.accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>
-                                  {formatCurrency(card.value)}
-                                </p>
+                            ].map(row => (
+                              <div key={row.label}
+                                className="flex items-center justify-between gap-3 py-1.5 border-b border-[var(--border)] last:border-0">
+                                <span className={`text-xs ${row.accent ? 'text-[var(--accent)] font-medium' : 'text-[var(--text3)]'}`}>{row.label}</span>
+                                <span className={`text-xs font-semibold mono whitespace-nowrap ${row.accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>
+                                  {formatCurrency(row.value)}
+                                </span>
                               </div>
                             ))}
+                          </div>
+                          <div className="flex items-center justify-between gap-3 px-1">
+                            <span className="text-xs font-semibold text-[var(--text)]">Total vendido</span>
+                            <span className="text-sm font-bold mono whitespace-nowrap text-[var(--text)]">{formatCurrency(r.system_total)}</span>
                           </div>
                           <p className="text-xs text-[var(--text3)]">Desde {formatDateTime(r.opened_at)}</p>
                           <Button variant="danger" onClick={() => openCloseModal(r)} className="w-full">
@@ -317,34 +320,48 @@ export default function CashRegisterPage() {
                       <span className="text-xs text-[var(--text3)]">Desde {formatDateTime(current.opened_at)}</span>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                      {[
-                        { label: 'Fondo inicial', value: current.opening_amount, accent: false },
-                        { label: 'Efectivo', value: current.system_efectivo, accent: true },
-                        { label: 'Débito', value: current.system_debito, accent: false },
-                        { label: 'Crédito', value: current.system_credito, accent: false },
-                        { label: 'Transferencia', value: current.system_transferencia, accent: false },
-                        { label: 'QR', value: current.system_qr, accent: false },
-                        { label: 'Cuenta Corriente', value: current.system_cuenta_corriente, accent: false },
-                        { label: 'Total vendido', value: current.system_total, accent: false },
-                      ].map(card => (
-                        <div key={card.label}
-                          className={`rounded-[var(--radius-md)] p-3 ${card.accent ? 'bg-[var(--accent-subtle)] border border-[var(--accent)]' : 'bg-[var(--surface2)]'}`}>
-                          <p className={`text-xs mb-1 ${card.accent ? 'text-[var(--accent)]' : 'text-[var(--text3)]'}`}>{card.label}</p>
-                          <p className={`text-lg font-bold mono ${card.accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>
-                            {formatCurrency(card.value)}
-                          </p>
+                    <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 sm:gap-x-6 px-3">
+                        {[
+                          { label: 'Fondo inicial', value: current.opening_amount, accent: false },
+                          { label: 'Efectivo', value: current.system_efectivo, accent: true },
+                          { label: 'Débito', value: current.system_debito, accent: false },
+                          { label: 'Crédito', value: current.system_credito, accent: false },
+                          { label: 'Transferencia', value: current.system_transferencia, accent: false },
+                          { label: 'QR', value: current.system_qr, accent: false },
+                          { label: 'Cuenta Corriente', value: current.system_cuenta_corriente, accent: false },
+                        ].map(row => (
+                          <div key={row.label}
+                            className="flex items-center justify-between gap-3 py-2.5 border-b border-[var(--border)]">
+                            <span className={`text-sm flex items-center gap-1.5 ${row.accent ? 'text-[var(--accent)] font-medium' : 'text-[var(--text3)]'}`}>
+                              {row.accent && <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />}
+                              {row.label}
+                            </span>
+                            <span className={`text-sm font-semibold mono whitespace-nowrap ${row.accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>
+                              {formatCurrency(row.value)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 sm:gap-x-6 px-3 py-3 bg-[var(--surface)]">
+                        <div className="flex items-center justify-between gap-3 py-1">
+                          <span className="text-sm font-semibold text-[var(--text)]">Total vendido</span>
+                          <span className="text-base font-bold mono whitespace-nowrap text-[var(--text)]">
+                            {formatCurrency(current.system_total)}
+                          </span>
                         </div>
-                      ))}
+                        <div className="flex items-center justify-between gap-3 py-1">
+                          <span className="text-sm font-semibold text-[var(--accent)]">Efectivo esperado</span>
+                          <span className="text-base font-bold mono whitespace-nowrap text-[var(--accent)]">
+                            {formatCurrency(Number(current.opening_amount) + current.system_efectivo)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="mt-3 text-xs text-[var(--text3)]">
-                      Efectivo esperado en caja:{' '}
-                      <span className="font-semibold text-[var(--text)] mono">
-                        {formatCurrency(Number(current.opening_amount) + current.system_efectivo)}
-                      </span>
-                      {' '}(fondo + ventas en efectivo)
-                    </div>
+                    <p className="mt-2 text-xs text-[var(--text3)]">
+                      Efectivo esperado = fondo inicial + ventas en efectivo
+                    </p>
 
                     {isMyCaja && (
                       <div className="mt-4 flex justify-end">
