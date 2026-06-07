@@ -74,6 +74,11 @@ export default function OGImage() {
         {/* Headline */}
         <div
           style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 14,
             fontSize: 64,
             fontWeight: 700,
             color: '#ffffff',
@@ -84,7 +89,7 @@ export default function OGImage() {
             marginBottom: 20,
           }}
         >
-          Control total de tu negocio,{' '}
+          <span>Control total de tu negocio,</span>
           <span style={{ color: '#4ade80' }}>en tiempo real</span>
         </div>
 
