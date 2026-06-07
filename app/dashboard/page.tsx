@@ -6,6 +6,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { StatCardSkeleton, CardListSkeleton } from '@/components/ui/Skeleton'
+import { SmartInsightsCard } from '@/components/modules/SmartInsightsCard'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { formatCurrency, formatCompactCurrency, formatAxisCurrency, formatNumber, formatDateTime, getPaymentMethodLabel, getPeriodDates, getLocalWeekStart } from '@/lib/utils'
@@ -268,6 +269,9 @@ export default function DashboardPage() {
             className={(data?.accounts_receivable ?? 0) > 0 ? 'border-amber-500/30 bg-amber-500/5' : ''}
           />
         </div>
+
+        {/* ══ Para tener en cuenta — avisos accionables del negocio ═ */}
+        <SmartInsightsCard />
 
         {/* ══ Héroe: tendencia 30 días + acción requerida ═════════ */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
