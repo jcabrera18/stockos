@@ -6,6 +6,7 @@
 import Dexie, { type Table } from 'dexie'
 import type { Product } from '@/types'
 import type { Promotion } from '@/lib/promoUtils'
+import type { CustomerSummary } from '@/app/customers/page'
 
 export interface LocalBarcode {
   barcode: string     // PK — get() es O(1), sub-5ms garantizado
@@ -51,6 +52,16 @@ export interface PendingSale {
   last_error?: string
 }
 
+export interface PendingOrder {
+  id: string                              // local UUID
+  created_at: string
+  customer_name: string                   // para mostrar en el banner de pendientes
+  payload: Record<string, unknown>        // cuerpo del POST /api/orders
+  status: 'pending' | 'failed'
+  retry_count: number
+  last_error?: string
+}
+
 class POSDatabase extends Dexie {
   products!: Table<Product>
   barcodes!: Table<LocalBarcode>
@@ -58,8 +69,10 @@ class POSDatabase extends Dexie {
   priceRules!: Table<LocalPriceRule>
   priceOverrides!: Table<LocalPriceOverride>
   promotions!: Table<Promotion>
+  customers!: Table<CustomerSummary>
   syncMeta!: Table<SyncMeta>
   pendingSales!: Table<PendingSale>
+  pendingOrders!: Table<PendingOrder>
 
   constructor() {
     super('stockos_pos')
@@ -89,6 +102,29 @@ class POSDatabase extends Dexie {
       promotions:     'id, scope, scope_id',
       syncMeta:       'key',
       pendingSales:   'id, status, created_at',
+    })
+    this.version(4).stores({
+      products:       'id, name, barcode, updated_at',
+      barcodes:       'barcode, product_id',
+      priceLists:     'id',
+      priceRules:     'id, product_id, price_list_id',
+      priceOverrides: 'id, product_id',
+      promotions:     'id, scope, scope_id',
+      customers:      'id, full_name, document, phone, customer_code',
+      syncMeta:       'key',
+      pendingSales:   'id, status, created_at',
+    })
+    this.version(5).stores({
+      products:       'id, name, barcode, updated_at',
+      barcodes:       'barcode, product_id',
+      priceLists:     'id',
+      priceRules:     'id, product_id, price_list_id',
+      priceOverrides: 'id, product_id',
+      promotions:     'id, scope, scope_id',
+      customers:      'id, full_name, document, phone, customer_code',
+      syncMeta:       'key',
+      pendingSales:   'id, status, created_at',
+      pendingOrders:  'id, status, created_at',
     })
   }
 }

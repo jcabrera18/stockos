@@ -20,6 +20,7 @@ import {
   resolveBarcode,
   computeLocalPrice,
   searchProductsLocal,
+  searchCustomersLocal,
   cacheProductFromScan,
   syncPromotions,
   getLocalPromotions,
@@ -671,16 +672,27 @@ export default function POSPage() {
   }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!customerQuery.trim() || customerQuery.length < 2) { setCustomerResults([]); return }
+    const q = customerQuery.trim()
+    if (!q || q.length < 2) { setCustomerResults([]); return }
+    let cancelled = false
     const timer = setTimeout(async () => {
+      // Cache local primero → resultados instantáneos y soporte offline
+      const local = await searchCustomersLocal(q)
+      if (!cancelled && local.length > 0) setCustomerResults(local)
+
       setSearchingCustomer(true)
       try {
-        const data = await api.get<CustomerSummary[]>(`/api/customers/search?q=${encodeURIComponent(customerQuery)}`)
-        setCustomerResults(data)
-      } catch { setCustomerResults([]) }
-      finally { setSearchingCustomer(false) }
-    }, 300)
-    return () => clearTimeout(timer)
+        // Refresca con el server para tener saldos al día
+        const data = await api.get<CustomerSummary[]>(`/api/customers/search?q=${encodeURIComponent(q)}`)
+        if (!cancelled) setCustomerResults(data)
+      } catch {
+        // Sin red → quedarse con los resultados del cache local
+        if (!cancelled && local.length === 0) setCustomerResults([])
+      } finally {
+        if (!cancelled) setSearchingCustomer(false)
+      }
+    }, 250)
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [customerQuery])
 
   useEffect(() => {

@@ -16,8 +16,9 @@
  */
 import { api } from '@/lib/api'
 import { posDB, type LocalPriceList, type LocalPriceRule, type LocalPriceOverride } from '@/lib/pos-db'
-import type { Product } from '@/types'
+import type { Product, PaginatedResponse } from '@/types'
 import type { Promotion } from '@/lib/promoUtils'
+import type { CustomerSummary } from '@/app/customers/page'
 
 // ── Tipos exportados ──────────────────────────────────────────────────────────
 
@@ -200,6 +201,35 @@ export async function getVariablePriceProducts(): Promise<Product[]> {
   }
 }
 
+// ── Búsqueda local de clientes ─────────────────────────────────────────────────
+
+/**
+ * Búsqueda de clientes en IndexedDB local.
+ * Permite seleccionar cliente para cuenta corriente sin conexión y da
+ * resultados instantáneos en el POS. Retorna [] si el cache está vacío
+ * → el caller puede hacer fallback al server.
+ */
+export async function searchCustomersLocal(query: string, limit = 8): Promise<CustomerSummary[]> {
+  try {
+    const q = query.toLowerCase()
+    return posDB.customers
+      .filter(
+        c =>
+          c.is_active !== false &&
+          (c.full_name.toLowerCase().includes(q) ||
+            (c.razon_social ?? '').toLowerCase().includes(q) ||
+            (c.nombre_fantasia ?? '').toLowerCase().includes(q) ||
+            (c.document ?? '').includes(q) ||
+            (c.phone ?? '').includes(q) ||
+            (c.customer_code ?? '').toLowerCase().includes(q)),
+      )
+      .limit(limit)
+      .toArray()
+  } catch {
+    return []
+  }
+}
+
 // ── Lectura desde cache ───────────────────────────────────────────────────────
 
 export async function getLocalPromotions(): Promise<Promotion[]> {
@@ -287,6 +317,38 @@ export async function syncProducts(warehouseId?: string | null): Promise<void> {
     await posDB.products.bulkPut(products)
     if (barcodeEntries.length > 0) await posDB.barcodes.bulkPut(barcodeEntries)
     await posDB.syncMeta.put({ key: 'products', synced_at: now })
+  })
+}
+
+/**
+ * Sincroniza el padrón completo de clientes a IndexedDB.
+ * Trae todas las páginas para que la búsqueda local y la venta a cuenta
+ * corriente funcionen sin conexión.
+ */
+export async function syncCustomers(): Promise<void> {
+  const PAGE_SIZE = 100
+
+  const first = await api.get<PaginatedResponse<CustomerSummary>>(
+    '/api/customers', { limit: PAGE_SIZE, page: 1 },
+  )
+  const totalPages = first.pagination.pages
+
+  let customers = first.data
+  if (totalPages > 1) {
+    const rest = await Promise.all(
+      Array.from({ length: totalPages - 1 }, (_, i) =>
+        api.get<PaginatedResponse<CustomerSummary>>(
+          '/api/customers', { limit: PAGE_SIZE, page: i + 2 },
+        )
+      )
+    )
+    customers = [...first.data, ...rest.flatMap(r => r.data)]
+  }
+
+  await posDB.transaction('rw', posDB.customers, posDB.syncMeta, async () => {
+    await posDB.customers.clear()
+    if (customers.length > 0) await posDB.customers.bulkPut(customers)
+    await posDB.syncMeta.put({ key: 'customers', synced_at: new Date().toISOString() })
   })
 }
 
@@ -383,6 +445,7 @@ export async function initPOSCache(warehouseId?: string | null): Promise<void> {
     syncProducts(warehouseId),
     syncPromotions(),
     syncPriceLists(),
+    syncCustomers().catch(() => {}),
     syncPriceRules().catch(() => {}),
     syncPriceOverrides().catch(() => {}),
   ])
@@ -396,6 +459,7 @@ export async function syncPOSCache(warehouseId?: string | null): Promise<void> {
     syncProducts(warehouseId).catch(() => {}),
     syncPromotions().catch(() => {}),
     syncPriceLists().catch(() => {}),
+    syncCustomers().catch(() => {}),
     syncPriceRules().catch(() => {}),
     syncPriceOverrides().catch(() => {}),
   ])

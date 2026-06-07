@@ -52,6 +52,7 @@ export async function syncPendingSales(): Promise<{ synced: number; failed: numb
           ...sale.payload,
           payment_method: 'cuenta_corriente',
           installments: 1,
+          created_at: sale.created_at,
         })
         apiSaleId = apiSale.id
         await api.post(`/api/customers/${sale.customer_charge.customer_id}/charge`, {
@@ -59,7 +60,10 @@ export async function syncPendingSales(): Promise<{ synced: number; failed: numb
           amount: sale.customer_charge.amount,
         })
       } else {
-        const apiSale = await api.post<{ id: string }>('/api/sales', sale.payload)
+        const apiSale = await api.post<{ id: string }>('/api/sales', {
+          ...sale.payload,
+          created_at: sale.created_at,
+        })
         apiSaleId = apiSale.id
       }
 

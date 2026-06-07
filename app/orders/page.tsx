@@ -24,7 +24,9 @@ import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
 import { useAuth } from '@/hooks/useAuth'
 import { usePOSSync } from '@/hooks/usePOSSync'
-import { searchProductsLocal } from '@/lib/pos-cache'
+import { searchProductsLocal, searchCustomersLocal } from '@/lib/pos-cache'
+import { queueOrder, getPendingOrdersCount, syncPendingOrders } from '@/lib/orders-queue'
+import { isNetworkError } from '@/lib/sales-queue'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────
@@ -199,6 +201,9 @@ export default function OrdersPage() {
   const [qcSaving, setQcSaving] = useState(false)
   const customerSearchRequestRef = useRef(0)
   const draftLoadedRef = useRef(false)
+
+  // Pedidos offline pendientes de sincronizar
+  const [pendingOrdersCount, setPendingOrdersCount] = useState(0)
 
   // Lista de carga (picking)
   interface PickingItem {
@@ -669,6 +674,26 @@ export default function OrdersPage() {
     fetchOrders()
   }, [fetchOrders])
 
+  // Sincronizar pedidos offline al recuperar la conexión (y al montar)
+  useEffect(() => {
+    const handleOnline = () => {
+      syncPendingOrders()
+        .then(({ synced, failed }) => {
+          if (synced > 0) {
+            toast.success(`${synced} pedido${synced > 1 ? 's' : ''} sincronizado${synced > 1 ? 's' : ''}`)
+            fetchOrders()
+          }
+          if (failed > 0) toast.error(`${failed} pedido${failed > 1 ? 's' : ''} no se pudieron sincronizar`)
+          getPendingOrdersCount().then(setPendingOrdersCount).catch(() => {})
+        })
+        .catch(() => {})
+    }
+    window.addEventListener('online', handleOnline)
+    getPendingOrdersCount().then(setPendingOrdersCount).catch(() => {})
+    handleOnline()
+    return () => window.removeEventListener('online', handleOnline)
+  }, [fetchOrders])
+
   useEffect(() => {
     Promise.all([
       api.get<Warehouse[]>('/api/warehouses'),
@@ -755,7 +780,11 @@ export default function OrdersPage() {
               .filter(s => !cart.find(c => c.product.id === s.product_id))
               .map(s => ({ id: s.product_id, name: s.product_name, stock_current: s.stock_current, barcode: s.barcode, cost_price: s.cost_price ?? 0, sell_price: s.sell_price ?? 0 } as Product))
           )
-        } catch { setProductResults([]) }
+        } catch {
+          // Sin conexión → fallback al cache local de productos
+          const local = await searchProductsLocal(productQuery.trim(), 8)
+          setProductResults(local.filter(p => !cart.find(c => c.product.id === p.id)))
+        }
         finally { setSearchingProducts(false) }
       }, 300)
       return () => clearTimeout(timer)
@@ -793,14 +822,23 @@ export default function OrdersPage() {
 
     const requestId = ++customerSearchRequestRef.current
     const timer = setTimeout(async () => {
+      // Cache local primero → resultados instantáneos y soporte offline
+      const local = (await searchCustomersLocal(query)).map(c => ({
+        id: c.id, full_name: c.full_name, phone: c.phone,
+        current_balance: c.current_balance, credit_limit: c.credit_limit,
+      }))
+      if (customerSearchRequestRef.current === requestId && local.length > 0) setCustomerResults(local)
+
       setSearchingCustomers(true)
       try {
+        // Refresca con el server para tener saldos al día
         const data = await api.get<{ id: string; full_name: string; phone?: string; current_balance: number; credit_limit: number }[]>(
           `/api/customers/search?q=${encodeURIComponent(query)}`
         )
         if (customerSearchRequestRef.current === requestId) setCustomerResults(data)
       } catch {
-        if (customerSearchRequestRef.current === requestId) setCustomerResults([])
+        // Sin red → quedarse con los resultados del cache local
+        if (customerSearchRequestRef.current === requestId && local.length === 0) setCustomerResults([])
       } finally {
         if (customerSearchRequestRef.current === requestId) setSearchingCustomers(false)
       }
@@ -940,32 +978,59 @@ export default function OrdersPage() {
     if (cartStockIssues.length > 0) { toast.error('Hay productos con stock insuficiente'); return }
 
     setSavingOrder(true)
-    try {
-      await api.post('/api/orders', {
+
+    const payload = {
+      customer_name: customerName.trim(),
+      warehouse_id: warehouseId || null,
+      price_list_id: priceListId || null,
+      discount: cartDiscount,
+      notes: orderNotes.trim() || null,
+      customer_id: selectedCustomerId ?? null,
+      items: cart.map(i => ({
+        product_id: i.product.id,
+        quantity: i.quantity,
+        unit_price: i.unit_price,
+        discount: i.discount,
+      })),
+      paid_amount: payAlreadyCollected ? Number(collectedAmount) || cartTotal : 0,
+      payment_method: payAlreadyCollected ? collectedMethod : null,
+      payment_status: payAlreadyCollected
+        ? ((Number(collectedAmount) || cartTotal) >= cartTotal ? 'paid' : 'partial')
+        : 'unpaid',
+    }
+
+    // Guarda el pedido en la cola offline y limpia el formulario
+    const saveOffline = async () => {
+      await queueOrder({
+        id: crypto.randomUUID(),
+        created_at: new Date().toISOString(),
         customer_name: customerName.trim(),
-        warehouse_id: warehouseId || null,
-        price_list_id: priceListId || null,
-        discount: cartDiscount,
-        notes: orderNotes.trim() || null,
-        customer_id: selectedCustomerId ?? null,
-        items: cart.map(i => ({
-          product_id: i.product.id,
-          quantity: i.quantity,
-          unit_price: i.unit_price,
-          discount: i.discount,
-        })),
-        paid_amount: payAlreadyCollected ? Number(collectedAmount) || cartTotal : 0,
-        payment_method: payAlreadyCollected ? collectedMethod : null,
-        payment_status: payAlreadyCollected
-          ? ((Number(collectedAmount) || cartTotal) >= cartTotal ? 'paid' : 'partial')
-          : 'unpaid',
+        payload,
       })
+      toast.success('Sin conexión — pedido guardado, se sincronizará automáticamente')
+      resetOrderForm()
+      setNewOrderModal(false)
+      getPendingOrdersCount().then(setPendingOrdersCount).catch(() => {})
+    }
+
+    try {
+      // Sin conexión → directo a la cola
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        await saveOffline()
+        return
+      }
+      await api.post('/api/orders', payload)
       toast.success('Pedido creado correctamente')
       resetOrderForm()
       setNewOrderModal(false)
       fetchOrders()
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error al crear el pedido')
+      // Falló por red → encolar igualmente para no perder el pedido
+      if (isNetworkError(err)) {
+        await saveOffline()
+      } else {
+        toast.error(err instanceof Error ? err.message : 'Error al crear el pedido')
+      }
     } finally { setSavingOrder(false) }
   }
 
@@ -1074,6 +1139,30 @@ export default function OrdersPage() {
           </div>
 
           <div className="overflow-y-auto flex-1 p-5 space-y-4">
+        {/* Banner pedidos offline pendientes */}
+        {pendingOrdersCount > 0 && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-300 dark:border-yellow-700">
+            <div className="flex items-center gap-2 text-xs text-yellow-700 dark:text-yellow-400">
+              <AlertCircle size={14} className="flex-shrink-0" />
+              <span className="font-medium">{pendingOrdersCount} pedido{pendingOrdersCount > 1 ? 's' : ''} sin sincronizar</span>
+            </div>
+            <button
+              onClick={() => {
+                syncPendingOrders()
+                  .then(({ synced, failed }) => {
+                    if (synced > 0) { toast.success(`${synced} pedido${synced > 1 ? 's' : ''} sincronizado${synced > 1 ? 's' : ''}`); fetchOrders() }
+                    if (failed > 0) toast.error(`${failed} no se pudieron sincronizar`)
+                    getPendingOrdersCount().then(setPendingOrdersCount).catch(() => {})
+                  })
+                  .catch(() => {})
+              }}
+              className="text-xs font-semibold text-yellow-700 dark:text-yellow-400 underline flex-shrink-0"
+            >
+              Reintentar
+            </button>
+          </div>
+        )}
+
         {/* Filtros */}
         <div className="space-y-2">
           {/* Estado */}
