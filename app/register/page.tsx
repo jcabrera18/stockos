@@ -1,6 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState } from 'react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
@@ -12,6 +11,9 @@ interface RegisterData {
   email: string
   pass: string
   pass2: string
+  branch: string
+  warehouse: string
+  register: string
 }
 
 // ── Logo ──────────────────────────────────────────────────────────────────────
@@ -174,12 +176,13 @@ function BrandingPanel() {
 function StepIndicator({ step }: { step: number }) {
   return (
     <div className="flex items-start mb-8">
-      {(['Tu negocio', 'Tu cuenta'] as const).map((label, i) => {
+      {(['Tu negocio', 'Tu cuenta', 'Tu espacio'] as const).map((label, i) => {
         const n = i + 1
         const done = step > n
         const active = step === n
+        const last = i === 2
         return (
-          <div key={i} className={`flex items-center ${i === 0 ? '' : ''}`} style={{ flex: i === 0 ? 'none' : 'none' }}>
+          <div key={i} className="flex items-center" style={{ flex: 'none' }}>
             <div className="flex flex-col items-center gap-1.5">
               <div
                 className="w-8 h-8 rounded-full flex items-center justify-center transition-all duration-300"
@@ -204,13 +207,13 @@ function StepIndicator({ step }: { step: number }) {
                 {label}
               </span>
             </div>
-            {i === 0 && (
+            {!last && (
               <div
                 className="transition-all duration-500"
                 style={{
                   height: 2,
-                  width: 48,
-                  background: step > 1 ? '#16a34a' : '#e5e7eb',
+                  width: 40,
+                  background: step > n ? '#16a34a' : '#e5e7eb',
                   margin: '0 8px 18px',
                   flexShrink: 0,
                 }}
@@ -395,13 +398,11 @@ function Step1({ data, onNext }: { data: RegisterData; onNext: (d: Partial<Regis
 
 // ── Step 2 ────────────────────────────────────────────────────────────────────
 function Step2({
-  data, onNext, onBack, loading, apiError,
+  data, onNext, onBack,
 }: {
   data: RegisterData
   onNext: (d: Partial<RegisterData>) => void
   onBack: () => void
-  loading: boolean
-  apiError: string
 }) {
   const [email, setEmail] = useState(data.email || '')
   const [pass, setPass]   = useState(data.pass  || '')
@@ -456,6 +457,160 @@ function Step2({
         />
       </div>
 
+      <button
+        type="submit"
+        className="w-full mt-6 bg-[#16a34a] hover:bg-[#15803d] active:scale-[.98] text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
+        style={{ padding: '13px', fontSize: 15, letterSpacing: '-0.01em' }}
+      >
+        Continuar <span style={{ fontSize: 16 }}>→</span>
+      </button>
+      <button
+        type="button"
+        onClick={onBack}
+        className="w-full mt-2.5 text-[14px] font-semibold text-gray-500 hover:text-gray-700 hover:border-gray-400 rounded-xl transition-all"
+        style={{ padding: '11px', border: '1.5px solid #e5e7eb' }}
+      >
+        ← Volver
+      </button>
+      <TrustBadges />
+    </form>
+  )
+}
+
+// ── Workspace Row ─────────────────────────────────────────────────────────────
+function WorkspaceRow({
+  icon, color, title, help, value, onChange, error, autoFocus,
+}: {
+  icon: React.ReactNode
+  color: string
+  title: string
+  help: string
+  value: string
+  onChange: (v: string) => void
+  error?: string
+  autoFocus?: boolean
+}) {
+  const [focused, setFocused] = useState(false)
+  return (
+    <div className="flex gap-3">
+      <div
+        className="flex items-center justify-center flex-shrink-0 rounded-xl"
+        style={{ width: 40, height: 40, background: `${color}14`, color, marginTop: 2 }}
+      >
+        {icon}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex flex-col gap-1">
+          <span className="text-[13px] font-semibold text-gray-800">{title}</span>
+          <span className="text-[12px] text-gray-500 leading-snug">{help}</span>
+        </div>
+        <input
+          value={value}
+          autoFocus={autoFocus}
+          onChange={e => onChange(e.target.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          style={{
+            width: '100%',
+            marginTop: 8,
+            padding: '9px 12px',
+            fontSize: 15,
+            color: '#111827',
+            background: '#fff',
+            border: `1.5px solid ${error ? '#ef4444' : focused ? '#16a34a' : '#e5e7eb'}`,
+            borderRadius: 10,
+            outline: 'none',
+            boxShadow: focused ? `0 0 0 3px ${error ? '#fee2e2' : '#f0fdf4'}` : 'none',
+            transition: 'border-color .15s, box-shadow .15s',
+            fontFamily: 'inherit',
+          }}
+        />
+        {error && <span className="text-[12px] font-medium text-red-500 mt-1 block">{error}</span>}
+      </div>
+    </div>
+  )
+}
+
+// ── Step 3 — Espacio de trabajo ───────────────────────────────────────────────
+function StepWorkspace({
+  data, onNext, onBack, loading, apiError,
+}: {
+  data: RegisterData
+  onNext: (d: Partial<RegisterData>) => void
+  onBack: () => void
+  loading: boolean
+  apiError: string
+}) {
+  const [branch, setBranch]       = useState(data.branch    || 'Sucursal Principal')
+  const [warehouse, setWarehouse] = useState(data.warehouse || 'Depósito Principal')
+  const [register, setRegister]   = useState(data.register  || 'Caja 1')
+  const [errors, setErrors] = useState<Record<string, string>>({})
+
+  const go = (e: React.FormEvent) => {
+    e.preventDefault()
+    const err: Record<string, string> = {}
+    if (!branch.trim())    err.branch = 'Poné un nombre a tu sucursal'
+    if (!warehouse.trim()) err.warehouse = 'Poné un nombre a tu depósito'
+    if (!register.trim())  err.register = 'Poné un nombre a tu caja'
+    setErrors(err)
+    if (!Object.keys(err).length) onNext({ branch, warehouse, register })
+  }
+
+  return (
+    <form onSubmit={go} style={{ animation: 'fadeUp .35s ease both' }}>
+      <StepIndicator step={3} />
+      <h1 className="text-gray-900 mb-1.5" style={{ fontSize: 26, fontWeight: 800, letterSpacing: '-0.03em' }}>
+        Tu espacio de trabajo
+      </h1>
+      <p className="text-gray-500 text-[15px] mb-5">
+        Así organiza StockOS tu negocio. Dejá estos nombres o cambialos —
+        después podés agregar más sucursales y cajas.
+      </p>
+
+      <div className="flex flex-col gap-5">
+        <WorkspaceRow
+          color="#16a34a"
+          autoFocus
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 9l1.5-5h15L21 9" /><path d="M4 9v11h16V9" /><path d="M9 20v-6h6v6" />
+            </svg>
+          }
+          title="Sucursal"
+          help="Tu local físico. Si tenés más de uno, después sumás los que quieras."
+          value={branch}
+          onChange={setBranch}
+          error={errors.branch}
+        />
+        <WorkspaceRow
+          color="#0ea5e9"
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+              <path d="M3.3 7L12 12l8.7-5M12 22V12" />
+            </svg>
+          }
+          title="Depósito"
+          help="Donde vive el stock de esa sucursal. Es lo que necesitás para cargar productos."
+          value={warehouse}
+          onChange={setWarehouse}
+          error={errors.warehouse}
+        />
+        <WorkspaceRow
+          color="#f59e0b"
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="5" width="20" height="14" rx="2" /><line x1="2" y1="10" x2="22" y2="10" />
+            </svg>
+          }
+          title="Caja"
+          help="Donde registrás los cobros del día. Cada sucursal puede tener varias."
+          value={register}
+          onChange={setRegister}
+          error={errors.register}
+        />
+      </div>
+
       {apiError && (
         <div className="mt-4 px-3 py-2.5 rounded-xl bg-red-50 border border-red-100">
           <p className="text-sm text-red-500 text-center">{apiError}</p>
@@ -471,104 +626,98 @@ function Step2({
         {loading ? (
           <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
         ) : (
-          <>Crear mi cuenta gratis <span style={{ fontSize: 16 }}>→</span></>
+          <>Crear todo y empezar <span style={{ fontSize: 16 }}>→</span></>
         )}
       </button>
       <button
         type="button"
         onClick={onBack}
-        className="w-full mt-2.5 text-[14px] font-semibold text-gray-500 hover:text-gray-700 hover:border-gray-400 rounded-xl transition-all"
+        disabled={loading}
+        className="w-full mt-2.5 text-[14px] font-semibold text-gray-500 hover:text-gray-700 hover:border-gray-400 rounded-xl transition-all disabled:opacity-60"
         style={{ padding: '11px', border: '1.5px solid #e5e7eb' }}
       >
         ← Volver
       </button>
-      <TrustBadges />
     </form>
   )
 }
 
-// ── Step 3 — Éxito ────────────────────────────────────────────────────────────
-function Step3({ bizName }: { bizName: string }) {
-  const [phase, setPhase] = useState(0)
+// ── Step 4 — Revisá tu correo ─────────────────────────────────────────────────
+function StepCheckEmail({ email }: { email: string }) {
+  const supabase = createClient()
+  const [resending, setResending] = useState(false)
+  const [msg, setMsg] = useState('')
 
-  useEffect(() => {
-    const t1 = setTimeout(() => setPhase(1), 1000)
-    const t2 = setTimeout(() => setPhase(2), 2800)
-    return () => { clearTimeout(t1); clearTimeout(t2) }
-  }, [])
+  const handleResend = async () => {
+    setResending(true)
+    setMsg('')
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: { emailRedirectTo: `${window.location.origin}/login` },
+    })
+    setResending(false)
+    setMsg(error ? 'No pudimos reenviar el correo. Probá en unos minutos.' : 'Te reenviamos el correo de confirmación.')
+  }
 
   return (
-    <div style={{ animation: 'fadeUp .4s ease both' }} className="text-center py-4">
+    <div style={{ animation: 'fadeUp .4s ease both' }} className="text-center py-2">
       <div
-        className="w-[88px] h-[88px] rounded-full flex items-center justify-center mx-auto mb-7"
-        style={{
-          background: '#f0fdf4',
-          border: '2px solid #bbf7d0',
-          animation: 'scaleIn .5s cubic-bezier(.34,1.56,.64,1) both',
-        }}
+        className="w-[72px] h-[72px] rounded-2xl flex items-center justify-center mx-auto mb-6"
+        style={{ background: '#f0fdf4', border: '2px solid #bbf7d0', animation: 'scaleIn .5s cubic-bezier(.34,1.56,.64,1) both' }}
       >
-        <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
-          <circle cx="22" cy="22" r="20" fill="#16a34a" />
-          <path
-            d="M13 22L19 28L31 16"
-            stroke="white"
-            strokeWidth="3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ strokeDasharray: 30, strokeDashoffset: 30, animation: 'drawCheck .5s ease .2s forwards' }}
-          />
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M22 6l-10 7L2 6" />
+          <rect x="2" y="4" width="20" height="16" rx="2" />
         </svg>
       </div>
-      <h1
-        className="text-gray-900 mb-2.5 leading-tight"
-        style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.03em' }}
-      >
-        ¡<span style={{ color: '#16a34a' }}>{bizName || 'Tu negocio'}</span> ya está en StockOS!
+      <h1 className="text-gray-900 mb-2" style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-0.03em' }}>
+        Revisá tu correo
       </h1>
-      <p className="text-gray-500 text-[15px] mb-7">
-        {phase === 0 ? 'Preparando tu cuenta…' : 'Entrando al sistema…'}
+      <p className="text-gray-500 text-[15px] leading-relaxed mb-1">
+        Te enviamos un enlace a <strong className="text-gray-700">{email}</strong> para confirmar tu cuenta.
+        Confirmala y después iniciá sesión.
       </p>
-      {phase >= 1 && (
-        <div
-          className="flex items-center justify-center gap-2.5 mb-6"
-          style={{ animation: 'fadeUp .3s ease both' }}
-        >
-          <div
-            className="w-[18px] h-[18px] rounded-full"
-            style={{ border: '2.5px solid #e5e7eb', borderTopColor: '#16a34a', animation: 'spin .8s linear infinite' }}
-          />
-          <span className="text-gray-500 text-[14px]">Configurando tu espacio de trabajo</span>
+      <p className="text-gray-400 text-[13px] mb-7">Revisá también la carpeta de spam.</p>
+
+      {msg && (
+        <div className="mb-4 px-3 py-2.5 rounded-xl bg-green-50 border border-green-100">
+          <p className="text-sm text-green-700">{msg}</p>
         </div>
       )}
-      <div className="bg-gray-50 rounded-lg h-1 overflow-hidden">
-        <div
-          className="h-full rounded-lg"
-          style={{
-            background: 'linear-gradient(90deg,#16a34a,#4ade80)',
-            width: phase === 0 ? '35%' : phase === 1 ? '72%' : '100%',
-            transition: 'width .9s cubic-bezier(.4,0,.2,1)',
-          }}
-        />
-      </div>
-      <div className="mt-7 p-3.5 rounded-xl" style={{ background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-        <p className="text-[13px] font-medium" style={{ color: '#166534' }}>
-          Tu prueba gratuita de 14 dias arranca ahora. Sin tarjeta requerida.
-        </p>
-      </div>
+
+      <Link
+        href={`/login?registered=1&email=${encodeURIComponent(email)}`}
+        className="block w-full bg-[#16a34a] hover:bg-[#15803d] active:scale-[.98] text-white font-bold rounded-xl transition-all"
+        style={{ padding: '13px', fontSize: 15, letterSpacing: '-0.01em' }}
+      >
+        Ir a iniciar sesión →
+      </Link>
+      <button
+        type="button"
+        onClick={handleResend}
+        disabled={resending}
+        className="w-full mt-3 text-[14px] font-semibold text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-60"
+        style={{ padding: '8px' }}
+      >
+        {resending ? 'Enviando…' : '¿No te llegó? Reenviar correo'}
+      </button>
     </div>
   )
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function RegisterPage() {
-  const router = useRouter()
   const supabase = createClient()
 
   const [step, setStep]         = useState(1)
   const [animKey, setAnimKey]   = useState(0)
   const [loading, setLoading]   = useState(false)
   const [apiError, setApiError] = useState('')
-  const [formData, setFormData] = useState<RegisterData>({ biz: '', name: '', email: '', pass: '', pass2: '' })
+  const [formData, setFormData] = useState<RegisterData>({
+    biz: '', name: '', email: '', pass: '', pass2: '',
+    branch: 'Sucursal Principal', warehouse: 'Depósito Principal', register: 'Caja 1',
+  })
 
   const next = (data: Partial<RegisterData>) => {
     setFormData(d => ({ ...d, ...data }))
@@ -593,10 +742,13 @@ export default function RegisterPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          business_name: merged.biz.trim(),
-          full_name:     merged.name.trim(),
-          email:         merged.email.trim().toLowerCase(),
-          password:      merged.pass,
+          business_name:  merged.biz.trim(),
+          full_name:      merged.name.trim(),
+          email:          merged.email.trim().toLowerCase(),
+          password:       merged.pass,
+          branch_name:    merged.branch.trim(),
+          warehouse_name: merged.warehouse.trim(),
+          register_name:  merged.register.trim(),
         }),
       })
 
@@ -607,27 +759,18 @@ export default function RegisterPage() {
         return
       }
 
-      const { error: loginErr } = await supabase.auth.signInWithPassword({
-        email:    merged.email.trim().toLowerCase(),
-        password: merged.pass,
-      })
-
-      if (loginErr) {
-        router.replace('/login')
-        return
-      }
-
-      // Disparar el mail de confirmación de cuenta (no bloqueante).
-      // El usuario ya entra al sistema; el banner insiste hasta que confirme.
+      // Flujo confirm-first: enviamos el mail de confirmación y mandamos al
+      // login con un aviso. GoTrue NO deja loguear cuentas sin confirmar, así
+      // que NO intentamos auto-login: el usuario confirma y recién ahí entra.
       supabase.auth.resend({
         type: 'signup',
         email: merged.email.trim().toLowerCase(),
         options: { emailRedirectTo: `${window.location.origin}/login` },
       }).catch(() => {})
 
+      // Pantalla "Revisá tu correo": el usuario debe confirmar antes de entrar.
       setAnimKey(k => k + 1)
-      setStep(3)
-      setTimeout(() => router.replace('/dashboard'), 3000)
+      setStep(4)
     } catch {
       setApiError('Error de conexión. Intentá de nuevo.')
       setLoading(false)
@@ -709,8 +852,9 @@ export default function RegisterPage() {
           >
             <div key={animKey}>
               {step === 1 && <Step1 data={formData} onNext={next} />}
-              {step === 2 && <Step2 data={formData} onNext={handleRegister} onBack={back} loading={loading} apiError={apiError} />}
-              {step === 3 && <Step3 bizName={formData.biz} />}
+              {step === 2 && <Step2 data={formData} onNext={next} onBack={back} />}
+              {step === 3 && <StepWorkspace data={formData} onNext={handleRegister} onBack={back} loading={loading} apiError={apiError} />}
+              {step === 4 && <StepCheckEmail email={formData.email.trim().toLowerCase()} />}
             </div>
           </div>
           <p className="register-terms mt-4 text-[12px] text-gray-400 text-center">

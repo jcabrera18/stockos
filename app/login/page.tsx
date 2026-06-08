@@ -322,6 +322,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
+  const [notice, setNotice]         = useState('')      // aviso post-registro
+  const [unconfirmed, setUnconfirmed] = useState(false) // login bloqueado por falta de confirmación
+  const [resending, setResending]   = useState(false)
 
   // workstation
   const [branches, setBranches]               = useState<Branch[]>([])
@@ -336,14 +339,57 @@ export default function LoginPage() {
     })
   }, [])
 
+  // Aviso al volver del registro: confirmá tu cuenta antes de entrar.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('registered') === '1') {
+      const em = params.get('email') ?? ''
+      if (em) setEmail(em)
+      setNotice(
+        em
+          ? `¡Cuenta creada! Te enviamos un correo a ${em} para confirmar tu cuenta. Confirmala y después iniciá sesión.`
+          : '¡Cuenta creada! Te enviamos un correo para confirmar tu cuenta. Confirmala y después iniciá sesión.'
+      )
+      // Limpiar la URL para que el aviso no quede pegado al recargar
+      window.history.replaceState({}, '', '/login')
+    }
+  }, [])
+
+  const handleResendConfirm = async () => {
+    if (!email.trim()) return
+    setResending(true)
+    setError('')
+    const { error: err } = await supabase.auth.resend({
+      type: 'signup',
+      email: email.trim().toLowerCase(),
+      options: { emailRedirectTo: `${window.location.origin}/login` },
+    })
+    setResending(false)
+    if (err) { setError('No pudimos reenviar el correo. Probá en unos minutos.'); return }
+    setUnconfirmed(false)
+    setNotice(`Te reenviamos el correo a ${email.trim().toLowerCase()}. Revisá tu bandeja y la carpeta de spam.`)
+  }
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError('')
+    setNotice('')
+    setUnconfirmed(false)
 
     try {
       const { error: authErr } = await supabase.auth.signInWithPassword({ email, password })
-      if (authErr) { setError('Email o contraseña incorrectos'); setLoading(false); return }
+      if (authErr) {
+        // Cuenta creada pero sin confirmar → ofrecer reenviar el correo
+        if (authErr.code === 'email_not_confirmed' || /not confirmed/i.test(authErr.message)) {
+          setUnconfirmed(true)
+          setError('Todavía no confirmaste tu cuenta. Revisá tu correo y confirmá tu cuenta para entrar.')
+        } else {
+          setError('Email o contraseña incorrectos')
+        }
+        setLoading(false)
+        return
+      }
 
       const profile = await api.get<{ role: string }>('/api/auth/me')
 
@@ -582,6 +628,16 @@ export default function LoginPage() {
                   </h1>
                   <p className="text-gray-500 text-[15px] mb-7">Ingresá con tu cuenta de StockOS.</p>
 
+                  {notice && (
+                    <div className="mb-5 px-3.5 py-3 rounded-xl bg-green-50 border border-green-100 flex gap-2.5">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
+                        <path d="M22 6l-10 7L2 6" />
+                        <rect x="2" y="4" width="20" height="16" rx="2" />
+                      </svg>
+                      <p className="text-[13px] text-green-800 leading-snug">{notice}</p>
+                    </div>
+                  )}
+
                   <div className="flex flex-col gap-[18px]">
                     <Field
                       label="Email"
@@ -609,6 +665,16 @@ export default function LoginPage() {
                   {error && (
                     <div className="mt-4 px-3 py-2.5 rounded-xl bg-red-50 border border-red-100">
                       <p className="text-sm text-red-500 text-center">{error}</p>
+                      {unconfirmed && (
+                        <button
+                          type="button"
+                          onClick={handleResendConfirm}
+                          disabled={resending}
+                          className="mt-2 w-full text-sm font-semibold text-[#16a34a] hover:underline disabled:opacity-60"
+                        >
+                          {resending ? 'Enviando…' : 'Reenviar correo de confirmación'}
+                        </button>
+                      )}
                     </div>
                   )}
 
