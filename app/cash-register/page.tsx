@@ -36,6 +36,9 @@ interface CashRegister {
   system_transferencia: number
   system_qr: number
   system_cuenta_corriente: number
+  system_cash_in?: number
+  system_cc_collected?: number
+  system_cash_out?: number
   system_total: number
   difference?: number
   opened_at: string
@@ -79,6 +82,14 @@ export default function CashRegisterPage() {
   const [closingAmount, setClosingAmount] = useState('')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // Movimientos de caja (ingreso/egreso de efectivo)
+  const [movementModal, setMovementModal] = useState(false)
+  const [movementTarget, setMovementTarget] = useState<CashRegister | null>(null)
+  const [movementType, setMovementType] = useState<'in' | 'out'>('out')
+  const [movementAmount, setMovementAmount] = useState('')
+  const [movementReason, setMovementReason] = useState('')
+  const [movementCategory, setMovementCategory] = useState('proveedores')
 
   // Refresh
   const [refreshing, setRefreshing] = useState(false)
@@ -208,6 +219,42 @@ export default function CashRegisterPage() {
     setCloseModal(true)
   }
 
+  const openMovementModal = (register: CashRegister, type: 'in' | 'out') => {
+    setMovementTarget(register)
+    setMovementType(type)
+    setMovementAmount('')
+    setMovementReason('')
+    setMovementCategory('proveedores')
+    setMovementModal(true)
+  }
+
+  const handleMovement = async () => {
+    if (!movementTarget) return
+    if (movementAmount === '' || Number(movementAmount) <= 0) { toast.error('Ingresá un monto válido'); return }
+    if (!movementReason.trim()) { toast.error('Ingresá un motivo'); return }
+    setSaving(true)
+    try {
+      await api.post(`/api/cash-register/${movementTarget.id}/movement`, {
+        type: movementType,
+        amount: Number(movementAmount),
+        reason: movementReason.trim(),
+        ...(movementType === 'out' ? { category: movementCategory } : {}),
+      })
+      toast.success(movementType === 'out' ? 'Egreso registrado' : 'Ingreso registrado')
+      setMovementModal(false)
+      setMovementTarget(null)
+      window.dispatchEvent(new Event('caja-changed'))
+      fetchData()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al registrar el movimiento')
+    } finally { setSaving(false) }
+  }
+
+  // Efectivo esperado = fondo + ventas efectivo + ingresos + cobros CC efectivo − egresos
+  const expectedCash = (r: CashRegister) =>
+    Number(r.opening_amount) + r.system_efectivo
+      + (r.system_cash_in ?? 0) + (r.system_cc_collected ?? 0) - (r.system_cash_out ?? 0)
+
   const diffColor = (diff?: number) => {
     if (diff === undefined || diff === null) return 'text-[var(--text3)]'
     if (Math.abs(diff) < 1) return 'text-[var(--accent)]'
@@ -273,7 +320,7 @@ export default function CashRegisterPage() {
                           <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] px-3">
                             {[
                               { label: 'Fondo', value: r.opening_amount, accent: false },
-                              { label: 'Efectivo', value: r.system_efectivo, accent: true },
+                              { label: 'Efectivo', value: r.system_efectivo, accent: false },
                               { label: 'Débito', value: r.system_debito, accent: false },
                               { label: 'Crédito', value: r.system_credito, accent: false },
                               { label: 'Transferencia', value: r.system_transferencia, accent: false },
@@ -293,7 +340,27 @@ export default function CashRegisterPage() {
                             <span className="text-xs font-semibold text-[var(--text)]">Total vendido</span>
                             <span className="text-sm font-bold mono whitespace-nowrap text-[var(--text)]">{formatCurrency(r.system_total)}</span>
                           </div>
+                          {!!r.system_cc_collected && (
+                            <div className="flex items-center justify-between gap-3 px-1">
+                              <span className="text-xs text-[var(--text3)]">Cobros cta. cte.</span>
+                              <span className="text-xs font-semibold mono whitespace-nowrap text-[var(--accent)]">+{formatCurrency(r.system_cc_collected)}</span>
+                            </div>
+                          )}
+                          {!!r.system_cash_out && (
+                            <div className="flex items-center justify-between gap-3 px-1">
+                              <span className="text-xs text-[var(--text3)]">Egresos de caja</span>
+                              <span className="text-xs font-semibold mono whitespace-nowrap text-[var(--danger)]">−{formatCurrency(r.system_cash_out)}</span>
+                            </div>
+                          )}
                           <p className="text-xs text-[var(--text3)]">Desde {formatDateTime(r.opened_at)}</p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button variant="secondary" onClick={() => openMovementModal(r, 'out')} className="w-full">
+                              <TrendingDown size={14} /> Egreso
+                            </Button>
+                            <Button variant="secondary" onClick={() => openMovementModal(r, 'in')} className="w-full">
+                              <TrendingUp size={14} /> Ingreso
+                            </Button>
+                          </div>
                           <Button variant="danger" onClick={() => openCloseModal(r)} className="w-full">
                             Cerrar caja
                           </Button>
@@ -324,8 +391,8 @@ export default function CashRegisterPage() {
                       <div className="grid grid-cols-1 sm:grid-cols-2 sm:gap-x-6 px-3">
                         {[
                           { label: 'Fondo inicial', value: current.opening_amount, accent: false },
-                          { label: 'Efectivo', value: current.system_efectivo, accent: true },
                           { label: 'Débito', value: current.system_debito, accent: false },
+                          { label: 'Efectivo', value: current.system_efectivo, accent: false },
                           { label: 'Crédito', value: current.system_credito, accent: false },
                           { label: 'Transferencia', value: current.system_transferencia, accent: false },
                           { label: 'QR', value: current.system_qr, accent: false },
@@ -343,28 +410,58 @@ export default function CashRegisterPage() {
                           </div>
                         ))}
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 sm:gap-x-6 px-3 py-3 bg-[var(--surface)]">
-                        <div className="flex items-center justify-between gap-3 py-1">
+                      <div className="px-3 py-3 bg-[var(--surface)] space-y-1.5">
+                        <div className="flex items-center justify-between gap-3">
                           <span className="text-sm font-semibold text-[var(--text)]">Total vendido</span>
                           <span className="text-base font-bold mono whitespace-nowrap text-[var(--text)]">
                             {formatCurrency(current.system_total)}
                           </span>
                         </div>
-                        <div className="flex items-center justify-between gap-3 py-1">
+                        {!!current.system_cc_collected && (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm text-[var(--text3)]">Cobros de cuenta corriente</span>
+                            <span className="text-sm font-semibold mono whitespace-nowrap text-[var(--accent)]">
+                              +{formatCurrency(current.system_cc_collected)}
+                            </span>
+                          </div>
+                        )}
+                        {!!current.system_cash_in && (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm text-[var(--text3)]">Ingresos de caja</span>
+                            <span className="text-sm font-semibold mono whitespace-nowrap text-[var(--accent)]">
+                              +{formatCurrency(current.system_cash_in)}
+                            </span>
+                          </div>
+                        )}
+                        {!!current.system_cash_out && (
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="text-sm text-[var(--text3)]">Egresos de caja</span>
+                            <span className="text-sm font-semibold mono whitespace-nowrap text-[var(--danger)]">
+                              −{formatCurrency(current.system_cash_out)}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between gap-3 pt-1.5 border-t border-[var(--border)]">
                           <span className="text-sm font-semibold text-[var(--accent)]">Efectivo esperado</span>
                           <span className="text-base font-bold mono whitespace-nowrap text-[var(--accent)]">
-                            {formatCurrency(Number(current.opening_amount) + current.system_efectivo)}
+                            {formatCurrency(expectedCash(current))}
                           </span>
                         </div>
                       </div>
                     </div>
 
                     <p className="mt-2 text-xs text-[var(--text3)]">
-                      Efectivo esperado = fondo inicial + ventas en efectivo
+                      Efectivo esperado = fondo inicial + ventas en efectivo + cobros cta. cte. + ingresos − egresos de caja
                     </p>
 
                     {isMyCaja && (
-                      <div className="mt-4 flex justify-end">
+                      <div className="mt-4 flex flex-wrap justify-end gap-2">
+                        <Button variant="secondary" onClick={() => openMovementModal(current, 'out')}>
+                          <TrendingDown size={15} /> Retiro / Egreso
+                        </Button>
+                        <Button variant="secondary" onClick={() => openMovementModal(current, 'in')}>
+                          <TrendingUp size={15} /> Ingreso
+                        </Button>
                         <Button variant="danger" onClick={() => openCloseModal(current)}>
                           Cerrar caja
                         </Button>
@@ -404,7 +501,7 @@ export default function CashRegisterPage() {
                         <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Fecha</th>
                         <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Cajero</th>
                         <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Sucursal / Caja</th>
-                        <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Total sistema</th>
+                        <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Esperado</th>
                         <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Declarado</th>
                         <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Diferencia</th>
                       </tr>
@@ -420,7 +517,7 @@ export default function CashRegisterPage() {
                             <p className="text-sm text-[var(--text)]">{(r.branches as { name: string } | undefined)?.name ?? '—'}</p>
                             <p className="text-xs text-[var(--text3)]">{(r.registers as { name: string } | undefined)?.name ?? ''}</p>
                           </td>
-                          <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)]">{formatCurrency(r.system_total)}</td>
+                          <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)]">{formatCurrency((r.closing_amount ?? 0) - (r.difference ?? 0))}</td>
                           <td className="px-4 py-3 text-right mono text-[var(--text2)] hidden sm:table-cell">{formatCurrency(r.closing_amount ?? 0)}</td>
                           <td className="px-4 py-3 text-right">
                             <div className={`flex items-center justify-end gap-1 font-semibold mono text-sm ${diffColor(r.difference)}`}>
@@ -539,10 +636,28 @@ export default function CashRegisterPage() {
               <span className="text-[var(--text3)]">Fondo inicial</span>
               <span className="mono text-[var(--text2)]">{formatCurrency(modalTarget.opening_amount)}</span>
             </div>
+            {!!modalTarget.system_cc_collected && (
+              <div className="flex justify-between text-sm px-1">
+                <span className="text-[var(--text3)]">Cobros de cuenta corriente</span>
+                <span className="mono text-[var(--accent)]">+{formatCurrency(modalTarget.system_cc_collected)}</span>
+              </div>
+            )}
+            {!!modalTarget.system_cash_in && (
+              <div className="flex justify-between text-sm px-1">
+                <span className="text-[var(--text3)]">Ingresos de caja</span>
+                <span className="mono text-[var(--accent)]">+{formatCurrency(modalTarget.system_cash_in)}</span>
+              </div>
+            )}
+            {!!modalTarget.system_cash_out && (
+              <div className="flex justify-between text-sm px-1">
+                <span className="text-[var(--text3)]">Egresos de caja</span>
+                <span className="mono text-[var(--danger)]">−{formatCurrency(modalTarget.system_cash_out)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-sm px-1">
               <span className="text-[var(--text3)]">Efectivo esperado en caja</span>
               <span className="mono font-semibold text-[var(--text)]">
-                {formatCurrency(Number(modalTarget.opening_amount) + modalTarget.system_efectivo)}
+                {formatCurrency(expectedCash(modalTarget))}
               </span>
             </div>
 
@@ -551,7 +666,7 @@ export default function CashRegisterPage() {
               placeholder="Contá los billetes e ingresá el total" autoFocus />
 
             {closingAmount !== '' && !isNaN(Number(closingAmount)) && (() => {
-              const expected = Number(modalTarget.opening_amount) + modalTarget.system_efectivo
+              const expected = expectedCash(modalTarget)
               const declared = Number(closingAmount)
               const diff = declared - expected
               const isOk = Math.abs(diff) < 1
@@ -630,9 +745,39 @@ export default function CashRegisterPage() {
                     <span className="mono text-[var(--text)]">{formatCurrency(row.value)}</span>
                   </div>
                 ))}
+                {!!selectedRegister.system_cuenta_corriente && (
+                  <div className="flex justify-between px-3 py-2 text-sm">
+                    <span className="text-[var(--text2)]">Cuenta Corriente</span>
+                    <span className="mono text-[var(--text)]">{formatCurrency(selectedRegister.system_cuenta_corriente)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between px-3 py-2 text-sm font-bold border-t-2 border-[var(--border)]">
-                  <span>Total sistema</span>
+                  <span>Total vendido (todos los medios)</span>
                   <span className="mono text-[var(--text)]">{formatCurrency(selectedRegister.system_total)}</span>
+                </div>
+                {!!selectedRegister.system_cc_collected && (
+                  <div className="flex justify-between px-3 py-2 text-sm">
+                    <span className="text-[var(--text3)]">Cobros de cuenta corriente</span>
+                    <span className="mono text-[var(--accent)]">+{formatCurrency(selectedRegister.system_cc_collected)}</span>
+                  </div>
+                )}
+                {!!selectedRegister.system_cash_in && (
+                  <div className="flex justify-between px-3 py-2 text-sm">
+                    <span className="text-[var(--text3)]">Ingresos de caja</span>
+                    <span className="mono text-[var(--accent)]">+{formatCurrency(selectedRegister.system_cash_in)}</span>
+                  </div>
+                )}
+                {!!selectedRegister.system_cash_out && (
+                  <div className="flex justify-between px-3 py-2 text-sm">
+                    <span className="text-[var(--text3)]">Egresos de caja</span>
+                    <span className="mono text-[var(--danger)]">−{formatCurrency(selectedRegister.system_cash_out)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between px-3 py-2 text-sm border-t-2 border-[var(--border)]">
+                  <span className="text-[var(--text2)]">Efectivo esperado en caja</span>
+                  <span className="mono font-medium text-[var(--text)]">
+                    {formatCurrency((selectedRegister.closing_amount ?? 0) - (selectedRegister.difference ?? 0))}
+                  </span>
                 </div>
                 <div className="flex justify-between px-3 py-2 text-sm">
                   <span className="text-[var(--text3)]">Efectivo declarado</span>
@@ -658,6 +803,56 @@ export default function CashRegisterPage() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* ── Modal movimiento de caja ── */}
+      <Modal open={movementModal} onClose={() => { setMovementModal(false); setMovementTarget(null) }}
+        title={movementType === 'out' ? 'Retiro / Egreso de caja' : 'Ingreso de caja'} size="sm">
+        <div className="space-y-4 pb-4">
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => setMovementType('out')}
+              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-[var(--radius-md)] text-sm font-medium border transition-colors ${movementType === 'out' ? 'bg-[var(--danger-subtle)] border-[var(--danger)] text-[var(--danger)]' : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text3)]'}`}>
+              <TrendingDown size={15} /> Egreso
+            </button>
+            <button type="button" onClick={() => setMovementType('in')}
+              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-[var(--radius-md)] text-sm font-medium border transition-colors ${movementType === 'in' ? 'bg-[var(--accent-subtle)] border-[var(--accent)] text-[var(--accent)]' : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text3)]'}`}>
+              <TrendingUp size={15} /> Ingreso
+            </button>
+          </div>
+
+          <Input label="Monto *" type="number" min="0" step="100"
+            value={movementAmount} onChange={e => setMovementAmount(e.target.value)}
+            placeholder="Ej: 5000" autoFocus />
+
+          <Input label="Motivo *" value={movementReason}
+            onChange={e => setMovementReason(e.target.value)}
+            placeholder={movementType === 'out' ? 'Ej: Pago a proveedor Coca-Cola' : 'Ej: Aporte de fondo'} />
+
+          {movementType === 'out' && (
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-[var(--text2)]">Categoría del gasto</label>
+              <select value={movementCategory}
+                onChange={e => setMovementCategory(e.target.value)}
+                className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]">
+                {['proveedores', 'personal', 'alquiler', 'servicios', 'impuestos', 'marketing', 'otro'].map(c => (
+                  <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>
+                ))}
+              </select>
+              <p className="text-xs text-[var(--text3)] mt-0.5">
+                El egreso resta del efectivo esperado y se registra como gasto en Finanzas.
+              </p>
+            </div>
+          )}
+
+          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => { setMovementModal(false); setMovementTarget(null) }} disabled={saving}>Cancelar</Button>
+              <Button onClick={handleMovement} loading={saving} variant={movementType === 'out' ? 'danger' : 'primary'}>
+                Registrar {movementType === 'out' ? 'egreso' : 'ingreso'}
+              </Button>
+            </div>
+          </div>
+        </div>
       </Modal>
     </AppShell>
   )

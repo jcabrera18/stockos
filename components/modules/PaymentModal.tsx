@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { CheckCircle, Printer } from 'lucide-react'
 import type { CustomerSummary } from '@/app/customers/page'
 import { useAuth } from '@/hooks/useAuth'
+import { useWorkstation } from '@/hooks/useWorkstation'
 
 interface PaymentModalProps {
   open: boolean
@@ -45,6 +46,7 @@ const METHOD_LABELS: Record<string, string> = {
 
 export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalProps) {
   const { user } = useAuth()
+  const { workstation } = useWorkstation()
   const [step, setStep] = useState<'form' | 'receipt'>('form')
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState('efectivo')
@@ -81,6 +83,9 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
         amount: amountNum,
         payment_method: method,
         description: description.trim() || 'Pago de cuenta corriente',
+        ...(method === 'efectivo' && workstation?.register_id
+          ? { register_id: workstation.register_id }
+          : {}),
       })
 
       setReceipt({
