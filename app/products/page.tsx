@@ -14,8 +14,9 @@ import { cn } from '@/lib/utils'
 import type { StockSummary, Product, Category, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import {
   Plus, Search, Package, Pencil, Trash2,
-  Tag, Filter, X, ChevronUp, ChevronDown, ArrowUpDown,
+  Tag, Filter, X, ChevronUp, ChevronDown, ArrowUpDown, MoreVertical,
 } from 'lucide-react'
+import { createPortal } from 'react-dom'
 import { CategoryTreePicker } from '@/components/ui/CategoryTreePicker'
 import { toast } from 'sonner'
 import { ProductPriceRulesModal } from '@/components/modules/ProductPriceRulesModal'
@@ -31,7 +32,7 @@ const STOCK_STATUS_OPTIONS = [
 
 const SORT_OPTIONS = [
   { value: 'name', label: 'Nombre' },
-  { value: 'sku', label: 'SKU' },
+  { value: 'sku', label: 'Código' },
   { value: 'sell_price', label: 'Precio venta' },
   { value: 'cost_price', label: 'Precio costo' },
 ]
@@ -44,6 +45,83 @@ type SortDir = 'asc' | 'desc'
 function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortField; sortDir: SortDir }) {
   if (sortBy !== field) return <ArrowUpDown size={11} className="opacity-25 group-hover:opacity-60 transition-opacity" />
   return sortDir === 'asc' ? <ChevronUp size={11} className="text-[var(--accent)]" /> : <ChevronDown size={11} className="text-[var(--accent)]" />
+}
+
+function RowActionsMenu({ onEdit, onPriceRules, onDelete }: {
+  onEdit: () => void
+  onPriceRules: () => void
+  onDelete: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [coords, setCoords] = useState({ top: 0, right: 0 })
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onPointer = (e: MouseEvent) => {
+      if (menuRef.current?.contains(e.target as Node) || btnRef.current?.contains(e.target as Node)) return
+      setOpen(false)
+    }
+    const onScrollOrResize = () => setOpen(false)
+    document.addEventListener('mousedown', onPointer)
+    window.addEventListener('scroll', onScrollOrResize, true)
+    window.addEventListener('resize', onScrollOrResize)
+    return () => {
+      document.removeEventListener('mousedown', onPointer)
+      window.removeEventListener('scroll', onScrollOrResize, true)
+      window.removeEventListener('resize', onScrollOrResize)
+    }
+  }, [open])
+
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      setCoords({ top: r.bottom + 4, right: window.innerWidth - r.right })
+    }
+    setOpen(o => !o)
+  }
+
+  const item = (label: string, Icon: typeof Pencil, onClick: () => void, danger = false) => (
+    <button
+      onClick={e => { e.stopPropagation(); setOpen(false); onClick() }}
+      className={cn(
+        'flex w-full items-center gap-2.5 px-3 py-2 text-sm text-left transition-colors',
+        danger
+          ? 'text-[var(--danger)] hover:bg-[var(--danger-subtle)]'
+          : 'text-[var(--text2)] hover:bg-[var(--surface3)] hover:text-[var(--text)]'
+      )}
+    >
+      <Icon size={15} /> {label}
+    </button>
+  )
+
+  return (
+    <div className="flex justify-end" onClick={e => e.stopPropagation()}>
+      <button
+        ref={btnRef}
+        onClick={toggle}
+        title="Acciones"
+        data-open={open}
+        className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100 data-[open=true]:opacity-100"
+      >
+        <MoreVertical size={16} />
+      </button>
+      {open && createPortal(
+        <div
+          ref={menuRef}
+          style={{ position: 'fixed', top: coords.top, right: coords.right }}
+          className="z-50 min-w-[180px] py-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] shadow-lg"
+        >
+          {item('Editar', Pencil, onEdit)}
+          {item('Reglas de precio', Tag, onPriceRules)}
+          {item('Eliminar', Trash2, onDelete, true)}
+        </div>,
+        document.body
+      )}
+    </div>
+  )
 }
 
 export default function ProductsPage() {
@@ -101,19 +179,24 @@ export default function ProductsPage() {
 
   const isBarcode = (v: string) => /^\d{8,14}$/.test(v.trim())
 
-  // Debounce: skip para barcodes (búsqueda directa)
+  const lookupBarcode = (value: string) => {
+    const trimmed = value.trim()
+    api.get<Product>(`/api/products/barcode/${trimmed}`)
+      .then(product => {
+        openEdit(product)
+        setSearch('')
+      })
+      .catch(() => {
+        setDebouncedSearch(trimmed)
+      })
+  }
+
+  // Debounce: barcodes con margen corto para que el lector termine de "tipear"
   useEffect(() => {
     if (isBarcode(search)) {
       const trimmed = search.trim()
-      api.get<Product>(`/api/products/barcode/${trimmed}`)
-        .then(product => {
-          openEdit(product)
-          setSearch('')
-        })
-        .catch(() => {
-          setDebouncedSearch(trimmed)
-        })
-      return
+      const t = setTimeout(() => lookupBarcode(trimmed), 150)
+      return () => clearTimeout(t)
     }
     const t = setTimeout(() => setDebouncedSearch(search), search ? 300 : 0)
     return () => clearTimeout(t)
@@ -307,7 +390,13 @@ export default function ProductsPage() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Buscar por nombre, código de barras o SKU..."
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && isBarcode(search)) {
+                    e.preventDefault()
+                    lookupBarcode(search)
+                  }
+                }}
+                placeholder="Buscar por nombre, código de barras o código interno..."
                 className="w-full pl-9 pr-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
               />
             </div>
@@ -416,7 +505,7 @@ export default function ProductsPage() {
                     </th>
                     {!panelOpen && (
                       <th onClick={() => handleSort('sku')} className="w-[9%] text-left px-4 py-3 text-xs font-medium text-[var(--text3)] cursor-pointer hover:text-[var(--text)] select-none group hidden lg:table-cell">
-                        <div className="flex items-center gap-1">SKU <SortIcon field="sku" sortBy={sortBy} sortDir={sortDir} /></div>
+                        <div className="flex items-center gap-1">Código <SortIcon field="sku" sortBy={sortBy} sortDir={sortDir} /></div>
                       </th>
                     )}
                     {!panelOpen && <th className="w-[22%] text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Categoría</th>}
@@ -484,34 +573,15 @@ export default function ProductsPage() {
                           </td>
                         )}
                         <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={e => { e.stopPropagation(); handleEdit(product) }}
-                              title="Editar"
-                              className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              onClick={async e => {
-                                e.stopPropagation()
-                                const p = await api.get<Product>(`/api/products/${product.id}`)
-                                setPriceRulesProduct(p)
-                                setPriceRulesModal(true)
-                              }}
-                              title="Reglas de precio"
-                              className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors"
-                            >
-                              <Tag size={14} />
-                            </button>
-                            <button
-                              onClick={e => { e.stopPropagation(); setDeleteProduct(product); setDeleteModal(true) }}
-                              title="Eliminar"
-                              className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
+                          <RowActionsMenu
+                            onEdit={() => handleEdit(product)}
+                            onPriceRules={async () => {
+                              const p = await api.get<Product>(`/api/products/${product.id}`)
+                              setPriceRulesProduct(p)
+                              setPriceRulesModal(true)
+                            }}
+                            onDelete={() => { setDeleteProduct(product); setDeleteModal(true) }}
+                          />
                         </td>
                       </tr>
                     )

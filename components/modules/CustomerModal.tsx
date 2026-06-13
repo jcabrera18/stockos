@@ -232,7 +232,7 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
               <div className="grid grid-cols-2 gap-3">
                 <Input ref={nameInputRef} label="Nombre y apellido *" value={form.full_name} onChange={set('full_name')}
                   placeholder="Ej: Juan García" error={errors.full_name} />
-                <Input label="SKU / Código" value={form.customer_code} onChange={set('customer_code')}
+                <Input label="Código" value={form.customer_code} onChange={set('customer_code')}
                   placeholder="Ej: CLI-001" />
                 <Select label="Tipo de documento" value={form.document_type} onChange={set('document_type')}
                   options={DOCUMENT_TYPES} placeholder="Seleccionar..." />

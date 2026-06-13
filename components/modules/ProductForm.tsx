@@ -153,7 +153,27 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
           use_fixed_sell_price: !f.use_fixed_sell_price,
           sell_price: f.use_fixed_sell_price ? '' : f.sell_price,
         }))
+        return
       }
+      if (e.key !== 'Enter') return
+      const { handleSave, handleSaveAndNew, isEdit, saving, expressMode } = saveActionsRef.current
+      if (saving) return
+      // Ctrl/Cmd/Alt+Enter → Crear/Guardar producto (sin abrir otro)
+      if (e.metaKey || e.ctrlKey || e.altKey) {
+        e.preventDefault()
+        handleSave()
+        return
+      }
+      // Enter pelado → Guardar y agregar otro (solo modo express al crear).
+      // Se ignora si el foco está en el input de código (el scanner usa Enter
+      // para sumar el código) o en un select/textarea.
+      if (!expressMode || isEdit) return
+      const ae = document.activeElement
+      if (ae === newBarcodeRef.current) return
+      const tag = ae?.tagName
+      if (tag === 'SELECT' || tag === 'TEXTAREA') return
+      e.preventDefault()
+      handleSaveAndNew()
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -240,7 +260,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
   }, [product])
 
   const addBarcode = async (overrideVal?: string) => {
-    const val = (overrideVal ?? newBarcode).trim()
+    const val = (overrideVal ?? newBarcode).replace(/\D/g, '')
     if (!val) return
     if (barcodes.includes(val)) { toast.error('Ese código ya está cargado'); return }
 
@@ -256,7 +276,14 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
 
     setBarcodes(prev => [...prev, val])
     setNewBarcode('')
-    newBarcodeRef.current?.focus()
+    // En express, tras agregar el código el foco va al nombre. Esto corre
+    // después del await del chequeo de duplicado, así que es el que manda
+    // (evita que el foco "rebote" al input de código un segundo después).
+    if (expressMode && !isEdit) {
+      nameInputRef.current?.focus()
+    } else {
+      newBarcodeRef.current?.focus()
+    }
   }
 
   const handleBarcodePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
@@ -264,7 +291,6 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
     if (!pasted) return
     e.preventDefault()
     addBarcode(pasted)
-    setTimeout(() => nameInputRef.current?.focus(), 30)
   }
 
   const removeBarcode = (idx: number) => {
@@ -384,6 +410,11 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
     }
   }
 
+  // Mantiene los handlers de guardado siempre frescos para el listener de
+  // teclado (que se suscribe una sola vez al montar y si no quedaría stale).
+  const saveActionsRef = useRef({ handleSave, handleSaveAndNew, isEdit, saving, expressMode })
+  saveActionsRef.current = { handleSave, handleSaveAndNew, isEdit, saving, expressMode }
+
   const handleSupplierSaved = async () => {
     const prevIds = new Set(suppliers.map(s => s.id))
     const updated = await api.get<Supplier[]>('/api/purchases/suppliers').catch(() => suppliers)
@@ -476,16 +507,14 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         <input
           ref={newBarcodeRef}
           type="text"
+          inputMode="numeric"
           autoFocus={autoFocus}
           value={newBarcode}
-          onChange={e => { setNewBarcode(e.target.value); setDuplicateWarning(null) }}
+          onChange={e => { setNewBarcode(e.target.value.replace(/\D/g, '')); setDuplicateWarning(null) }}
           onKeyDown={e => {
             if (e.key === 'Enter') {
               e.preventDefault()
               addBarcode()
-              if (expressMode && !isEdit) {
-                setTimeout(() => nameInputRef.current?.focus(), 30)
-              }
             }
           }}
           onPaste={handleBarcodePaste}
@@ -580,9 +609,6 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
               label="Nombre *"
               value={form.name}
               onChange={set('name')}
-              onKeyDown={e => {
-                if (e.key === 'Enter') { e.preventDefault(); costPriceRef.current?.focus() }
-              }}
               placeholder="Ej: Coca Cola 500ml"
               error={errors.name}
             />
@@ -601,13 +627,6 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                   step="0.01"
                   value={form.cost_price_net}
                   onChange={set('cost_price_net')}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      if (form.use_fixed_sell_price) sellPriceRef.current?.focus()
-                      else if (priceLists.length === 0) handleSave()
-                    }
-                  }}
                   placeholder="0.00"
                   error={errors.cost_price_net}
                 />
@@ -655,13 +674,28 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                     step="0.01"
                     value={form.sell_price}
                     onChange={set('sell_price')}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleSave() } }}
                     placeholder="0.00"
                     error={errors.sell_price}
                   />
                 )}
               </div>
             )}
+
+            {/* Ayuda de atajos para carga rápida */}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs text-[var(--text3)]">
+              <span className="flex items-center gap-1.5">
+                <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text3)]">↵</kbd>
+                guardar y cargar otro
+              </span>
+              <span className="flex items-center gap-1.5">
+                <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text3)]">⌘/Ctrl ↵</kbd>
+                crear y cerrar
+              </span>
+              <span className="flex items-center gap-1.5">
+                <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text3)]">Tab</kbd>
+                pasar de campo
+              </span>
+            </div>
           </>
         )}
 
@@ -686,7 +720,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
               />
 
               <div className="grid grid-cols-2 gap-3">
-                <Input label="SKU interno" value={form.sku} onChange={set('sku')} placeholder="COC-500" />
+                <Input label="Código interno" value={form.sku} onChange={set('sku')} placeholder="COC-500" />
                 <Select label="Unidad" options={UNITS} value={form.unit} onChange={set('unit')} />
               </div>
 
@@ -1032,10 +1066,12 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         {!isEdit && (
           <Button variant="secondary" onClick={handleSaveAndNew} loading={saving}>
             Guardar y agregar otro
+            <kbd className="ml-2 px-1.5 py-0.5 text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text3)]">↵</kbd>
           </Button>
         )}
         <Button onClick={handleSave} loading={saving}>
           {isEdit ? 'Guardar cambios' : 'Crear producto'}
+          <kbd className="ml-2 px-1.5 py-0.5 text-[10px] font-mono rounded border border-white/30 bg-white/10 text-white/80">⌘/Ctrl ↵</kbd>
         </Button>
       </div>
 

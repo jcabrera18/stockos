@@ -125,10 +125,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   useEffect(() => {
+    // Supabase re-emite SIGNED_IN/TOKEN_REFRESHED en cada focus/visibilitychange
+    // de la pestaña. Sin throttle, eso re-pedía /api/auth/me en cada alt-tab.
+    const PROFILE_RELOAD_THROTTLE_MS = 60 * 1000
+    let lastProfileLoadAt = Date.now()
+
     loadProfile()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        if (Date.now() - lastProfileLoadAt < PROFILE_RELOAD_THROTTLE_MS) return
+        lastProfileLoadAt = Date.now()
         loadProfile()
       } else if (event === 'SIGNED_OUT') {
         hasProfileRef.current = false

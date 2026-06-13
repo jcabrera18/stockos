@@ -7,6 +7,15 @@ import html2canvas from 'html2canvas'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import QRCode from 'qrcode'
+import { type PrintSettings, DEFAULT_PRINT_SETTINGS } from '@/hooks/usePrintSettings'
+import {
+  printThermal,
+  buildSaleTicketHtml,
+  buildInvoiceTicketHtml,
+  buildAfipQrUrl,
+  buildInvoiceQrDataUrl,
+  type TicketInvoiceData,
+} from '@/lib/printTicket'
 
 interface CartItem {
   product: { name: string; unit: string; barcode?: string }
@@ -70,6 +79,7 @@ interface POSTicketProps {
   branchName?: string
   registerName?: string
   sellerName?: string
+  printSettings?: PrintSettings
 }
 
 const IVA_LABELS: Record<string, string> = {
@@ -83,35 +93,39 @@ const TYPE_LABELS: Record<string, string> = {
   NDA: 'NOTA DE DÉBITO A', NDB: 'NOTA DE DÉBITO B', NDC: 'NOTA DE DÉBITO C',
 }
 
-function buildAfipQrUrl(invoice: InvoiceInfo, cuit: string, ptoVta: number): string {
-  const tipoCmpMap: Record<string, number> = {
-    A: 1, B: 6, C: 11, R: 91,
-    NCA: 3, NCB: 8, NCC: 13,
-    NDA: 2, NDB: 7, NDC: 12,
+// Normaliza el InvoiceInfo del POS al shape del builder compartido.
+function toTicketInvoice(inv: InvoiceInfo, sale: TicketSale, qrDataUrl: string): TicketInvoiceData {
+  return {
+    invoice_type: inv.invoice_type,
+    numero: inv.numero,
+    created_at: sale.created_at,
+    cae: inv.afip_cae ?? inv.cae,
+    cae_vto: inv.afip_cae_vto ?? inv.cae_expiry,
+    receptor_name: inv.receptor_name,
+    receptor_cuit: inv.receptor_cuit,
+    receptor_address: inv.receptor_address,
+    receptor_iva_condition: inv.receptor_iva_condition,
+    net_amount: inv.net_amount,
+    iva_amount: inv.iva_amount,
+    total_amount: inv.total_amount ?? sale.total,
+    items: (inv.invoice_items ?? []).map(i => ({
+      description: i.description, quantity: i.quantity, unit_price: i.unit_price, subtotal: i.subtotal,
+    })),
+    qrDataUrl,
+    payment_method: sale.payment_method,
+    installments: sale.installments,
+    payment_splits: sale.payment_splits,
   }
-  const cuitEmisor = Number(cuit.replace(/\D/g, ''))
-  const cuitReceptor = invoice.receptor_cuit ? Number(invoice.receptor_cuit.replace(/\D/g, '')) : 0
-  const cae = invoice.afip_cae ?? invoice.cae
-  const payload = {
-    ver: 1, fecha: (invoice as { fecha?: string }).fecha ?? new Date().toISOString().slice(0, 10),
-    cuit: cuitEmisor, ptoVta,
-    tipoCmp: tipoCmpMap[invoice.invoice_type] ?? 1,
-    nroCmp: invoice.numero ?? 0,
-    importe: invoice.total_amount ?? 0,
-    moneda: 'PES', ctz: 1,
-    tipoDocRec: invoice.receptor_cuit ? 80 : 99,
-    nroDocRec: cuitReceptor, tipoCodAut: 'E',
-    codAut: Number(cae),
-  }
-  return `https://www.afip.gob.ar/fe/qr/?p=${btoa(JSON.stringify(payload))}`
 }
 
 export function POSTicket({
   open, sale, invoiceId, onNewSale, onClose,
   customerPhone, customerName,
   business, branchName, registerName, sellerName,
+  printSettings = DEFAULT_PRINT_SETTINGS,
 }: POSTicketProps) {
   const printRef = useRef<HTMLDivElement>(null)
+  const autoPrintedRef = useRef<string | null>(null)
   const [sharing, setSharing] = useState(false)
   const [invoice, setInvoice] = useState<InvoiceInfo | null>(null)
   const [qrDataUrl, setQrDataUrl] = useState<string>('')
@@ -139,7 +153,7 @@ export function POSTicket({
     if (!invoice || invoice.afip_status !== 'authorized') { setQrDataUrl(''); return }
     const cae = invoice.afip_cae ?? invoice.cae
     if (!cae || !business?.cuit) { setQrDataUrl(''); return }
-    const url = buildAfipQrUrl(invoice, business.cuit, business.afip_punto_venta ?? 1)
+    const url = buildAfipQrUrl({ ...invoice, cae }, business.cuit, business.afip_punto_venta ?? 1)
     QRCode.toDataURL(url, { width: 120, margin: 1, errorCorrectionLevel: 'M' })
       .then(setQrDataUrl)
       .catch(() => setQrDataUrl(''))
@@ -150,7 +164,11 @@ export function POSTicket({
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-      if (e.key === 'p' || e.key === 'P') { e.preventDefault(); handlePrint() }
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault()
+        if (isInvoiced && invoice) handlePrintInvoiceTicket(invoice)
+        else handlePrint()
+      }
       if (e.key === 'w' || e.key === 'W') { e.preventDefault(); handleShareWhatsApp() }
       const canConvertOrRetry = invoice?.invoice_type === 'X' ||
         (invoice && ['rejected', 'pending'].includes(invoice.afip_status) && ['A', 'B', 'C'].includes(invoice.invoice_type))
@@ -188,127 +206,19 @@ export function POSTicket({
   }
 
   const handlePrintInvoiceTicket = async (inv: InvoiceInfo) => {
-    const biz = business
-    const fmt = (n: number) =>
-      new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(n)
-    const typeLabel = TYPE_LABELS[inv.invoice_type] ?? inv.invoice_type
-    const numero = String(inv.numero ?? 0).padStart(8, '0')
-    const isA = inv.invoice_type === 'A'
-    const ptoVenta = String(biz?.afip_punto_venta ?? 1).padStart(5, '0')
     const cae = inv.afip_cae ?? inv.cae
-
-    let qrDataUrl = ''
-    if (cae && biz?.cuit) {
-      try {
-        const url = buildAfipQrUrl(inv, biz.cuit, biz.afip_punto_venta ?? 1)
-        qrDataUrl = await QRCode.toDataURL(url, { width: 120, margin: 1, errorCorrectionLevel: 'M' })
-      } catch { }
-    }
-
-    const sep = `<hr style="border:none;border-top:1px dashed #000;margin:10px 0;">`
-    const row = (left: string, right: string) =>
-      `<div style="display:flex;justify-content:space-between;align-items:baseline;">${left}${right}</div>`
-    const metaRow = (label: string, value: string) =>
-      `<div style="display:flex;justify-content:space-between;align-items:baseline;line-height:1.8;">
-        <span style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;">${label}</span>
-        <span style="font-weight:700;">${value}</span>
-      </div>`
-
-    const bizInfoGrid = [
-      biz?.cuit ? `<div><div style="font-size:8px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.1em;">CUIT</div><div style="font-size:11px;font-weight:700;">${biz.cuit}</div></div>` : '',
-      biz?.iva_condition ? `<div><div style="font-size:8px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.1em;">Cond. IVA</div><div style="font-size:11px;font-weight:700;">${IVA_LABELS[biz.iva_condition] ?? biz.iva_condition}</div></div>` : '',
-      biz?.address ? `<div><div style="font-size:8px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.1em;">Domicilio</div><div style="font-size:11px;font-weight:700;">${biz.address}</div></div>` : '',
-      biz?.phone ? `<div><div style="font-size:8px;font-weight:600;color:#999;text-transform:uppercase;letter-spacing:0.1em;">Teléfono</div><div style="font-size:11px;font-weight:700;">${biz.phone}</div></div>` : '',
-    ].filter(Boolean).join('')
-
-    const html = `
-      <div style="text-align:center;margin-bottom:6px;">
-        <div style="font-size:16px;font-weight:800;letter-spacing:0.02em;">${biz?.name ?? ''}</div>
-        ${bizInfoGrid ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;margin-top:8px;text-align:left;">${bizInfoGrid}</div>` : ''}
-      </div>
-      ${sep}
-      <div style="text-align:center;">
-        <div style="font-size:15px;font-weight:800;letter-spacing:0.06em;">${typeLabel.toUpperCase()}</div>
-        <div style="font-size:12px;font-weight:700;margin-top:2px;letter-spacing:0.04em;">N° ${ptoVenta}-${numero}</div>
-      </div>
-      ${sep}
-      <div style="font-size:11px;line-height:1.8;">
-        ${metaRow('Receptor', inv.receptor_name ?? customerName ?? 'Consumidor Final')}
-        ${inv.receptor_cuit ? metaRow('CUIT', inv.receptor_cuit) : ''}
-        ${inv.receptor_address ? `<div style="font-size:11px;">${inv.receptor_address}</div>` : ''}
-        ${metaRow('Cond. IVA', IVA_LABELS[inv.receptor_iva_condition ?? 'CF'] ?? (inv.receptor_iva_condition ?? 'CF'))}
-      </div>
-      ${sep}
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-        <span style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;">Descripción</span>
-        <span style="font-size:10px;letter-spacing:0.1em;text-transform:uppercase;">Importe</span>
-      </div>
-      <div>
-        ${(inv.invoice_items ?? []).map(item => `
-          <div style="margin-bottom:9px;">
-            ${row(
-              `<span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity}x ${item.description}</span>`,
-              `<span style="flex-shrink:0;font-weight:700;">${fmt(item.subtotal)}</span>`
-            )}
-            <div style="font-size:10px;opacity:0.7;">c/u ${fmt(item.unit_price)}</div>
-          </div>
-        `).join('')}
-      </div>
-      ${sep}
-      ${isA ? `
-        ${row('<span style="font-size:11px;">Neto gravado</span>', `<span style="font-weight:700;">${fmt(inv.net_amount ?? 0)}</span>`)}
-        ${row('<span style="font-size:11px;">IVA 21%</span>', `<span style="font-weight:700;">${fmt(inv.iva_amount ?? 0)}</span>`)}
-        <div style="border-top:1px solid #000;margin:6px 0;"></div>
-      ` : ''}
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:2px;">
-        <span style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;">Total</span>
-        <span style="font-size:18px;font-weight:800;">${fmt(inv.total_amount ?? 0)}</span>
-      </div>
-      ${sep}
-      ${cae ? `
-        <div style="text-align:center;font-size:11px;line-height:1.8;">
-          <div style="font-weight:700;font-size:11px;letter-spacing:0.06em;text-transform:uppercase;">Comprobante autorizado</div>
-          <div>CAE: <strong>${cae}</strong></div>
-          ${inv.afip_cae_vto ?? inv.cae_expiry ? `<div>Vto. CAE: ${inv.afip_cae_vto ?? inv.cae_expiry}</div>` : ''}
-          ${qrDataUrl ? `
-            <div style="margin:10px 0 4px;">
-              <img src="${qrDataUrl}" style="width:110px;height:110px;" />
-            </div>
-            <div style="font-size:10px;margin-bottom:6px;">Verificar en afip.gob.ar/fe/qr</div>
-            <div style="margin:6px 0;">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170 58" width="110" height="38">
-                <text x="85" y="38" text-anchor="middle" font-family="Arial Black,Arial" font-size="44" font-weight="900" fill="#000">ARCA</text>
-                <text x="85" y="49" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#000" letter-spacing="1">AGENCIA DE RECAUDACION</text>
-                <text x="85" y="58" text-anchor="middle" font-family="Arial,sans-serif" font-size="7.5" fill="#000" letter-spacing="1">Y CONTROL ADUANERO</text>
-              </svg>
-            </div>
-          ` : ''}
-        </div>
-      ` : `
-        <div style="text-align:center;font-size:10px;letter-spacing:0.06em;padding:2px 0;">NO VÁLIDO COMO FACTURA</div>
-      `}
-      ${sep}
-      <div style="text-align:center;font-size:11px;line-height:1.8;">
-        <div style="font-weight:700;">¡Gracias por su compra!</div>
-        <div style="font-size:10px;opacity:0.6;">stockos.digital</div>
-      </div>
-    `
-
-    const win = window.open('', '_blank', 'width=350,height=800')
-    if (!win) return
-    win.document.write(`<!DOCTYPE html><html><head>
-      <meta charset="utf-8"><title>${typeLabel} ${ptoVenta}-${numero}</title>
-      <style>
-        @page { size: 80mm auto; margin: 0mm 2mm; }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 80mm; background: #fff; }
-        body { font-family: 'Courier New', Courier, monospace; font-size: 12px; font-weight: 700; line-height: 1.5; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        hr { border: none !important; border-top: 1px dashed #000 !important; margin: 10px 0 !important; }
-      </style>
-    </head><body><div style="padding:10px 12px 16px;">${html}</div></body></html>`)
-    win.document.close()
-    win.focus()
-    setTimeout(() => { win.print(); win.close() }, 400)
+    const qrDataUrl = business
+      ? await buildInvoiceQrDataUrl({ ...inv, cae }, business)
+      : ''
+    const data = toTicketInvoice(
+      { ...inv, receptor_name: inv.receptor_name ?? customerName ?? undefined },
+      sale,
+      qrDataUrl,
+    )
+    const numero = String(inv.numero ?? 0).padStart(8, '0')
+    const ptoVenta = String(business?.afip_punto_venta ?? 1).padStart(5, '0')
+    const typeLabel = TYPE_LABELS[inv.invoice_type] ?? inv.invoice_type
+    printThermal(`${typeLabel} ${ptoVenta}-${numero}`, buildInvoiceTicketHtml(data, business ?? {}), printSettings)
   }
 
   const handleConvert = async () => {
@@ -350,59 +260,34 @@ export function POSTicket({
   }
 
   const handlePrint = () => {
-    const content = printRef.current
-    if (!content) return
-
-    const win = window.open('', '_blank', 'width=350,height=800')
-    if (!win) return
-
-    // Escalar font-sizes directamente en el HTML — orden de mayor a menor para evitar doble reemplazo
-    const printHtml = content.innerHTML
-      .replace(/font-size: 26px/g, 'font-size: 52px')
-      .replace(/font-size: 22px/g, 'font-size: 44px')
-      .replace(/font-size: 17px/g, 'font-size: 36px')
-      .replace(/font-size: 15px/g, 'font-size: 32px')
-      .replace(/font-size: 14px/g, 'font-size: 30px')
-      .replace(/font-size: 13px/g, 'font-size: 28px')
-      .replace(/font-size: 12px/g, 'font-size: 28px')
-      .replace(/font-size: 11px/g, 'font-size: 26px')
-      .replace(/font-size: 10px/g, 'font-size: 24px')
-      .replace(/font-size: 9px/g,  'font-size: 20px')
-      .replace(/font-size: 8px/g,  'font-size: 18px')
-      // Todo en negro: colores hex y rgb normalizados por el browser
-      .replace(/color: #(111|222|333|444|555|666|777|888|999|aaa|bbb|ccc|ddd|eee)/g, 'color: #000')
-      .replace(/color: rgb\((\d{1,3}),\s*\1,\s*\1\)/g, 'color: #000')
-      // Eliminar opacidades que crean gris visual aunque el color sea negro
-      .replace(/opacity: 0\.\d+/g, 'opacity: 1')
-
-    win.document.write(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Ticket</title>
-  <style>
-    @page { margin: 1mm 3mm; }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; background: #fff; }
-    body {
-      font-family: system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
-      font-size: 17px;
-      font-weight: 400;
-      line-height: 1.7;
-      color: #000;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
-    }
-    body > div { width: 100% !important; max-width: 100% !important; box-shadow: none !important; padding: 8px 4px 14px !important; background: #fff !important; }
-    hr { border: none !important; border-top: 1px dashed #666 !important; margin: 10px 0 !important; }
-  </style>
-</head>
-<body>${printHtml}</body>
-</html>`)
-    win.document.close()
-    win.focus()
-    setTimeout(() => { win.print(); win.close() }, 400)
+    printThermal(`Ticket #${sale.id.slice(-8).toUpperCase()}`, buildSaleTicketHtml({
+      id: sale.id,
+      created_at: sale.created_at,
+      total: sale.total,
+      discount: sale.discount,
+      shipping_amount: sale.shipping_amount,
+      payment_method: sale.payment_method,
+      installments: sale.installments,
+      payment_splits: sale.payment_splits,
+      items: sale.items.map(i => ({
+        name: i.product.name, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount,
+      })),
+      branchName, registerName, sellerName, customerName,
+    }, business ?? {}), printSettings)
   }
+
+  // Impresión automática al cerrar la venta (configurable por terminal). Una sola vez por venta.
+  useEffect(() => {
+    if (!open || !printSettings.autoPrint || !sale.id) return
+    if (autoPrintedRef.current === sale.id) return
+    autoPrintedRef.current = sale.id
+    // Pequeño delay para dar tiempo a que cargue la factura si la venta está facturada
+    const t = setTimeout(() => {
+      if (isInvoiced && invoice) handlePrintInvoiceTicket(invoice)
+      else handlePrint()
+    }, 600)
+    return () => clearTimeout(t)
+  }, [open, printSettings.autoPrint, sale.id, isInvoiced, invoice]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleShareWhatsApp = async () => {
     if (!printRef.current) return

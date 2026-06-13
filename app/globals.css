@@ -122,3 +122,12 @@ section[data-visible] .section-fade {
   transform: none;
 }
 
+/* Drawer lateral: entra deslizando desde la derecha */
+@keyframes drawerSlideIn {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+.drawer-slide-in {
+  animation: drawerSlideIn 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+

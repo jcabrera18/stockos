@@ -244,7 +244,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   }, [product, open])
 
   const addBarcode = (overrideVal?: string) => {
-    const val = (overrideVal ?? newBarcode).trim()
+    const val = (overrideVal ?? newBarcode).replace(/\D/g, '')
     if (!val) return
     if (barcodes.includes(val)) { toast.error('Ese código ya está cargado'); return }
     setBarcodes(prev => [...prev, val])
@@ -493,9 +493,10 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         <input
           ref={newBarcodeRef}
           type="text"
+          inputMode="numeric"
           autoFocus={autoFocus}
           value={newBarcode}
-          onChange={e => setNewBarcode(e.target.value)}
+          onChange={e => setNewBarcode(e.target.value.replace(/\D/g, ''))}
           onKeyDown={e => {
             if (e.key === 'Enter') {
               e.preventDefault()
@@ -697,7 +698,7 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
 
               <div className="grid grid-cols-2 gap-3">
                 <Input
-                  label="SKU interno"
+                  label="Código interno"
                   value={form.sku}
                   onChange={set('sku')}
                   placeholder="COC-500"

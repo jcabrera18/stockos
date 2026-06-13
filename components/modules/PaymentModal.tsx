@@ -6,6 +6,7 @@ import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { printThermal } from '@/lib/printTicket'
 import { toast } from 'sonner'
 import { CheckCircle, Printer } from 'lucide-react'
 import type { CustomerSummary } from '@/app/customers/page'
@@ -108,27 +109,7 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
   const handlePrint = () => {
     const content = printRef.current
     if (!content) return
-
-    const win = window.open('', '_blank', 'width=350,height=800')
-    if (!win) return
-
-    win.document.write(`<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Recibo de pago</title>
-  <style>
-    @page { size: 80mm auto; margin: 3mm 2mm; }
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 80mm; background: #fff; }
-    body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  </style>
-</head>
-<body>${content.innerHTML}</body>
-</html>`)
-    win.document.close()
-    win.focus()
-    setTimeout(() => { win.print(); win.close() }, 400)
+    printThermal('Recibo de pago', content.innerHTML)
   }
 
   if (!customer) return null

@@ -1035,7 +1035,7 @@ export default function CustomersPage() {
                         {!panelOpen && (
                           <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">
                             <button onClick={() => toggleSort('customer_code')} className="flex items-center hover:text-[var(--text)] transition-colors">
-                              SKU <SortIcon field="customer_code" />
+                              Código <SortIcon field="customer_code" />
                             </button>
                           </th>
                         )}

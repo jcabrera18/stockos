@@ -6,15 +6,18 @@ import { formatCurrency } from '@/lib/utils'
 import type { Product } from '@/types'
 import type { CustomerSummary } from '@/app/customers/page'
 import type { PriceList } from '@/app/price-lists/page'
-import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle, RefreshCw, Truck, Banknote, CreditCard, ArrowRightLeft, QrCode, BookOpen } from 'lucide-react'
+import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle, RefreshCw, Truck, Banknote, CreditCard, ArrowRightLeft, QrCode, BookOpen, Pencil, Trash2, Check, Info, Printer, Layers } from 'lucide-react'
 import { toast } from 'sonner'
 import { POSTicket } from '@/components/modules/POSTicket'
+import { PrintSettingsModal } from '@/components/modules/PrintSettingsModal'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
 import { useWorkstation } from '@/hooks/useWorkstation'
+import { usePrintSettings } from '@/hooks/usePrintSettings'
 import { useAuth } from '@/hooks/useAuth'
 import { Button } from '@/components/ui/Button'
 import { evaluatePromo, type Promotion } from '@/lib/promoUtils'
 import { Modal } from '@/components/ui/Modal'
+import { Drawer } from '@/components/ui/Drawer'
 import { usePOSSync } from '@/hooks/usePOSSync'
 import {
   resolveBarcode,
@@ -68,6 +71,19 @@ function suggestReceived(amount: number): number[] {
     .filter(v => v > amount)
     .sort((a, b) => a - b)
     .slice(0, 4)
+}
+
+// Sugiere montos parciales "redondos" por debajo del saldo, útiles en pagos mixtos
+function suggestPartialAmounts(remaining: number): number[] {
+  if (remaining <= 0) return []
+  const opts = new Set<number>()
+  ;[1000, 2000, 5000, 10000].forEach(step => {
+    const v = Math.floor(remaining / step) * step
+    if (v > 0 && v < remaining) opts.add(v)
+  })
+  const half = Math.round(remaining / 2)
+  if (half > 0 && half < remaining) opts.add(half)
+  return [...opts].sort((a, b) => a - b).slice(0, 3)
 }
 
 interface CompletedSale {
@@ -129,15 +145,22 @@ export default function POSPage() {
 
   const [step, setStep] = useState<'cart' | 'ticket'>('cart')
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
-  const [paymentSplits, setPaymentSplits] = useState<PaymentSplit[]>([{ method: 'efectivo', amount: 0, installments: 1 }])
-  const [activeSplitIndex, setActiveSplitIndex] = useState(0)
-  const amountInputRefs    = useRef<(HTMLInputElement | null)[]>([])
-  const receivedInputRefs  = useRef<(HTMLInputElement | null)[]>([])
+  // Pagos ya aplicados (ledger) + el pago que se está componiendo (draft)
+  const [applied, setApplied] = useState<PaymentSplit[]>([])
+  const [draft, setDraft] = useState<PaymentSplit>({ method: 'efectivo', amount: 0, installments: 1 })
+  const [selectedApplied, setSelectedApplied] = useState<number | null>(null)
+  // Modo "varios medios": cuando es false, se asume que paga todo con el medio elegido
+  // y el input de monto queda oculto. Se activa al tocar "¿Paga con varios medios?".
+  const [splitMode, setSplitMode] = useState(false)
+  const draftAmountRef   = useRef<HTMLInputElement | null>(null)
+  const draftReceivedRef = useRef<HTMLInputElement | null>(null)
+  const customerSearchRef = useRef<HTMLInputElement | null>(null)
   const [processing, setProcessing] = useState(false)
   const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null)
 
   const [customerQuery, setCustomerQuery] = useState('')
   const [customerResults, setCustomerResults] = useState<CustomerSummary[]>([])
+  const [customerActiveIndex, setCustomerActiveIndex] = useState(0)
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSummary | null>(null)
   const [searchingCustomer, setSearchingCustomer] = useState(false)
   const [quickCustomerModal, setQuickCustomerModal] = useState(false)
@@ -162,11 +185,14 @@ export default function POSPage() {
   const [mobileView, setMobileView] = useState<'search' | 'cart'>('search')
 
   const [branches, setBranches] = useState<{ id: string; name: string; warehouse_id?: string; registers: { id: string; name: string }[] }[]>([])
+  const [loadingBranches, setLoadingBranches] = useState(true)
   const [selectingWorkstation, setSelectingWorkstation] = useState(false)
   const [tempBranchId, setTempBranchId] = useState('')
   const [tempRegisterId, setTempRegisterId] = useState('')
 
   const { workstation, setWorkstation, loaded } = useWorkstation()
+  const { settings: printSettings } = usePrintSettings()
+  const [showPrintSettings, setShowPrintSettings] = useState(false)
   const { user } = useAuth()
   const stockEnabled    = user?.business?.stock_enabled ?? false
   const stockEnabledRef = useRef(stockEnabled)
@@ -287,9 +313,11 @@ export default function POSPage() {
   useEffect(() => { searchRef.current?.focus() }, [])
 
   useEffect(() => {
+    setLoadingBranches(true)
     api.get<{ id: string; name: string; registers: { id: string; name: string }[] }[]>('/api/branches')
       .then(setBranches)
       .catch(() => { })
+      .finally(() => setLoadingBranches(false))
   }, [])
 
   useEffect(() => {
@@ -401,8 +429,9 @@ export default function POSPage() {
         e.preventDefault()
         if (cartRef.current.length > 0) {
           const currentTotal = cartRef.current.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
-          setPaymentSplits([{ method: 'efectivo', amount: currentTotal, installments: 1 }])
-          setActiveSplitIndex(0)
+          setApplied([])
+          setDraft({ method: 'efectivo', amount: currentTotal, installments: 1 })
+          setSelectedApplied(null)
           setPaymentModalOpen(true)
         }
         return
@@ -666,7 +695,14 @@ export default function POSPage() {
         setActiveResultIndex(res.data.length > 0 ? 0 : -1)
       } catch { setResults([]); setActiveResultIndex(-1) }
       finally { setSearching(false) }
-    }, isBarcode ? 0 : 300)
+    // Para barcodes usamos un debounce muy corto (no 0ms): un EAN-13 se teclea
+    // dígito a dígito y la regex matchea ya con 8 dígitos, así que con 0ms se
+    // procesaba un código parcial (ej. "77992190") antes de completar el scan,
+    // duplicando el item. 35ms es imperceptible para el cajero pero ~3x el gap
+    // entre caracteres de un scanner (<15ms), así que la próxima tecla cancela
+    // el timer del valor parcial. Si el scanner manda Enter, ese handler limpia
+    // este timer y procesa al instante (latencia 0).
+    }, isBarcode ? 35 : 300)
 
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -694,6 +730,30 @@ export default function POSPage() {
     }, 250)
     return () => { cancelled = true; clearTimeout(timer) }
   }, [customerQuery])
+
+  // Al cambiar los resultados, resaltar el primero para que Enter lo elija directo
+  useEffect(() => { setCustomerActiveIndex(0) }, [customerResults])
+
+  // Navegación con flechas + Enter en el listado de clientes (Cta. Cte.)
+  const handleCustomerKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (customerQuery.trim().length < 2) return
+    const itemCount = customerResults.length + 1  // +1 por la opción "Crear"
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setCustomerActiveIndex(i => Math.min(itemCount - 1, i + 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setCustomerActiveIndex(i => Math.max(0, i - 1))
+    } else if (e.key === 'Enter') {
+      e.preventDefault(); e.stopPropagation()
+      if (customerActiveIndex < customerResults.length) {
+        const c = customerResults[customerActiveIndex]
+        if (c) { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]) }
+      } else {
+        setQuickCustomerModal(true)
+      }
+    }
+  }
 
   useEffect(() => {
     if (workstation === null && loaded) setSelectingWorkstation(true)
@@ -826,59 +886,108 @@ export default function POSPage() {
   const hasMissingCustomPrice = cart.some(i => i.product.price_mode === 'custom' && i.unit_price === 0)
   const hasPendingItems       = cart.some(i => i.status === 'pending')
 
-  const splitTotal         = paymentSplits.reduce((a, s) => a + (s.amount || 0), 0)
-  const remaining          = Math.round((total - splitTotal) * 100) / 100
-  const splitsValid        = Math.abs(remaining) < 0.01
-  const hasInvalidReceived = paymentSplits.some(
-    s => s.method === 'efectivo' && s.received !== undefined && s.received > 0 && s.received < s.amount
+  // Total ya cubierto por los pagos aplicados, y saldo pendiente real (sin contar el draft)
+  const totalApplied = Math.round(applied.reduce((a, s) => a + (s.amount || 0), 0) * 100) / 100
+  const remaining    = Math.round((total - totalApplied) * 100) / 100
+  const fullyApplied = remaining < 0.01
+
+  // El modo dividido está activo si el usuario lo pidió o si ya hay pagos aplicados.
+  const splitActive = splitMode || applied.length > 0
+
+  // Estado del pago que se está componiendo (draft)
+  const draftAmount  = draft.amount || 0
+  const draftReceivedInvalid =
+    draft.method === 'efectivo' && draft.received !== undefined && draft.received > 0 && draft.received < draftAmount
+  const draftChange =
+    draft.method === 'efectivo' && (draft.received ?? 0) > draftAmount
+      ? Math.ceil((draft.received ?? 0) - draftAmount) : 0
+  const canApplyDraft = draftAmount > 0 && draftAmount <= remaining + 0.01 && !draftReceivedInvalid
+  const draftCovers   = draftAmount >= remaining - 0.01   // el draft salda todo lo que falta
+
+  const ccInPlay      = draft.method === 'cuenta_corriente' || applied.some(s => s.method === 'cuenta_corriente')
+  const needsCustomer = ccInPlay && !selectedCustomer
+
+  // Validación del modo dividido (columnas): ninguna columna vacía, sin sobrepago y
+  // sin efectivo donde lo recibido sea menor al monto de esa columna.
+  const splitBad = splitActive && (
+    applied.some(s => (s.amount || 0) <= 0) ||
+    totalApplied > total + 0.01 ||
+    applied.some(s => s.method === 'efectivo' && (s.received ?? 0) > 0 && (s.received ?? 0) < s.amount)
   )
-  const canConfirm = splitsValid && !hasInvalidReceived
-  const canConfirmRef = useRef(canConfirm)
-  const processingRef = useRef(processing)
-  const handleConfirmRef = useRef<() => void>(() => {})
-  useEffect(() => { canConfirmRef.current = canConfirm }, [canConfirm])
+
+  // La acción principal aplica el draft; si con eso se cubre el total, además confirma la venta.
+  const canMainAction      = !needsCustomer && !hasMissingCustomPrice && !splitBad && (fullyApplied || canApplyDraft)
+  const mainActionConfirms = fullyApplied || (canApplyDraft && draftCovers)
+
+  // Refs para los atajos de teclado (se actualizan en cada render, ver useEffect más abajo)
+  const processingRef      = useRef(processing)
+  const fullyAppliedRef    = useRef(fullyApplied)
+  const splitActiveRef     = useRef(splitActive)
+  const selectedAppliedRef = useRef(selectedApplied)
+  const mainActionRef      = useRef<() => void>(() => {})
+  const removeAppliedRef   = useRef<(i: number) => void>(() => {})
+  const ccSearchAvailRef   = useRef(false)
   useEffect(() => { processingRef.current = processing }, [processing])
 
-  const updateSplitMethod = useCallback((i: number, method: string) =>
-    setPaymentSplits(prev => prev.map((s, idx) => idx === i ? { ...s, method, received: undefined } : s)), [])
+  const setDraftMethod = useCallback((method: string) =>
+    setDraft(d => ({ ...d, method, received: undefined })), [])
+  const setDraftAmount = useCallback((val: string) =>
+    setDraft(d => ({ ...d, amount: Math.max(0, Number(val) || 0) })), [])
+  const setDraftInstallments = useCallback((n: number) =>
+    setDraft(d => ({ ...d, installments: n })), [])
+  const setDraftReceived = useCallback((val: number) =>
+    setDraft(d => ({ ...d, received: val })), [])
 
-  const updateSplitAmount = useCallback((i: number, val: string) =>
-    setPaymentSplits(prev => prev.map((s, idx) => idx === i ? { ...s, amount: Math.max(0, Number(val) || 0) } : s)), [])
+  // Pasar a "varios medios": el cobro se edita como columnas (una por medio).
+  // Cada columna es un PaymentSplit dentro de `applied`. Arrancamos con dos.
+  const enableSplit = useCallback(() => {
+    setSplitMode(true)
+    // El draft no se usa en modo dividido; lo dejamos neutro para que no afecte
+    // ni la validación (canApplyDraft) ni el flag de cuenta corriente (ccInPlay).
+    setDraft({ method: 'efectivo', amount: 0, installments: 1 })
+    setApplied([
+      { method: 'efectivo', amount: 0, installments: 1 },
+      { method: 'debito',   amount: 0, installments: 1 },
+    ])
+  }, [])
 
-  const updateSplitInstallments = useCallback((i: number, n: number) =>
-    setPaymentSplits(prev => prev.map((s, idx) => idx === i ? { ...s, installments: n } : s)), [])
+  // Editar una columna (medio, monto, recibido, cuotas…)
+  const setSplitColumn = useCallback((i: number, patch: Partial<PaymentSplit>) =>
+    setApplied(arr => arr.map((s, idx) => idx === i ? { ...s, ...patch } : s)), [])
 
-  const addSplit = useCallback(() =>
-    setPaymentSplits(prev => {
-      const rem = Math.max(0, Math.round((total - prev.reduce((a, s) => a + s.amount, 0)) * 100) / 100)
-      return [...prev, { method: 'efectivo', amount: rem, installments: 1 }]
-    }), [total]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Agregar otra columna (otro medio de pago)
+  const addSplitColumn = useCallback(() =>
+    setApplied(arr => [...arr, { method: 'efectivo', amount: 0, installments: 1 }]), [])
 
-  const removeSplit = useCallback((i: number) =>
-    setPaymentSplits(prev => prev.filter((_, idx) => idx !== i)), [])
+  // Quitar una columna; si queda una sola, se vuelve a modo simple (lo maneja el efecto de abajo)
+  const removeSplitColumn = useCallback((i: number) =>
+    setApplied(arr => arr.filter((_, idx) => idx !== i)), [])
 
-  const updateSplitReceived = useCallback((i: number, val: number) =>
-    setPaymentSplits(prev => prev.map((s, idx) => idx === i ? { ...s, received: val } : s)), [])
-
-  // Foco inicial al abrir el modal
+  // Si en modo dividido queda una sola columna (o ninguna), volvemos a modo simple
+  // conservando el medio de la columna restante.
   useEffect(() => {
-    if (paymentModalOpen) {
-      setTimeout(() => amountInputRefs.current[activeSplitIndex]?.focus(), 150)
+    if (splitMode && applied.length <= 1) {
+      const keep = applied[0]
+      setSplitMode(false)
+      setApplied([])
+      if (keep) setDraft(d => ({ ...d, method: keep.method, installments: keep.installments }))
     }
-  }, [paymentModalOpen]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [splitMode, applied])
 
-  // Cuando se añade un split, el nuevo queda activo y se enfoca su input de monto
+  // Al abrir el modal arrancamos siempre en modo simple (un solo medio).
   useEffect(() => {
-    const last = paymentSplits.length - 1
-    setActiveSplitIndex(last)
-    if (paymentModalOpen) {
-      setTimeout(() => amountInputRefs.current[last]?.focus(), 50)
-    }
-  }, [paymentSplits.length]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (paymentModalOpen) setSplitMode(false)
+  }, [paymentModalOpen])
 
-  // Shortcuts globales del modal — método de pago, split y escape.
-  // Usan preventDefault() para que las letras no escriban en inputs numéricos.
-  // Funcionan independientemente de dónde esté el foco.
+  // En modo simple el monto siempre es el saldo pendiente (paga todo con un medio).
+  useEffect(() => {
+    if (!splitActive && !fullyApplied) {
+      setDraft(d => d.amount === remaining ? d : ({ ...d, amount: remaining }))
+    }
+  }, [splitActive, remaining, fullyApplied])
+
+  // Shortcuts globales del modal. Usan preventDefault() para que las letras no
+  // escriban en inputs numéricos y funcionan sin importar dónde esté el foco.
   useEffect(() => {
     if (!paymentModalOpen) return
     const METHOD_KEYS: Record<string, string> = {
@@ -888,60 +997,68 @@ export default function POSPage() {
     const handler = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') { setPaymentModalOpen(false); return }
 
-      // No interceptar si el foco está en un input de texto (ej: buscador de cliente)
-      const active = document.activeElement as HTMLInputElement | null
-      const isTextInput = active?.tagName === 'INPUT' && active?.type !== 'number'
-      if (isTextInput) return
+      const active = document.activeElement as HTMLElement | null
+      const inTextInput = active?.tagName === 'INPUT' && (active as HTMLInputElement).type !== 'number'
+      const inAnyField  = active?.tagName === 'INPUT' || active?.tagName === 'TEXTAREA'
+      if (inTextInput) return  // no interceptar el buscador de cliente
 
-      // Enter confirma la venta desde cualquier lugar del modal (excepto text inputs)
+      // Enter: aplicar pago o confirmar venta (lo decide handleMainAction)
       if (ev.key === 'Enter') {
         ev.preventDefault()
-        if (canConfirmRef.current && !processingRef.current) handleConfirmRef.current()
+        if (!processingRef.current) mainActionRef.current()
         return
       }
 
+      // Backspace/Delete sobre un pago aplicado seleccionado lo elimina
+      if ((ev.key === 'Backspace' || ev.key === 'Delete') && !inAnyField && selectedAppliedRef.current != null) {
+        ev.preventDefault()
+        removeAppliedRef.current(selectedAppliedRef.current)
+        return
+      }
+
+      // F → ir directo a buscar el cliente de cuenta corriente
+      if ((ev.key === 'f' || ev.key === 'F') && ccSearchAvailRef.current) {
+        ev.preventDefault()
+        customerSearchRef.current?.focus()
+        return
+      }
+
+      // E/D/C/T/Q/A → medio de pago del draft
       const method = METHOD_KEYS[ev.key.toLowerCase()]
-      if (method) {
+      if (method && !fullyAppliedRef.current) {
         ev.preventDefault()
-        updateSplitMethod(activeSplitIndex, method)
-        setTimeout(() => amountInputRefs.current[activeSplitIndex]?.focus(), 30)
+        setDraftMethod(method)
+        setTimeout(() => draftAmountRef.current?.focus(), 30)
         return
       }
 
-      if (ev.key === '+' || ev.key === 'n' || ev.key === 'N') {
+      // N / + → dividir el cobro; si ya está dividido, agrega otra columna
+      if ((ev.key === 'n' || ev.key === 'N' || ev.key === '+') && !fullyAppliedRef.current) {
         ev.preventDefault()
-        addSplit()
+        if (splitActiveRef.current) addSplitColumn()
+        else enableSplit()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [paymentModalOpen, activeSplitIndex, remaining, updateSplitMethod, addSplit])
+  }, [paymentModalOpen, setDraftMethod, enableSplit, addSplitColumn])
 
-  // Shortcuts foco-específicos del input de monto: Enter confirma, R va a recibido.
-  // Los métodos (E/D/C/T/Q/A) y N los maneja el listener global.
-  const handleAmountKeyDown = useCallback((
-    e: React.KeyboardEvent<HTMLInputElement>,
-    splitIndex: number,
-    isEfectivo: boolean,
-  ) => {
-    if ((e.key === 'r' || e.key === 'R') && isEfectivo) {
-      e.preventDefault()
-      setTimeout(() => receivedInputRefs.current[splitIndex]?.focus(), 30)
-      return
+  // V (de "vuelto") sobre el input de monto salta al campo "paga con" (solo efectivo).
+  // Enter lo maneja el listener global.
+  const handleDraftAmountKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if ((e.key === 'v' || e.key === 'V') && draft.method === 'efectivo') {
+      e.preventDefault(); e.stopPropagation()
+      setTimeout(() => draftReceivedRef.current?.focus(), 30)
     }
-    if (e.key === 'Enter' && canConfirm && !processing) {
-      e.preventDefault()
-      handleConfirm()
-    }
-  }, [canConfirm, processing]) // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
-  const handleConfirm = async () => {
+  const handleConfirm = async (finalSplits: PaymentSplit[]) => {
     if (cart.length === 0) return
     setProcessing(true)
     try {
-      const isSingleSplit        = paymentSplits.length === 1
-      const ccSplit              = paymentSplits.find(s => s.method === 'cuenta_corriente')
-      const singleSplit          = paymentSplits[0]
+      const isSingleSplit        = finalSplits.length === 1
+      const ccSplit              = finalSplits.find(s => s.method === 'cuenta_corriente')
+      const singleSplit          = finalSplits[0]
       const effectiveMethod      = isSingleSplit ? singleSplit.method : 'mixto'
       const effectiveInstallments = isSingleSplit && singleSplit.method === 'credito' ? singleSplit.installments : 1
 
@@ -962,7 +1079,7 @@ export default function POSPage() {
         branch_id:        workstation?.branch_id ?? null,
         register_id:      workstation?.register_id ?? null,
         customer_id:      selectedCustomer?.id ?? null,
-        ...(!isSingleSplit ? { payment_splits: paymentSplits } : {}),
+        ...(!isSingleSplit ? { payment_splits: finalSplits } : {}),
       }
       const offline = !navigator.onLine
 
@@ -975,7 +1092,7 @@ export default function POSPage() {
         shipping_amount: shipping,
         payment_method: effectiveMethod,
         installments: effectiveInstallments,
-        ...(isSingleSplit ? {} : { payment_splits: paymentSplits }),
+        ...(isSingleSplit ? {} : { payment_splits: finalSplits }),
         items: cart,
         created_at: new Date().toISOString(),
       })
@@ -986,6 +1103,7 @@ export default function POSPage() {
         setCompletedSale(sale)
         localStorage.removeItem(POS_CART_KEY)
         setCart([]); setSaleDiscountPct(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
+        setApplied([])
         setPaymentModalOpen(false); setStep('ticket')
       }
 
@@ -1063,6 +1181,7 @@ export default function POSPage() {
       setCompletedSale({ ...sale, items: cart, shipping_amount: shipping })
       localStorage.removeItem(POS_CART_KEY)
       setCart([]); setSaleDiscountPct(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
+      setApplied([])
       setPaymentModalOpen(false); setStep('ticket')
       api.post<{ id: string }>('/api/invoices', { sale_id: saleId, customer_id: customerId })
         .then(inv => { setCompletedSale(prev => prev?.id === saleId ? { ...prev, invoice_id: inv.id } : prev) })
@@ -1071,13 +1190,69 @@ export default function POSPage() {
       toast.error(err instanceof Error ? err.message : 'Error al procesar la venta')
     } finally { setProcessing(false) }
   }
-  // Mantener ref siempre actualizado para el handler de teclado del modal
-  useEffect(() => { handleConfirmRef.current = handleConfirm })
+  // Construye la fila de pago a partir del draft (o null si es inválido)
+  const buildDraftRow = (): PaymentSplit | null => {
+    if (!canApplyDraft) return null
+    return {
+      method: draft.method,
+      amount: Math.round(draftAmount * 100) / 100,
+      installments: draft.method === 'credito' ? (draft.installments ?? 1) : 1,
+      ...(draft.method === 'efectivo' && draft.received ? { received: draft.received } : {}),
+    }
+  }
+
+  // Acción principal: aplica el draft al ledger; si así se cubre el total, confirma la venta.
+  const handleMainAction = () => {
+    if (processing) return
+    if (needsCustomer) { toast.error('Seleccioná un cliente para cuenta corriente'); return }
+    if (fullyApplied) { handleConfirm(applied); return }
+    const row = buildDraftRow()
+    if (!row) return
+    const next = [...applied, row]
+    if (draftCovers) { handleConfirm(next); return }
+    // Pago parcial: queda en el ledger y el formulario se re-arma con el saldo restante
+    setApplied(next)
+    const rem = Math.round((total - next.reduce((a, s) => a + s.amount, 0)) * 100) / 100
+    setDraft({ method: 'efectivo', amount: Math.max(0, rem), installments: 1 })
+    setSelectedApplied(null)
+    setTimeout(() => draftAmountRef.current?.focus(), 50)
+  }
+
+  const removeAppliedAt = (i: number) => {
+    const next = applied.filter((_, idx) => idx !== i)
+    setApplied(next)
+    setSelectedApplied(null)
+    const rem = Math.round((total - next.reduce((a, s) => a + s.amount, 0)) * 100) / 100
+    // Reabrir el formulario con el saldo liberado para que sea fácil reemplazarlo
+    if (next.length === 0) setDraft({ method: 'efectivo', amount: Math.max(0, rem), installments: 1 })
+    else setDraft(d => ({ ...d, amount: Math.max(0, rem) }))
+  }
+
+  // Editar = sacar el pago del ledger y volver a cargarlo en el formulario
+  const editAppliedAt = (i: number) => {
+    const row = applied[i]
+    setApplied(applied.filter((_, idx) => idx !== i))
+    setDraft({ ...row })
+    setSelectedApplied(null)
+    setTimeout(() => draftAmountRef.current?.focus(), 30)
+  }
+
+  // Mantener refs actualizados para los handlers de teclado del modal
+  useEffect(() => {
+    mainActionRef.current     = handleMainAction
+    removeAppliedRef.current  = removeAppliedAt
+    fullyAppliedRef.current   = fullyApplied
+    splitActiveRef.current    = splitActive
+    selectedAppliedRef.current = selectedApplied
+    ccSearchAvailRef.current  = ccInPlay && !selectedCustomer
+  })
 
   const handleNewSale = () => {
     localStorage.removeItem(POS_CART_KEY)
     setCart([]); setSaleDiscountPct(0); setShippingEnabled(false)
-    setPaymentSplits([{ method: 'efectivo', amount: 0, installments: 1 }])
+    setApplied([])
+    setDraft({ method: 'efectivo', amount: 0, installments: 1 })
+    setSelectedApplied(null)
     setPaymentModalOpen(false)
     setCompletedSale(null); setSelectedCustomer(null); setCustomerQuery('')
     setStep('cart')
@@ -1131,6 +1306,13 @@ export default function POSPage() {
                 </button>
               </>
             )}
+            <button
+              onClick={() => setShowPrintSettings(true)}
+              title="Configuración de impresión"
+              className="p-1.5 rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors"
+            >
+              <Printer size={16} />
+            </button>
           </div>
         </div>
 
@@ -1706,7 +1888,7 @@ export default function POSPage() {
               <p className="text-xs text-[var(--text3)] text-center">Resolviendo productos...</p>
             )}
             <button
-              onClick={() => { setPaymentSplits([{ method: 'efectivo', amount: total, installments: 1 }]); setActiveSplitIndex(0); setPaymentModalOpen(true) }}
+              onClick={() => { setApplied([]); setDraft({ method: 'efectivo', amount: total, installments: 1 }); setSelectedApplied(null); setPaymentModalOpen(true) }}
               disabled={cart.length === 0 || hasMissingCustomPrice || hasPendingItems}
               className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-[var(--radius-md)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
             >
@@ -1718,169 +1900,373 @@ export default function POSPage() {
 
       </div>
 
-      {/* ── Modal de cobro ── */}
-      <Modal open={paymentModalOpen} onClose={() => setPaymentModalOpen(false)} title="Cobrar" size="md">
-        <div className="space-y-4">
+      {/* ── Drawer de cobro (panel lateral derecho) ──
+          En modo simple es angosto; al dividir el pago se ensancha para mostrar
+          una columna por medio sin necesidad de scrollear. */}
+      <Drawer open={paymentModalOpen} onClose={() => setPaymentModalOpen(false)} title="Cobrar"
+        width={
+          !splitActive            ? 'sm:max-w-[520px]'
+          : applied.length <= 2   ? 'sm:max-w-[820px]'
+          : applied.length === 3  ? 'sm:max-w-[1080px]'
+          :                         'sm:max-w-[94vw]'
+        }
+        footer={
+          <div className="space-y-2">
+            <p className="text-[11px] text-center text-[var(--text3)] leading-snug">
+              {canMainAction
+                ? 'Ya está todo cubierto. Tocá para terminar la venta.'
+                : splitActive
+                  ? (totalApplied > total + 0.01
+                      ? 'Te pasaste del total. Ajustá algún monto.'
+                      : applied.some(s => (s.amount || 0) <= 0)
+                        ? 'Cada medio tiene que tener un monto mayor a 0.'
+                        : `Repartí todo el total entre los medios. Faltan ${formatCurrency(remaining)}.`)
+                  : 'Elegí cómo paga el cliente para confirmar la venta.'}
+            </p>
+            <button onClick={handleMainAction}
+              disabled={processing || !canMainAction}
+              className="w-full py-3.5 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-bold text-base rounded-[var(--radius-md)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.99] flex items-center justify-center gap-3">
+              {processing
+                ? <><span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Procesando...</>
+                : <>Confirmar venta <kbd className="text-xs font-mono bg-white/20 border border-white/30 px-2 py-0.5 rounded">↵ Enter</kbd></>
+              }
+            </button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
 
-          {/* Total */}
-          <div className="text-center py-2 bg-[var(--accent-subtle)] rounded-[var(--radius-lg)]">
-            <p className="text-xs text-[var(--accent)] font-medium uppercase tracking-wide mb-1">Total a cobrar</p>
-            <p className="text-4xl font-bold mono text-[var(--accent)]">{formatCurrency(total)}</p>
+          {/* Ayuda introductoria */}
+          <p className="flex items-start gap-1.5 text-[11px] text-[var(--text3)] leading-snug bg-[var(--surface2)] rounded-[var(--radius-md)] px-3 py-2">
+            <Info size={14} className="flex-shrink-0 mt-px text-[var(--accent)]" />
+            <span>Elegí el <strong className="text-[var(--text2)]">medio de pago</strong> y <strong className="text-[var(--text2)]">confirmá</strong>. ¿El cliente paga con dos medios (una parte en efectivo y otra con tarjeta)? Tocá <strong className="text-[var(--text2)]">«¿Paga con varios medios?»</strong> y dividís el cobro.</span>
+          </p>
+
+          {/* ── PaymentSummary ── */}
+          <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface2)] px-4 py-3">
+            <div className="flex items-end justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--text3)]">Total a cobrar</p>
+                <p className="text-2xl sm:text-3xl font-bold mono text-[var(--text)] leading-tight">{formatCurrency(total)}</p>
+                <p className="text-[10px] text-[var(--text3)] leading-snug">Lo que tiene que pagar el cliente</p>
+              </div>
+              <div className="text-right">
+                {draftChange > 0 ? (
+                  <>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--accent)]">Vuelto</p>
+                    <p className="text-2xl sm:text-3xl font-bold mono text-[var(--accent)] leading-tight">{formatCurrency(draftChange)}</p>
+                    <p className="text-[10px] text-[var(--text3)] leading-snug">Lo que tenés que devolver</p>
+                  </>
+                ) : applied.length > 0 && remaining > 0.01 ? (
+                  <>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--warning)]">Falta cobrar</p>
+                    <p className="text-2xl sm:text-3xl font-bold mono text-[var(--warning)] leading-tight">{formatCurrency(remaining)}</p>
+                    <p className="text-[10px] text-[var(--text3)] leading-snug">Todavía sin pagar</p>
+                  </>
+                ) : fullyApplied ? (
+                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--accent)]">
+                    <Check size={16} /> Pago completo
+                  </span>
+                ) : null}
+              </div>
+            </div>
+            {applied.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-[var(--border)] flex justify-between text-xs text-[var(--text3)]">
+                <span>Recibido</span>
+                <span className="mono font-medium text-[var(--text2)]">{formatCurrency(totalApplied)} de {formatCurrency(total)}</span>
+              </div>
+            )}
           </div>
 
-          {/* Splits */}
-          {paymentSplits.map((split, i) => {
+          {/* ── Editor de columnas (modo "varios medios") ── */}
+          {splitActive && (
+            <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--text)]">¿Cómo se reparte el pago?</p>
+                  <p className="text-[11px] text-[var(--text3)] leading-snug mt-0.5">Una columna por medio. Poné cuánto entra en cada uno hasta cubrir el total.</p>
+                </div>
+                <button onClick={() => { setSplitMode(false); setApplied([]) }}
+                  className="flex-shrink-0 text-[11px] font-medium text-[var(--text3)] hover:text-[var(--accent)] hover:underline">
+                  Un solo medio
+                </button>
+              </div>
+
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                {applied.map((col, i) => {
+                  const restForCol = Math.round((total - (totalApplied - (col.amount || 0))) * 100) / 100
+                  const colChange  = col.method === 'efectivo' && (col.received ?? 0) > col.amount ? Math.ceil((col.received ?? 0) - col.amount) : 0
+                  const colRecvBad = col.method === 'efectivo' && (col.received ?? 0) > 0 && (col.received ?? 0) < col.amount
+                  return (
+                    <div key={i} className="flex-shrink-0 w-[244px] rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface2)] p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text3)]">Medio {i + 1}</span>
+                        <button onClick={() => removeSplitColumn(i)} title="Quitar este medio"
+                          className="p-1 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--surface3)] transition-colors">
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+
+                      <select value={col.method}
+                        onChange={e => setSplitColumn(i, { method: e.target.value, received: undefined })}
+                        className="w-full px-2.5 py-2 text-sm font-medium rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] cursor-pointer">
+                        {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                      </select>
+
+                      <input type="number" min="0" step="0.01" value={col.amount || ''}
+                        onFocus={e => e.target.select()}
+                        onChange={e => setSplitColumn(i, { amount: Math.max(0, Number(e.target.value) || 0) })}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (!processing && canMainAction) handleMainAction() } }}
+                        placeholder="0"
+                        className="w-full px-2.5 py-2 text-xl mono font-bold rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+
+                      {restForCol > 0.01 && Math.abs(restForCol - (col.amount || 0)) > 0.01 && (
+                        <button onClick={() => setSplitColumn(i, { amount: restForCol })}
+                          className="w-full px-2 py-1 text-[11px] mono font-medium rounded border border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:opacity-80 transition-all active:scale-95">
+                          Completar resto · {formatCurrency(restForCol)}
+                        </button>
+                      )}
+
+                      {/* Efectivo: recibido + vuelto */}
+                      {col.method === 'efectivo' && (col.amount || 0) > 0 && (
+                        <div className="space-y-1.5 pt-1.5 border-t border-[var(--border)]">
+                          <label className="text-[10px] font-medium text-[var(--text3)]">Paga con (para el vuelto)</label>
+                          <input type="number" min={col.amount} step="1" value={col.received || ''}
+                            onChange={e => setSplitColumn(i, { received: Number(e.target.value) || 0 })}
+                            placeholder={String(Math.ceil(col.amount))}
+                            className={`w-full px-2.5 py-1.5 text-sm mono rounded-[var(--radius-md)] bg-[var(--surface)] border text-[var(--text)] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${colRecvBad ? 'border-[var(--danger)]' : 'border-[var(--border)] focus:border-[var(--accent)]'}`} />
+                          {colChange > 0 && <p className="text-[11px] font-medium text-[var(--accent)]">Vuelto {formatCurrency(colChange)}</p>}
+                          {colRecvBad && <p className="text-[10px] text-[var(--danger)] leading-snug">Es menos que el monto de este medio.</p>}
+                        </div>
+                      )}
+
+                      {/* Crédito: cuotas */}
+                      {col.method === 'credito' && (
+                        <div className="pt-1.5 border-t border-[var(--border)] space-y-1">
+                          <label className="text-[10px] font-medium text-[var(--text3)]">Cuotas</label>
+                          <div className="flex flex-wrap gap-1">
+                            {[1, 3, 6, 12, 18, 24].map(n => (
+                              <button key={n} onClick={() => setSplitColumn(i, { installments: n })}
+                                className={`px-2 py-0.5 text-[11px] rounded font-medium transition-colors ${(col.installments ?? 1) === n ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface)] text-[var(--text2)] hover:bg-[var(--surface3)]'}`}>
+                                {n}x
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Cuenta corriente */}
+                      {col.method === 'cuenta_corriente' && (
+                        <p className="flex items-start gap-1 text-[10px] text-[var(--text2)] leading-snug pt-1">
+                          <BookOpen size={12} className="flex-shrink-0 mt-px text-[var(--accent)]" />
+                          Queda fiado en la cuenta del cliente.
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+
+                {/* Agregar otra columna */}
+                {applied.length < PAYMENT_METHODS.length && (
+                  <button onClick={addSplitColumn}
+                    className="flex-shrink-0 w-[120px] rounded-[var(--radius-md)] border border-dashed border-[var(--border)] text-xs font-medium text-[var(--text3)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors flex flex-col items-center justify-center gap-1.5 py-6">
+                    <Plus size={18} />
+                    Agregar medio
+                  </button>
+                )}
+              </div>
+
+              {totalApplied > total + 0.01 && (
+                <p className="text-[11px] text-[var(--danger)] leading-snug">Te pasaste: la suma de los medios ({formatCurrency(totalApplied)}) supera el total ({formatCurrency(total)}). Ajustá algún monto.</p>
+              )}
+            </div>
+          )}
+
+          {/* ── Formulario de un solo medio (modo simple) ── */}
+          {!splitActive && (() => {
             const KEY_HINT: Record<string, string> = {
               efectivo: 'E', debito: 'D', credito: 'C',
               transferencia: 'T', qr: 'Q', cuenta_corriente: 'A',
             }
-            const isActive = activeSplitIndex === i
+            const pendingAfterDraft = Math.round((remaining - draftAmount) * 100) / 100
+            const exceedsRemaining  = draftAmount > remaining + 0.01
             return (
-              <div key={i}
-                onClick={() => setActiveSplitIndex(i)}
-                className={`border rounded-[var(--radius-md)] p-2 space-y-2 transition-all cursor-default ${isActive ? 'border-[var(--accent)]' : 'border-[var(--border)]'}`}
-              >
-                {paymentSplits.length > 1 && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-[var(--text3)]">Pago {i + 1}</span>
-                    <button onClick={e => { e.stopPropagation(); removeSplit(i) }}
-                      className="p-1 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--surface2)] transition-colors">
-                      <X size={13} />
-                    </button>
-                  </div>
-                )}
+              <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 space-y-3">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--text)]">
+                    {applied.length > 0 ? 'Agregar otro pago' : '¿Cómo paga el cliente?'}
+                  </p>
+                  <p className="text-[11px] text-[var(--text3)] leading-snug mt-0.5">
+                    {applied.length > 0
+                      ? 'Elegí el medio para cubrir lo que falta. Se suma a la lista de arriba.'
+                      : 'Elegí cómo paga. Si abona todo con un solo medio, ya podés confirmar la venta.'}
+                  </p>
+                </div>
 
-                {/* Grilla de métodos con hints de teclado */}
-                <div className="grid grid-cols-3 gap-1">
-                  {PAYMENT_METHODS.map(m => (
-                    <button key={m.value}
-                      onClick={e => { e.stopPropagation(); updateSplitMethod(i, m.value); setActiveSplitIndex(i); setTimeout(() => amountInputRefs.current[i]?.focus(), 30) }}
-                      className={`relative flex items-center gap-1.5 px-2 py-1.5 rounded border text-xs font-medium transition-all active:scale-95
-                        ${split.method === m.value
-                          ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                          : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'}`}>
-                      {isActive && (
-                        <kbd className="absolute top-0.5 right-1 text-[8px] font-mono bg-[var(--surface3)] text-[var(--text3)] px-0.5 rounded leading-none">
-                          {KEY_HINT[m.value]}
-                        </kbd>
+                {/* Selector de método — ancho completo */}
+                <div className="space-y-1.5">
+                  {splitActive && <label className="text-xs font-semibold text-[var(--text2)]">1 · Medio de pago</label>}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                    {PAYMENT_METHODS.map(m => {
+                      const sel = draft.method === m.value
+                      return (
+                        <button key={m.value}
+                          onClick={() => { setDraftMethod(m.value); if (splitActive) setTimeout(() => draftAmountRef.current?.focus(), 30) }}
+                          className={`relative flex items-center gap-1.5 px-2 py-2.5 rounded-[var(--radius-md)] border text-xs font-medium transition-all active:scale-95
+                            ${sel
+                              ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                              : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--text3)]'}`}>
+                          <kbd className={`absolute top-1 right-1 text-[8px] font-mono leading-none ${sel ? 'text-[var(--accent)]' : 'text-[var(--text3)]'}`}>{KEY_HINT[m.value]}</kbd>
+                          <m.Icon size={15} className="flex-shrink-0" />
+                          <span className="truncate">{m.label}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[10px] text-[var(--text3)] leading-snug">
+                    Tip: podés apretar la letra que aparece en cada botón (E = efectivo, D = débito…) en vez de tocarlo.
+                  </p>
+                </div>
+
+                {/* Monto: solo en modo "varios medios". En modo simple paga el total con este medio. */}
+                {splitActive ? (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-semibold text-[var(--text2)]">2 · ¿Cuánto paga con este medio?</label>
+                      {applied.length === 0 && (
+                        <button onClick={() => setSplitMode(false)}
+                          className="text-[11px] font-medium text-[var(--text3)] hover:text-[var(--accent)] hover:underline">
+                          Paga con un solo medio
+                        </button>
                       )}
-                      <m.Icon size={14} className="flex-shrink-0" />
-                      <span className="truncate">{m.label}</span>
-                    </button>
-                  ))}
-                </div>
-
-                {/* Monto */}
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-[var(--text3)]">Monto</span>
-                    {isActive && (
-                      <kbd className="text-[9px] font-mono bg-[var(--surface3)] border border-[var(--border)] px-1 py-0.5 rounded text-[var(--text3)]">M</kbd>
-                    )}
-                  </div>
-                  <input
-                    ref={el => { amountInputRefs.current[i] = el }}
-                    type="number" min="0" step="0.01"
-                    value={split.amount || ''}
-                    onFocus={() => setActiveSplitIndex(i)}
-                    onChange={e => updateSplitAmount(i, e.target.value)}
-                    onKeyDown={e => handleAmountKeyDown(e, i, split.method === 'efectivo')}
-                    className="w-full px-3 py-2.5 text-xl mono font-bold rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-                  />
-                </div>
-
-                {/* Crédito: cuotas */}
-                {split.method === 'credito' && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-[var(--text2)] flex-shrink-0">Cuotas</span>
-                    <div className="flex gap-1 flex-wrap">
-                      {[1, 3, 6, 12, 18, 24].map(n => (
-                        <button key={n} onClick={e => { e.stopPropagation(); updateSplitInstallments(i, n) }}
-                          className={`px-2.5 py-1 text-xs rounded font-medium transition-colors
-                            ${(split.installments ?? 1) === n ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'}`}>
-                          {n}x
+                    </div>
+                    <input
+                      ref={draftAmountRef}
+                      type="number" min="0" step="0.01"
+                      value={draft.amount || ''}
+                      onFocus={() => setSelectedApplied(null)}
+                      onChange={e => setDraftAmount(e.target.value)}
+                      onKeyDown={handleDraftAmountKeyDown}
+                      className={`w-full px-3 py-2.5 text-2xl mono font-bold rounded-[var(--radius-md)] bg-[var(--surface2)] border text-[var(--text)] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none
+                        ${exceedsRemaining ? 'border-[var(--danger)] focus:border-[var(--danger)]' : 'border-[var(--border)] focus:border-[var(--accent)]'}`}
+                    />
+                    {/* Montos parciales sugeridos + atajo para usar el saldo completo */}
+                    <div className="flex gap-1.5 flex-wrap">
+                      {suggestPartialAmounts(remaining).map(v => (
+                        <button key={v} onClick={() => setDraft(d => ({ ...d, amount: v }))}
+                          className="px-2 py-1 text-xs mono font-medium rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)] transition-all active:scale-95">
+                          {formatCurrency(v)}
                         </button>
                       ))}
+                      {remaining > 0.01 && draftAmount < remaining - 0.01 && (
+                        <button onClick={() => setDraft(d => ({ ...d, amount: remaining }))}
+                          className="px-2 py-1 text-xs mono font-medium rounded border border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:opacity-80 transition-all active:scale-95">
+                          Resto {formatCurrency(remaining)}
+                        </button>
+                      )}
                     </div>
+                    {exceedsRemaining ? (
+                      <p className="text-[11px] text-[var(--danger)] leading-snug">Ese monto es más de lo que falta. Lo máximo con este medio es {formatCurrency(remaining)}.</p>
+                    ) : pendingAfterDraft > 0.01 ? (
+                      <p className="text-[11px] text-[var(--warning)] leading-snug">Con este medio cobrás {formatCurrency(draftAmount)}. Después tendrás que cobrar {formatCurrency(pendingAfterDraft)} más con otro medio.</p>
+                    ) : (
+                      <p className="text-[10px] text-[var(--text3)] leading-snug">Poné cuánto paga con este medio y después agregás el resto con otro.</p>
+                    )}
+                  </div>
+                ) : (
+                  <button onClick={enableSplit}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-[var(--radius-md)] border border-dashed border-[var(--border)] text-xs font-medium text-[var(--text3)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors">
+                    <Layers size={14} />
+                    ¿Paga con varios medios? Dividir el cobro
+                  </button>
+                )}
+
+                {/* Crédito: cuotas */}
+                {draft.method === 'credito' && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-[var(--text2)] flex-shrink-0">Cuotas</span>
+                    {[1, 3, 6, 12, 18, 24].map(n => (
+                      <button key={n} onClick={() => setDraftInstallments(n)}
+                        className={`px-2.5 py-1 text-xs rounded font-medium transition-colors
+                          ${(draft.installments ?? 1) === n ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'}`}>
+                        {n}x
+                      </button>
+                    ))}
                   </div>
                 )}
 
                 {/* Efectivo: recibido y vuelto */}
-                {split.method === 'efectivo' && split.amount > 0 && (
-                  <div className="space-y-2 pt-2 border-t border-[var(--border)]">
-                    {/* Sugerencias de denominación */}
-                    <div className="flex gap-1.5 flex-wrap">
-                      {suggestReceived(split.amount).map(v => (
-                        <button key={v}
-                          onClick={e => { e.stopPropagation(); updateSplitReceived(i, v) }}
+                {draft.method === 'efectivo' && draftAmount > 0 && (
+                  <div className="space-y-2 pt-3 border-t border-[var(--border)]">
+                    <div>
+                      <p className="text-xs font-semibold text-[var(--text2)]">{splitActive ? '3 · ' : ''}Calcular el vuelto <span className="font-normal text-[var(--text3)]">(opcional)</span></p>
+                      <p className="text-[10px] text-[var(--text3)] leading-snug">¿Te paga con un billete más grande? Anotá con cuánto paga y te decimos el vuelto solo. Si paga justo, dejalo vacío.</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {suggestReceived(draftAmount).map(v => (
+                        <button key={v} onClick={() => setDraftReceived(v)}
                           className={`px-2.5 py-1 text-xs mono font-medium rounded border transition-all active:scale-95
-                            ${split.received === v
+                            ${draft.received === v
                               ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                               : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)] hover:border-[var(--accent)]'}`}>
                           {formatCurrency(v)}
                         </button>
                       ))}
                     </div>
-                    {/* Input recibido */}
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-medium text-[var(--text3)]">Recibido</span>
-                        <kbd className="text-[9px] font-mono bg-[var(--surface3)] border border-[var(--border)] px-1 py-0.5 rounded text-[var(--text3)]">R</kbd>
+                    <div className="grid sm:grid-cols-2 gap-3 items-end">
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-medium text-[var(--text3)]">Paga con</label>
+                          <kbd className="text-[9px] font-mono bg-[var(--surface3)] border border-[var(--border)] px-1 py-0.5 rounded text-[var(--text3)]">V</kbd>
+                        </div>
+                        <input
+                          ref={draftReceivedRef}
+                          type="number" min={draftAmount} step="1"
+                          value={draft.received || ''}
+                          onChange={e => setDraftReceived(Number(e.target.value))}
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (!processing) handleMainAction() } }}
+                          placeholder={String(Math.ceil(draftAmount))}
+                          className={`w-full px-3 py-2 text-base mono rounded-[var(--radius-md)] bg-[var(--surface2)] border text-[var(--text)] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none
+                            ${draftReceivedInvalid ? 'border-[var(--danger)] focus:border-[var(--danger)]' : 'border-[var(--border)] focus:border-[var(--accent)]'}`}
+                        />
                       </div>
-                      <input
-                        ref={el => { receivedInputRefs.current[i] = el }}
-                        type="number" min={split.amount} step="1"
-                        value={split.received || ''}
-                        onChange={e => updateSplitReceived(i, Number(e.target.value))}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter' && canConfirm && !processing) { e.preventDefault(); handleConfirm() }
-                          if (e.key === 'Escape' || e.key === 'm' || e.key === 'M') { e.preventDefault(); amountInputRefs.current[i]?.focus() }
-                        }}
-                        placeholder={String(Math.ceil(split.amount))}
-                        onClick={e => e.stopPropagation()}
-                        className={`w-full px-3 py-2 text-base mono rounded-[var(--radius-md)] bg-[var(--surface2)] border text-[var(--text)] focus:outline-none ${(split.received ?? 0) > 0 && (split.received ?? 0) < split.amount ? 'border-[var(--danger)] focus:border-[var(--danger)]' : 'border-[var(--border)] focus:border-[var(--accent)]'}`}
-                      />
+                      {draftChange > 0 && (
+                        <div className="flex items-center justify-between px-3 py-2 bg-[var(--accent-subtle)] rounded-[var(--radius-md)]">
+                          <div className="leading-tight">
+                            <span className="block text-sm font-semibold text-[var(--text2)]">Vuelto</span>
+                            <span className="block text-[10px] text-[var(--text3)]">Devolvé esto</span>
+                          </div>
+                          <span className="text-2xl font-bold mono text-[var(--accent)]">{formatCurrency(draftChange)}</span>
+                        </div>
+                      )}
                     </div>
-                    {/* Vuelto — redondeado a favor del consumidor */}
-                    {(split.received ?? 0) > split.amount && (
-                      <div className="flex items-center justify-between px-1 py-1.5 bg-[var(--accent-subtle)] rounded-[var(--radius-md)]">
-                        <span className="text-sm font-semibold text-[var(--text2)]">Vuelto</span>
-                        <span className="text-2xl font-bold mono text-[var(--accent)]">
-                          {formatCurrency(Math.ceil((split.received ?? 0) - split.amount))}
-                        </span>
-                      </div>
+                    {draftReceivedInvalid && (
+                      <p className="text-[11px] text-[var(--danger)] leading-snug">El cliente no puede pagar menos que el monto. Poné cuánto te entrega (igual o más).</p>
                     )}
+                  </div>
+                )}
+
+                {/* Cuenta corriente: aclaración */}
+                {draft.method === 'cuenta_corriente' && (
+                  <div className="flex items-start gap-1.5 text-xs text-[var(--text2)] bg-[var(--surface2)] rounded-[var(--radius-md)] px-3 py-2 leading-snug">
+                    <BookOpen size={14} className="flex-shrink-0 mt-px text-[var(--accent)]" />
+                    <span>El cliente se lo lleva <strong>fiado</strong>: el monto queda anotado como deuda en su cuenta. Elegí el cliente abajo o apretá <kbd className="text-[9px] font-mono bg-[var(--surface3)] border border-[var(--border)] px-1 py-0.5 rounded">F</kbd> para ir directo.</span>
                   </div>
                 )}
               </div>
             )
-          })}
-
-          {/* Resumen multi-split */}
-          {paymentSplits.length > 1 && (
-            <div className={`flex justify-between text-sm px-1 font-medium ${splitsValid ? 'text-[var(--accent)]' : 'text-[var(--warning)]'}`}>
-              <span>{splitsValid ? '✓ Total cubierto' : 'Pendiente'}</span>
-              <span className="mono">{splitsValid ? formatCurrency(total) : formatCurrency(Math.abs(remaining))}</span>
-            </div>
-          )}
-
-          {/* Agregar medio de pago */}
-          <div className="space-y-1.5">
-            {paymentSplits.length === 1 && (
-              <p className="text-xs text-[var(--text3)] text-center">
-                Para pago mixto: modificá el monto del primer medio y agregá otro.
-              </p>
-            )}
-            <button onClick={addSplit}
-              className="w-full flex items-center justify-center gap-2 py-2.5 border border-dashed border-[var(--border)] rounded-[var(--radius-md)] text-sm text-[var(--text3)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors">
-              <Plus size={14} /> Agregar otro medio de pago
-              <kbd className="text-[10px] font-mono bg-[var(--surface2)] border border-[var(--border)] px-1.5 py-0.5 rounded">N</kbd>
-            </button>
-          </div>
+          })()}
 
           {/* Búsqueda de cliente para Cta. Cte. */}
-          {paymentSplits.some(s => s.method === 'cuenta_corriente') && (
-            <div className="relative">
+          {ccInPlay && (
+            <div className="space-y-1.5">
+              <div className="px-0.5">
+                <p className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text2)]">
+                  Cliente de la cuenta corriente
+                  {!selectedCustomer && <kbd className="text-[9px] font-mono bg-[var(--surface3)] border border-[var(--border)] px-1 py-0.5 rounded text-[var(--text3)]">F</kbd>}
+                </p>
+                <p className="text-[10px] text-[var(--text3)] leading-snug">Buscalo por nombre o documento. La deuda se anota en esta cuenta. Si es nuevo, podés crearlo acá mismo.</p>
+              </div>
               {selectedCustomer ? (
                 <div className="flex items-center justify-between px-3 py-2 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)]">
                   <div>
@@ -1897,38 +2283,39 @@ export default function POSPage() {
                 <div className="relative">
                   <Users size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
                   {searchingCustomer && <div className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />}
-                  <input value={customerQuery} onChange={e => setCustomerQuery(e.target.value)}
-                    placeholder="Buscar cliente para Cta. Cte. ..."
+                  <input ref={customerSearchRef} value={customerQuery} onChange={e => setCustomerQuery(e.target.value)}
+                    onKeyDown={handleCustomerKeyDown}
+                    placeholder="Buscar cliente por nombre o documento..."
                     className="w-full pl-9 pr-3 py-2.5 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--warning)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
                   />
                   {customerQuery.length >= 2 && (
-                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 overflow-hidden">
-                      {customerResults.length > 0 ? (
-                        <>
-                          {customerResults.map(c => (
-                            <button key={c.id}
-                              onClick={() => { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]) }}
-                              className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
-                              <div>
-                                <p className="text-sm font-medium text-[var(--text)]">{c.full_name}</p>
-                                {c.document && <p className="text-xs text-[var(--text3)]">{c.document}</p>}
-                              </div>
-                              {Number(c.current_balance) > 0 && <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>}
-                            </button>
-                          ))}
-                          <button onClick={() => setQuickCustomerModal(true)}
-                            className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[var(--accent-subtle)] transition-colors text-left border-t border-[var(--border)]">
-                            <Plus size={13} className="text-[var(--accent)]" />
-                            <span className="text-sm text-[var(--accent)] font-medium">Crear "{customerQuery}"</span>
+                    <div className="absolute bottom-full left-0 right-0 mb-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 overflow-hidden max-h-60 overflow-y-auto">
+                      {customerResults.map((c, idx) => {
+                        const active = customerActiveIndex === idx
+                        return (
+                          <button key={c.id}
+                            onMouseEnter={() => setCustomerActiveIndex(idx)}
+                            onClick={() => { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]) }}
+                            className={`w-full flex items-center justify-between px-3 py-2.5 transition-colors text-left border-b border-[var(--border)] last:border-0 ${active ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--surface2)]'}`}>
+                            <div>
+                              <p className={`text-sm font-medium ${active ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>{c.full_name}</p>
+                              {c.document && <p className="text-xs text-[var(--text3)]">{c.document}</p>}
+                            </div>
+                            {Number(c.current_balance) > 0 && <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>}
                           </button>
-                        </>
-                      ) : (
-                        <button onClick={() => setQuickCustomerModal(true)}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[var(--accent-subtle)] transition-colors text-left">
-                          <Plus size={13} className="text-[var(--accent)]" />
-                          <span className="text-sm text-[var(--accent)] font-medium">Crear cliente "{customerQuery}"</span>
-                        </button>
-                      )}
+                        )
+                      })}
+                      {(() => {
+                        const createActive = customerActiveIndex === customerResults.length
+                        return (
+                          <button onMouseEnter={() => setCustomerActiveIndex(customerResults.length)}
+                            onClick={() => setQuickCustomerModal(true)}
+                            className={`w-full flex items-center gap-2 px-3 py-2.5 transition-colors text-left ${customerResults.length > 0 ? 'border-t border-[var(--border)]' : ''} ${createActive ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--accent-subtle)]'}`}>
+                            <Plus size={13} className="text-[var(--accent)]" />
+                            <span className="text-sm text-[var(--accent)] font-medium">Crear {customerResults.length > 0 ? `"${customerQuery}"` : `cliente "${customerQuery}"`}</span>
+                          </button>
+                        )
+                      })()}
                     </div>
                   )}
                 </div>
@@ -1936,20 +2323,8 @@ export default function POSPage() {
             </div>
           )}
 
-          {/* Confirmar — sticky abajo */}
-          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-6 border-t border-[var(--border)]">
-            <button onClick={handleConfirm}
-              disabled={processing || !canConfirm || (paymentSplits.some(s => s.method === 'cuenta_corriente') && !selectedCustomer)}
-              className="w-full py-4 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-bold text-base rounded-[var(--radius-md)] transition-colors disabled:opacity-60 active:scale-95 flex items-center justify-center gap-3">
-              {processing
-                ? <><span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Procesando...</>
-                : <>Confirmar venta <kbd className="text-xs font-mono bg-white/20 border border-white/30 px-2 py-0.5 rounded">↵ Enter</kbd></>
-              }
-            </button>
-          </div>
-
         </div>
-      </Modal>
+      </Drawer>
 
       {/* Tabs mobile */}
       <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 flex border-t border-[var(--border)] bg-[var(--surface)]/95 backdrop-blur-md">
@@ -1998,39 +2373,46 @@ export default function POSPage() {
           </p>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-[var(--text2)]">Sucursal</label>
-            <select
-              value={tempBranchId}
-              onChange={e => {
-                const branchId = e.target.value
-                setTempBranchId(branchId)
-                setTempRegisterId('')
-                const branch = branches.find(b => b.id === branchId)
-                if (branch?.warehouse_id) {
-                  const wh = warehouses.find(w => w.id === branch.warehouse_id)
-                  if (wh) setSelectedWarehouse(wh)
-                }
-              }}
-              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-            >
-              <option value="">Seleccionar...</option>
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>{b.name}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={tempBranchId}
+                onChange={e => {
+                  const branchId = e.target.value
+                  setTempBranchId(branchId)
+                  setTempRegisterId('')
+                  const branch = branches.find(b => b.id === branchId)
+                  if (branch?.warehouse_id) {
+                    const wh = warehouses.find(w => w.id === branch.warehouse_id)
+                    if (wh) setSelectedWarehouse(wh)
+                  }
+                }}
+                disabled={loadingBranches}
+                className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50"
+              >
+                <option value="">{loadingBranches ? 'Cargando...' : 'Seleccionar...'}</option>
+                {branches.map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+              {loadingBranches && <span className="absolute right-8 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />}
+            </div>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-[var(--text2)]">Caja</label>
-            <select
-              value={tempRegisterId}
-              onChange={e => setTempRegisterId(e.target.value)}
-              disabled={!tempBranchId}
-              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50"
-            >
-              <option value="">{tempBranchId ? 'Seleccionar...' : 'Primero elegí la sucursal'}</option>
-              {branches.find(b => b.id === tempBranchId)?.registers.map(r => (
-                <option key={r.id} value={r.id}>{r.name}</option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                value={tempRegisterId}
+                onChange={e => setTempRegisterId(e.target.value)}
+                disabled={loadingBranches || !tempBranchId}
+                className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50"
+              >
+                <option value="">{loadingBranches ? 'Cargando...' : tempBranchId ? 'Seleccionar...' : 'Primero elegí la sucursal'}</option>
+                {branches.find(b => b.id === tempBranchId)?.registers.map(r => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
+              {loadingBranches && <span className="absolute right-8 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />}
+            </div>
           </div>
           <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
             <div className="flex justify-end gap-2">
@@ -2129,7 +2511,10 @@ export default function POSPage() {
         branchName={workstation?.branch_name}
         registerName={workstation?.register_name}
         sellerName={user?.full_name}
+        printSettings={printSettings}
       />
+
+      <PrintSettingsModal open={showPrintSettings} onClose={() => setShowPrintSettings(false)} />
 
     </div>
   )

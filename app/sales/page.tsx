@@ -35,6 +35,7 @@ export default function SalesPage() {
   const [customerSearch, setCustomerSearch] = useState('')
   const [customerOptions, setCustomerOptions] = useState<{ id: string; full_name: string }[]>([])
   const [searchingCustomers, setSearchingCustomers] = useState(false)
+  const [periodRevenue, setPeriodRevenue] = useState(0)
 
   // Refs para evitar loops en useCallback
   const periodRef = useRef(period)
@@ -82,9 +83,23 @@ export default function SalesPage() {
       if (ticketRef.current) params.ticket = ticketRef.current
       if (customerRef.current) params.customer_id = customerRef.current.id
 
-      const res = await api.get<PaginatedResponse<Sale>>('/api/sales', params)
+      // Total del período: reutiliza /api/finances/summary (suma server-side de
+      // todas las ventas del rango, no solo la página). Solo soporta from/to,
+      // así que el método de pago se deriva del breakdown by_payment.
+      const summaryParams: Record<string, string> = {}
+      if (params.from) summaryParams.from = String(params.from)
+      if (params.to) summaryParams.to = String(params.to)
+
+      const [res, summary] = await Promise.all([
+        api.get<PaginatedResponse<Sale>>('/api/sales', params),
+        api.get<{ revenue: number; by_payment: Record<string, number> }>(
+          '/api/finances/summary', summaryParams
+        ),
+      ])
       setData(res.data)
       setPagination(res.pagination)
+      const pm = paymentRef.current
+      setPeriodRevenue(pm ? (summary.by_payment[pm] ?? 0) : summary.revenue)
     } catch (err) { console.error(err) }
     finally { setLoading(false) }
   }, [])
@@ -119,7 +134,7 @@ export default function SalesPage() {
     return () => clearTimeout(timer)
   }, [customerSearch])
 
-  const totalRevenue = data.reduce((a, s) => a + Number(s.total), 0)
+  const totalRevenue = periodRevenue
 
   const periods: { key: Period; label: string }[] = [
     { key: 'today', label: 'Hoy' },

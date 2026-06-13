@@ -9,12 +9,13 @@ import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 import { useAuth } from '@/hooks/useAuth'
-import { useTheme } from '@/hooks/useTheme'
 import { getRoleLabel } from '@/lib/utils'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
-import { Sun, Moon, Shield, Truck, Building2, Receipt, CreditCard, MessageCircle } from 'lucide-react'
+import { Shield, Truck, Building2, Receipt, CreditCard, MessageCircle, Printer } from 'lucide-react'
 import { Toggle } from '@/components/ui/Toggle'
+import { usePrintSettings } from '@/hooks/usePrintSettings'
+import { PrintSettingsFields } from '@/components/modules/PrintSettingsModal'
 
 const IVA_OPTIONS = [
   { value: 'RI', label: 'Responsable Inscripto (Facturas A/B)' },
@@ -60,7 +61,7 @@ interface WarehouseOption {
 export default function SettingsPage() {
   const { user, signOut, refreshUser } = useAuth()
   const role = user?.role ?? ''
-  const { theme, toggle } = useTheme()
+  const { settings: printSettings, setSettings: setPrintSettings } = usePrintSettings()
 
   // Datos del negocio
   const [bizName, setBizName]           = useState('')
@@ -533,6 +534,36 @@ export default function SettingsPage() {
               </Card>
             )}
 
+            {/* Ventas */}
+            {isOwnerAdmin && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Truck size={15} className="text-[var(--accent)]" />
+                    Ventas
+                  </CardTitle>
+                </CardHeader>
+                <div>
+                  <p className="text-xs text-[var(--text3)] mb-1">Precio de envío por defecto</p>
+                  <p className="text-xs text-[var(--text3)] mb-2">Se pre-carga al activar el envío en el POS</p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={shippingDefault}
+                      onChange={e => setShippingDefault(e.target.value)}
+                      placeholder="0"
+                      className="max-w-[140px]"
+                    />
+                    <Button onClick={handleSaveShipping} disabled={savingShipping}>
+                      {savingShipping ? 'Guardando...' : 'Guardar'}
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            )}
+
           </div>
 
           {/* ── Columna derecha ── */}
@@ -554,6 +585,11 @@ export default function SettingsPage() {
                     <Shield size={13} className="text-[var(--accent)]" />
                     <p className="text-sm text-[var(--text)]">{getRoleLabel(role ?? '')}</p>
                   </div>
+                </div>
+                <div className="pt-2 border-t border-[var(--border)]">
+                  <Button variant="danger" onClick={signOut}>
+                    Cerrar sesión
+                  </Button>
                 </div>
               </div>
             </Card>
@@ -683,67 +719,19 @@ export default function SettingsPage() {
               )
             })()}
 
-            {/* Apariencia */}
+            {/* Impresión */}
             <Card>
               <CardHeader>
-                <CardTitle>Apariencia</CardTitle>
+                <CardTitle className="flex items-center gap-2">
+                  <Printer size={15} className="text-[var(--accent)]" />
+                  Impresión
+                </CardTitle>
               </CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-[var(--text)]">
-                    {theme === 'dark' ? 'Modo oscuro' : 'Modo claro'}
-                  </p>
-                  <p className="text-xs text-[var(--text3)] mt-0.5">
-                    Cambia el tema de la interfaz
-                  </p>
-                </div>
-                <button
-                  onClick={toggle}
-                  className="w-10 h-10 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] flex items-center justify-center hover:bg-[var(--surface3)] transition-colors"
-                >
-                  {theme === 'dark' ? <Sun size={16} className="text-[var(--text2)]" /> : <Moon size={16} className="text-[var(--text2)]" />}
-                </button>
-              </div>
-            </Card>
-
-            {/* Ventas */}
-            {isOwnerAdmin && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Truck size={15} className="text-[var(--accent)]" />
-                    Ventas
-                  </CardTitle>
-                </CardHeader>
-                <div>
-                  <p className="text-xs text-[var(--text3)] mb-1">Precio de envío por defecto</p>
-                  <p className="text-xs text-[var(--text3)] mb-2">Se pre-carga al activar el envío en el POS</p>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={shippingDefault}
-                      onChange={e => setShippingDefault(e.target.value)}
-                      placeholder="0"
-                      className="max-w-[140px]"
-                    />
-                    <Button onClick={handleSaveShipping} disabled={savingShipping}>
-                      {savingShipping ? 'Guardando...' : 'Guardar'}
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            )}
-
-            {/* Sesión */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Sesión</CardTitle>
-              </CardHeader>
-              <Button variant="danger" onClick={signOut}>
-                Cerrar sesión
-              </Button>
+              <p className="text-xs text-[var(--text3)] mb-4">
+                Se guarda en <strong>esta terminal</strong>. Cada caja puede tener su propia impresora —
+                los cajeros también pueden cambiarla desde el botón de impresora en el POS.
+              </p>
+              <PrintSettingsFields settings={printSettings} setSettings={setPrintSettings} />
             </Card>
 
           </div>

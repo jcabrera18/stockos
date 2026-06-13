@@ -10,6 +10,14 @@ import { Printer, CreditCard, Package, User, Calendar, Hash, FileText, Download,
 import { useAuth } from '@/hooks/useAuth'
 import { toast } from 'sonner'
 import { printFacturaA4 } from '@/lib/printFactura'
+import {
+  printThermal,
+  buildSaleTicketHtml,
+  buildInvoiceTicketHtml,
+  buildInvoiceQrDataUrl,
+  type TicketInvoiceData,
+  type TicketBusiness,
+} from '@/lib/printTicket'
 
 interface SaleItem {
   id: string
@@ -180,109 +188,55 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
     setConvertModal(true)
   }
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (!sale) return
-    const win = window.open('', '_blank', 'width=350,height=800')
-    if (!win) return
-
-    const itemsSubtotal = sale.sale_items.reduce(
-      (a, i) => a + i.unit_price * i.quantity - i.discount, 0
-    )
+    const biz: TicketBusiness = user?.business ?? {}
     const isInvoiced = !!(invoice && invoice.afip_status === 'authorized' && (invoice.cae || invoice.afip_cae))
-    const invoiceTypeLabel = (type: string) => {
-      const map: Record<string, string> = {
-        A: 'FACTURA A', B: 'FACTURA B', C: 'FACTURA C',
-        NCA: 'NOTA DE CRÉDITO A', NCB: 'NOTA DE CRÉDITO B', NCC: 'NOTA DE CRÉDITO C',
-        R: 'REMITO',
+
+    if (isInvoiced && invoice) {
+      const cae = invoice.afip_cae ?? invoice.cae
+      const qrDataUrl = await buildInvoiceQrDataUrl({ ...invoice, cae }, biz)
+      const data: TicketInvoiceData = {
+        invoice_type: invoice.invoice_type,
+        numero: invoice.numero,
+        created_at: sale.created_at,
+        cae,
+        cae_vto: invoice.afip_cae_vto,
+        receptor_name: invoice.receptor_name ?? customer?.full_name,
+        receptor_cuit: invoice.receptor_cuit,
+        receptor_address: invoice.receptor_address,
+        receptor_iva_condition: invoice.receptor_iva_condition,
+        net_amount: invoice.net_amount,
+        iva_amount: invoice.iva_amount,
+        total_amount: invoice.total_amount,
+        items: invoice.invoice_items.map(i => ({
+          description: i.description, quantity: i.quantity, unit_price: i.unit_price, subtotal: i.subtotal,
+        })),
+        qrDataUrl,
+        payment_method: sale.payment_method,
+        installments: sale.installments,
+        payment_splits: sale.payment_splits,
       }
-      return map[type] ?? `COMPROBANTE ${type}`
+      const ptoVenta = String(biz.afip_punto_venta ?? 1).padStart(5, '0')
+      printThermal(`Factura ${ptoVenta}-${String(invoice.numero).padStart(8, '0')}`, buildInvoiceTicketHtml(data, biz))
+      return
     }
 
-    const sep = `<div style="border-top:1px dashed #999;margin:8px 0;"></div>`
-    const itemsHtml = sale.sale_items.map(item => {
-      const lineTotal = item.unit_price * item.quantity - item.discount
-      return `
-        <div style="margin-bottom:6px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-            <span style="flex:1;padding-right:8px;word-break:break-word;">${item.quantity} ${item.products.unit} ${item.products.name}</span>
-            <span style="flex-shrink:0;">${formatCurrency(lineTotal)}</span>
-          </div>
-          <div style="font-size:11px;color:#555;">
-            &nbsp;&nbsp;c/u ${formatCurrency(item.unit_price)}${item.discount > 0 ? ` &minus; dto ${formatCurrency(item.discount)}` : ''}
-          </div>
-        </div>`
-    }).join('')
-
-    win.document.write(`<!DOCTYPE html><html><head>
-      <meta charset="utf-8"><title>Ticket</title>
-      <style>
-        @page { size: 80mm auto; margin: 3mm 2mm; }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: Arial, Helvetica, sans-serif; font-size: 12px; font-weight: 500; line-height: 1.4; color: #000; background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-      </style>
-    </head><body>
-      <div style="padding:14px 12px;">
-        <div style="text-align:center;margin-bottom:2px;">
-          <div style="font-size:15px;font-weight:bold;letter-spacing:0.04em;">${user?.business?.name ?? 'StockOS'}</div>
-          ${user?.business?.cuit ? `<div>CUIT: ${user.business.cuit}</div>` : ''}
-          ${user?.business?.address ? `<div style="font-size:11px;margin-top:1px;">${user.business.address}</div>` : ''}
-          ${user?.business?.phone ? `<div style="font-size:11px;">Tel: ${user.business.phone}</div>` : ''}
-        </div>
-        ${sep}
-        <div style="font-size:12px;line-height:1.5;">
-          <div>Fecha: ${formatDateTime(sale.created_at)}</div>
-          <div>N&#176; Ticket: #${sale.id.slice(-8).toUpperCase()}</div>
-          ${sale.users ? `<div>Cajero: ${sale.users.full_name}</div>` : ''}
-          ${customer ? `<div>Cliente: ${customer.full_name}</div>` : ''}
-        </div>
-        ${sep}
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;font-weight:bold;font-size:11px;margin-bottom:6px;">
-          <span>DESCRIPCIÓN</span><span>IMPORTE</span>
-        </div>
-        ${itemsHtml}
-        ${sep}
-        <div style="line-height:1.6;">
-          ${(sale.discount > 0 || (sale.shipping_amount ?? 0) > 0) ? `
-          <div style="display:flex;justify-content:space-between;">
-            <span>Subtotal</span><span>${formatCurrency(itemsSubtotal)}</span>
-          </div>` : ''}
-          ${sale.discount > 0 ? `
-          <div style="display:flex;justify-content:space-between;">
-            <span>Descuento</span><span>-${formatCurrency(sale.discount)}</span>
-          </div>` : ''}
-          ${(sale.shipping_amount ?? 0) > 0 ? `
-          <div style="display:flex;justify-content:space-between;">
-            <span>Envío</span><span>+${formatCurrency(sale.shipping_amount!)}</span>
-          </div>` : ''}
-          <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;margin-top:2px;">
-            <span>TOTAL</span><span>${formatCurrency(sale.total)}</span>
-          </div>
-          ${sale.payment_splits && sale.payment_splits.length > 1
-            ? sale.payment_splits.map(s =>
-                `<div style="font-size:11px;">${getPaymentMethodLabel(s.method)}: ${formatCurrency(s.amount)}${s.method === 'credito' && (s.installments ?? 1) > 1 ? ` (${s.installments} cuotas)` : ''}</div>`
-              ).join('')
-            : `<div style="margin-top:4px;font-size:11px;">Pago: ${getPaymentMethodLabel(sale.payment_method)}${sale.payment_method === 'credito' && sale.installments > 1 ? ` (${sale.installments} cuotas)` : ''}</div>`
-          }
-        </div>
-        ${sep}
-        ${isInvoiced && invoice ? `
-        <div style="text-align:center;line-height:1.6;">
-          <div style="font-weight:bold;font-size:12px;">${invoiceTypeLabel(invoice.invoice_type)}</div>
-          ${invoice.numero !== undefined ? `<div>N&#176;: ${String(invoice.numero).padStart(8, '0')}</div>` : ''}
-          <div>CAE: ${invoice.cae ?? invoice.afip_cae}</div>
-          ${invoice.afip_cae_vto ? `<div>Vto. CAE: ${invoice.afip_cae_vto}</div>` : ''}
-        </div>` : `
-        <div style="text-align:center;font-weight:bold;padding:2px 0;letter-spacing:0.03em;">*** NO VALIDO COMO FACTURA ***</div>`}
-        ${sep}
-        <div style="text-align:center;font-size:11px;line-height:1.6;">
-          <div>&#161;Gracias por su compra!</div>
-          <div style="color:#888;">Powered by StockOS</div>
-        </div>
-      </div>
-    </body></html>`)
-    win.document.close()
-    win.focus()
-    setTimeout(() => { win.print(); win.close() }, 400)
+    printThermal(`Ticket #${sale.id.slice(-8).toUpperCase()}`, buildSaleTicketHtml({
+      id: sale.id,
+      created_at: sale.created_at,
+      total: sale.total,
+      discount: sale.discount,
+      shipping_amount: sale.shipping_amount,
+      payment_method: sale.payment_method,
+      installments: sale.installments,
+      payment_splits: sale.payment_splits,
+      items: sale.sale_items.map(i => ({
+        name: i.products.name, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount,
+      })),
+      sellerName: sale.users?.full_name,
+      customerName: customer?.full_name,
+    }, biz))
   }
 
 

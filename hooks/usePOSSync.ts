@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { initPOSCache, syncPOSCache } from '@/lib/pos-cache'
 
 const SYNC_INTERVAL_MS = 10 * 60 * 1000 // 10 minutos
+const FOCUS_THROTTLE_MS = 2 * 60 * 1000 // mínimo entre syncs disparados por foco
 
 /**
  * Maneja el ciclo de vida del cache local del POS.
@@ -21,13 +22,22 @@ export function usePOSSync(warehouseId?: string | null) {
   const warehouseIdRef = useRef(warehouseId)
   useEffect(() => { warehouseIdRef.current = warehouseId }, [warehouseId])
 
+  // Timestamp del último sync para throttlear los disparados por foco. Sin esto,
+  // cada vez que la ventana recupera el foco (alt-tab, devtools, etc.) se
+  // re-descargaba el catálogo completo, generando ráfagas continuas de requests.
+  const lastSyncAtRef = useRef(0)
+  const runSync = useCallback(() => {
+    lastSyncAtRef.current = Date.now()
+    return syncPOSCache(warehouseIdRef.current).catch(() => {})
+  }, [])
+
   useEffect(() => {
     if (initialized.current) return
     initialized.current = true
 
     setSyncing(true)
     initPOSCache(warehouseId)
-      .then(() => setCacheReady(true))
+      .then(() => { lastSyncAtRef.current = Date.now(); setCacheReady(true) })
       .catch(() => { setCacheReady(false) })
       .finally(() => setSyncing(false))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -39,29 +49,31 @@ export function usePOSSync(warehouseId?: string | null) {
     if (prevWarehouseRef.current === warehouseId) return
     prevWarehouseRef.current = warehouseId
     if (!warehouseId) return
-    syncPOSCache(warehouseId).catch(() => {})
-  }, [warehouseId])
+    runSync()
+  }, [warehouseId, runSync])
 
   // Sync periódico y en recuperación de foco
   useEffect(() => {
     if (!cacheReady) return
 
-    const interval = setInterval(() => {
-      syncPOSCache(warehouseIdRef.current).catch(() => {})
-    }, SYNC_INTERVAL_MS)
+    const interval = setInterval(runSync, SYNC_INTERVAL_MS)
 
-    const onFocus = () => syncPOSCache(warehouseIdRef.current).catch(() => {})
+    const onFocus = () => {
+      if (Date.now() - lastSyncAtRef.current < FOCUS_THROTTLE_MS) return
+      runSync()
+    }
     window.addEventListener('focus', onFocus)
 
     return () => {
       clearInterval(interval)
       window.removeEventListener('focus', onFocus)
     }
-  }, [cacheReady])
+  }, [cacheReady, runSync])
 
   const forceSync = useCallback(async (): Promise<void> => {
     setSyncing(true)
     try {
+      lastSyncAtRef.current = Date.now()
       await syncPOSCache(warehouseIdRef.current)
       setCacheReady(true)
     } finally {
