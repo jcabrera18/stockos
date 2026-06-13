@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { api } from '@/lib/api'
+import { type UserProfile, writeCachedProfile } from '@/lib/profile-cache'
 import { useWorkstation } from '@/hooks/useWorkstation'
 import Link from 'next/link'
 
@@ -391,7 +392,11 @@ export default function LoginPage() {
         return
       }
 
-      const profile = await api.get<{ role: string }>('/api/auth/me')
+      const profile = await api.get<UserProfile>('/api/auth/me')
+      // Reescribimos la caché apenas nos autenticamos: así el AuthContext nunca
+      // sirve el perfil (y rol) de un usuario que se logueó antes en este browser
+      // si su primera carga de /api/auth/me falla transitoriamente.
+      writeCachedProfile(profile)
 
       if (profile.role === 'cashier') {
         setLoadingBranches(true)

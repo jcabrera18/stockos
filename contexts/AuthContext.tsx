@@ -3,6 +3,12 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 import { createClient } from '@/lib/supabase/client'
 import { api } from '@/lib/api'
 import { posthog } from '@/lib/posthog'
+import {
+  type UserProfile,
+  readCachedProfile,
+  writeCachedProfile,
+  clearCachedProfile,
+} from '@/lib/profile-cache'
 
 // Detecta fallos de red (no de auth) para decidir si caer al perfil cacheado.
 // Inlineado a propósito: importarlo de lib/sales-queue arrastraría Dexie al
@@ -12,63 +18,6 @@ function isNetworkError(err: unknown): boolean {
   if (!(err instanceof TypeError)) return false
   const msg = err.message.toLowerCase()
   return msg.includes('fetch') || msg.includes('network') || msg.includes('load failed')
-}
-
-// Perfil cacheado para login offline: tras una carga exitosa lo guardamos en
-// localStorage; si en una carga posterior /api/auth/me falla por red (offline o
-// Supabase/Railway caído) y hay una sesión previa, operamos con este perfil en
-// vez de mandar al usuario a /login. Ver .claude/OFFLINE_PLAN.md (P1).
-const PROFILE_CACHE_KEY = 'stockos_profile'
-
-function readCachedProfile(): UserProfile | null {
-  try {
-    const raw = localStorage.getItem(PROFILE_CACHE_KEY)
-    return raw ? (JSON.parse(raw) as UserProfile) : null
-  } catch {
-    return null
-  }
-}
-
-function writeCachedProfile(profile: UserProfile) {
-  try {
-    localStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify(profile))
-  } catch { }
-}
-
-function clearCachedProfile() {
-  try {
-    localStorage.removeItem(PROFILE_CACHE_KEY)
-  } catch { }
-}
-
-interface UserProfile {
-  id:           string
-  business_id:  string
-  role:         string
-  is_active:    boolean
-  warehouse_id: string | null
-  email?:       string
-  full_name?:   string
-  business?: {
-    name:                   string
-    cuit:                   string | null
-    address:                string | null
-    phone:                  string | null
-    shipping_price_default: number
-    iva_condition:          string
-    afip_punto_venta:       number | null
-    afip_environment:       string
-    monotributo_limite_anual: number | null
-    stock_enabled:          boolean
-    subscription: {
-      plan:               string
-      billing_cycle:      string | null
-      status:             'trialing' | 'active' | 'grace' | 'past_due' | 'canceled'
-      trial_ends_at:      string | null
-      grace_ends_at:      string | null
-      current_period_end: string | null
-    }
-  } | null
 }
 
 interface AuthContextValue {
@@ -107,10 +56,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const offline = typeof navigator !== 'undefined' && !navigator.onLine
       const cached = readCachedProfile()
 
+      // El perfil cacheado solo es válido si pertenece al usuario de la sesión
+      // activa: así nunca servimos el perfil (y rol) de un usuario que se logueó
+      // antes en este browser. getSession() lee el JWT de localStorage sin red.
+      let cachedMatchesSession = false
+      if (cached) {
+        try {
+          const { data } = await supabase.auth.getSession()
+          cachedMatchesSession = data.session?.user?.id === cached.id
+        } catch { /* sin sesión accesible: tratamos la caché como inválida */ }
+        if (!cachedMatchesSession) clearCachedProfile()
+      }
+
       // Login offline (P1): si falla por red (offline / Supabase / Railway caído)
-      // y hay un perfil cacheado de una sesión previa, operamos con él en vez de
+      // y hay un perfil cacheado del MISMO usuario, operamos con él en vez de
       // desloguear. No aplica si el error es 'No autenticado' (no hay sesión real).
-      if (cached && msg !== 'No autenticado' && (offline || isNetworkError(err))) {
+      if (cached && cachedMatchesSession && msg !== 'No autenticado' && (offline || isNetworkError(err))) {
         hasProfileRef.current = true
         setUser(cached)
       } else if (msg === 'No autenticado' || !hasProfileRef.current) {
@@ -134,7 +95,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        if (Date.now() - lastProfileLoadAt < PROFILE_RELOAD_THROTTLE_MS) return
+        // El throttle solo aplica cuando YA tenemos perfil: evita el refetch en
+        // cada focus/visibilitychange (Supabase re-emite SIGNED_IN ahí). Si NO
+        // tenemos perfil (recién logueado tras un signOut, con la sesión vieja sin
+        // token), hay que cargar siempre: si no, el sidebar queda en el rol fallback.
+        if (hasProfileRef.current && Date.now() - lastProfileLoadAt < PROFILE_RELOAD_THROTTLE_MS) return
         lastProfileLoadAt = Date.now()
         loadProfile()
       } else if (event === 'SIGNED_OUT') {
