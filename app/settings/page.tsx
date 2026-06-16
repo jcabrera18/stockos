@@ -710,7 +710,7 @@ export default function SettingsPage() {
                     {/* CTA */}
                     {sub.status !== 'active' && (
                       <a
-                        href="https://wa.me/5493438445203"
+                        href="https://wa.me/5493438558913"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center justify-center gap-2 w-full py-2.5 rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold transition-colors"

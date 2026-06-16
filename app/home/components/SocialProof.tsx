@@ -128,7 +128,7 @@ export function SocialProof() {
             <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
           </Link>
           <a
-            href="https://wa.me/5493438445203?text=Hola!%20Quiero%20sumarme%20al%20acceso%20anticipado%20de%20StockOS."
+            href="https://wa.me/5493438558913?text=Hola!%20Quiero%20sumarme%20al%20acceso%20anticipado%20de%20StockOS."
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center justify-center gap-2 px-7 py-3.5 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 text-gray-600 hover:text-gray-900 rounded-xl font-medium text-[15px] transition-all duration-200"

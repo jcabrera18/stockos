@@ -39,7 +39,7 @@ export function Footer() {
         <nav className="flex flex-wrap justify-center gap-6 text-[13px] text-gray-400">
           <a href="#features" className="hover:text-gray-700 transition-colors">Funciones</a>
           <a href="#faq" className="hover:text-gray-700 transition-colors">FAQ</a>
-          <a href="https://wa.me/5493438445203" target="_blank" rel="noopener noreferrer" className="hover:text-gray-700 transition-colors">Contacto</a>
+          <a href="https://wa.me/5493438558913" target="_blank" rel="noopener noreferrer" className="hover:text-gray-700 transition-colors">Contacto</a>
           <Link href="/login" className="hover:text-gray-700 transition-colors">Ingresar</Link>
         </nav>
 

@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { X, AlertTriangle, Clock } from 'lucide-react'
 import { useAuthContext } from '@/contexts/AuthContext'
 
-const WA_LINK = 'https://wa.me/5493438445203'
+const WA_LINK = 'https://wa.me/5493438558913'
 const DISMISS_KEY = 'sub_dismissed_date'
 
 function daysUntil(dateStr: string | null): number {

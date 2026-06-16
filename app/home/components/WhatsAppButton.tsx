@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 
-const WA_NUMBER = '5493438445203'
+const WA_NUMBER = '5493438558913'
 const WA_MESSAGE = 'Hola! Quiero saber más sobre StockOS para mi negocio.'
 const WA_HREF = `https://wa.me/${WA_NUMBER}?text=${encodeURIComponent(WA_MESSAGE)}`
 

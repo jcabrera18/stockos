@@ -67,7 +67,7 @@ export function CTA() {
                 <ArrowRight size={15} className="group-hover:translate-x-0.5 transition-transform" />
               </Link>
               <a
-                href="https://wa.me/5493438445203"
+                href="https://wa.me/5493438558913"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center justify-center gap-2 px-7 py-3.5 border border-white/15 hover:border-white/30 hover:bg-white/[0.05] text-white/65 hover:text-white/90 rounded-xl font-medium text-[15px] transition-all duration-200"

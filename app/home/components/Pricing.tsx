@@ -32,7 +32,7 @@ const PLANS = [
     popular: false,
     scale: 'Sucursales y depósitos ilimitados',
     perks: ['Sucursales, depósitos y cajas ilimitados', 'Transferencias entre depósitos', 'Soporte dedicado'],
-    cta: { label: 'Hablar con ventas', href: 'https://wa.me/5493438445203', primary: false },
+    cta: { label: 'Hablar con ventas', href: 'https://wa.me/5493438558913', primary: false },
   },
 ]
 
