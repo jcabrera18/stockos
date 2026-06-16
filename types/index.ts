@@ -65,10 +65,12 @@ export interface Product {
   is_active: boolean
   created_at: string
   updated_at: string
+  brand_id?: string
   // joins
   categories?: { id: string; name: string }
   suppliers?: { id: string; name: string }
   product_barcodes?: { barcode: string }[]
+  price_overrides?: { price_list_id: string; price: number }[]
 }
 
 export interface StockSummary extends Product {

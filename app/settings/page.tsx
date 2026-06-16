@@ -35,6 +35,12 @@ const ROLE_OPTIONS = [
   { value: 'seller',  label: 'Vendedor' },
 ]
 
+const ROLE_DESCRIPTIONS: Record<string, string> = {
+  cashier: 'El que está en la caja cobrando: POS, ventas, clientes y caja.',
+  stocker: 'El que repone mercadería y maneja el depósito, las compras y los pedidos.',
+  seller:  'El que sale a vender o vende por otro canal. Solo carga pedidos, con comisión opcional.',
+}
+
 interface BusinessUser {
   id: string
   full_name: string | null
@@ -782,6 +788,11 @@ export default function SettingsPage() {
                       value={newUser.role}
                       onChange={e => setNewUser(prev => ({ ...prev, role: e.target.value }))}
                     />
+                    {ROLE_DESCRIPTIONS[newUser.role] && (
+                      <p className="text-xs text-[var(--text3)] mt-1.5 leading-snug">
+                        {ROLE_DESCRIPTIONS[newUser.role]}
+                      </p>
+                    )}
                   </div>
                   <div className={newUser.role === 'seller' ? '' : 'col-span-2'}>
                     <p className="text-xs text-[var(--text3)] mb-1">Sucursal</p>

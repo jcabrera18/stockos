@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/Button'
 import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { TableSkeleton } from '@/components/ui/Skeleton'
+import { TableSkeleton, ProductFormSkeleton } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ProductForm } from '@/components/modules/ProductForm'
 import { api } from '@/lib/api'
@@ -141,6 +141,7 @@ export default function ProductsPage() {
   const [formProduct, setFormProduct] = useState<Product | null>(null)
   const [formStockCurrent, setFormStockCurrent] = useState<number | undefined>(undefined)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [formLoading, setFormLoading] = useState(false)
 
   // Modales
   const [deleteModal, setDeleteModal] = useState(false)
@@ -306,30 +307,40 @@ export default function ProductsPage() {
   }
 
   const openEdit = (product: Product, stockCurrent?: number) => {
+    loadReqRef.current++ // cancela cualquier carga en vuelo
+    setFormLoading(false)
     setFormProduct(product)
     setFormStockCurrent(stockCurrent)
     setSelectedId(product.id)
     setPanelOpen(true)
   }
 
-  const handleEdit = async (item: StockSummary) => {
+  // Marca la última solicitud para descartar respuestas que llegan fuera de orden
+  const loadReqRef = useRef(0)
+
+  const loadProduct = async (id: string, stockCurrent?: number) => {
+    // Feedback inmediato: abrir panel y marcar selección antes de esperar la request
+    setSelectedId(id)
+    setPanelOpen(true)
+    setFormLoading(true)
+    const reqId = ++loadReqRef.current
     try {
-      const product = await api.get<Product>(`/api/products/${item.id}`)
-      openEdit(product, item.stock_current)
+      const product = await api.get<Product>(`/api/products/${id}`)
+      if (reqId !== loadReqRef.current) return // llegó una selección más nueva
+      setFormProduct(product)
+      setFormStockCurrent(stockCurrent)
     } catch {
+      if (reqId !== loadReqRef.current) return
       toast.error('Error al cargar el producto')
+    } finally {
+      if (reqId === loadReqRef.current) setFormLoading(false)
     }
   }
 
-  const handleNavigateToProduct = async (id: string) => {
-    try {
-      const product = await api.get<Product>(`/api/products/${id}`)
-      const summary = data.find(d => d.id === id)
-      openEdit(product, summary?.stock_current)
-    } catch {
-      toast.error('Error al cargar el producto')
-    }
-  }
+  const handleEdit = (item: StockSummary) => loadProduct(item.id, item.stock_current)
+
+  const handleNavigateToProduct = (id: string) =>
+    loadProduct(id, data.find(d => d.id === id)?.stock_current)
 
   const handleDelete = async () => {
     if (!deleteProduct) return
@@ -353,13 +364,17 @@ export default function ProductsPage() {
   }
 
   const openCreate = () => {
+    loadReqRef.current++ // cancela cualquier carga en vuelo
+    setFormLoading(false)
     setFormProduct(null)
     setSelectedId(null)
     setPanelOpen(true)
   }
 
   const closePanel = () => {
+    loadReqRef.current++
     setPanelOpen(false)
+    setFormLoading(false)
     setFormProduct(null)
     setFormStockCurrent(undefined)
     setSelectedId(null)
@@ -604,14 +619,27 @@ export default function ProductsPage() {
 
         {/* Panel derecho — formulario */}
         {panelOpen && (
-          <div className="w-full md:flex-1 overflow-y-auto">
-            <ProductForm
-              product={formProduct}
-              stockCurrent={formStockCurrent}
-              onSaved={() => fetchProductsRef.current?.()}
-              onClose={closePanel}
-              onNavigateToProduct={handleNavigateToProduct}
-            />
+          <div className="relative w-full md:flex-1 overflow-y-auto">
+            {/* Barra de progreso fina mientras carga el producto */}
+            {formLoading && (
+              <div className="indeterminate-bar sticky top-0 z-10 h-0.5 w-full overflow-hidden bg-[var(--accent)]/15" />
+            )}
+            {formLoading && !formProduct ? (
+              // Primera apertura: sin contexto previo → skeleton
+              <ProductFormSkeleton />
+            ) : (
+              // Cambio de producto: mantenemos el form actual atenuado mientras
+              // llega el nuevo (se siente como "actualizando", no "recargando")
+              <div className={cn('transition-opacity duration-150', formLoading && 'opacity-40 pointer-events-none')}>
+                <ProductForm
+                  product={formProduct}
+                  stockCurrent={formStockCurrent}
+                  onSaved={() => fetchProductsRef.current?.()}
+                  onClose={closePanel}
+                  onNavigateToProduct={handleNavigateToProduct}
+                />
+              </div>
+            )}
           </div>
         )}
 

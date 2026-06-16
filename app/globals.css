@@ -131,3 +131,19 @@ section[data-visible] .section-fade {
   animation: drawerSlideIn 0.22s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
+/* Barra de progreso indeterminada (carga de panel) */
+@keyframes indeterminateBar {
+  0%   { left: -40%; width: 40%; }
+  50%  { left: 25%;  width: 50%; }
+  100% { left: 100%; width: 40%; }
+}
+.indeterminate-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: var(--accent);
+  border-radius: 9999px;
+  animation: indeterminateBar 1.1s ease-in-out infinite;
+}
+

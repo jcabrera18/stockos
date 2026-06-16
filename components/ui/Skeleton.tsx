@@ -47,6 +47,55 @@ export function TableSkeleton({ rows = 8 }: { rows?: number }) {
   )
 }
 
+// Skeleton para el panel de edición de producto (respeta el layout de ProductForm)
+export function ProductFormSkeleton() {
+  const field = (i: number) => (
+    <div key={i} className="space-y-1.5">
+      <Skeleton className="h-3 w-24" />
+      <Skeleton className="h-9 w-full" />
+    </div>
+  )
+  return (
+    <div className="p-5 sm:p-6">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-6">
+        <Skeleton className="h-7 w-7 rounded-md" />
+        <Skeleton className="h-6 w-48" />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-6">
+        {/* Columna izquierda */}
+        <div className="space-y-6">
+          <div className="space-y-4">
+            <Skeleton className="h-3 w-28" />
+            {[0, 1].map(field)}
+          </div>
+          <div className="space-y-4">
+            <Skeleton className="h-3 w-28" />
+            {[2, 3, 4].map(field)}
+          </div>
+        </div>
+        {/* Columna derecha */}
+        <div className="space-y-6">
+          <div className="space-y-4">
+            <Skeleton className="h-3 w-28" />
+            <div className="grid grid-cols-3 gap-3">
+              {[5, 6, 7].map(field)}
+            </div>
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-9 w-full" />
+          </div>
+          <div className="space-y-4">
+            <Skeleton className="h-3 w-20" />
+            <div className="grid grid-cols-3 gap-3">
+              {[8, 9, 10].map(field)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Skeleton para cards del dashboard
 export function StatCardSkeleton() {
   return (

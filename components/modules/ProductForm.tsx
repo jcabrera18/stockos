@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { cn, formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
-import { Plus, X, ChevronDown, ArrowLeft, AlertTriangle, SlidersHorizontal } from 'lucide-react'
+import { Plus, X, ChevronDown, ArrowLeft, AlertTriangle, SlidersHorizontal, Loader2 } from 'lucide-react'
 import type { Product, Category, Supplier } from '@/types'
 import { CategoryTreePicker } from '@/components/ui/CategoryTreePicker'
 import type { PriceList } from '@/app/price-lists/page'
@@ -102,6 +102,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
   const [newBarcode, setNewBarcode] = useState('')
   const [selectedBarcodeIdx, setSelectedBarcodeIdx] = useState<number>(0)
   const [duplicateWarning, setDuplicateWarning] = useState<Product | null>(null)
+  const [checkingBarcode, setCheckingBarcode] = useState(false)
   const newBarcodeRef = useRef<HTMLInputElement>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const costPriceRef = useRef<HTMLInputElement>(null)
@@ -227,7 +228,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         description: product.description ?? '',
         category_id: product.category_id ?? '',
         supplier_id: product.supplier_id ?? '',
-        brand_id: (product as Product & { brand_id?: string }).brand_id ?? '',
+        brand_id: product.brand_id ?? '',
         cost_price_net: String(product.cost_price_net ?? product.cost_price ?? 0),
         vat_rate: String(product.vat_rate ?? 0),
         sell_price: product.use_fixed_sell_price ? String(product.sell_price) : '',
@@ -238,17 +239,16 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         unit: product.unit,
         price_mode: product.price_mode ?? 'fixed',
       })
-      api.get<Product & { price_overrides?: { price_list_id: string; price: number }[] }>(`/api/products/${product.id}`)
-        .then(full => {
-          const bars = (full.product_barcodes ?? []).map(b => b.barcode)
-          setBarcodes(bars.length > 0 ? bars : (full.barcode ? [full.barcode] : []))
-          const ovMap: Record<string, string> = {}
-          for (const ov of (full.price_overrides ?? [])) {
-            ovMap[ov.price_list_id] = String(ov.price)
-          }
-          setOverridePrices(ovMap)
-        })
-        .catch(() => { setBarcodes(product.barcode ? [product.barcode] : []) })
+      // El producto ya viene completo desde la página (incluye product_barcodes
+      // y price_overrides), así que poblamos todo de forma síncrona — sin un
+      // segundo fetch que haría aparecer el código de barras con retraso.
+      const bars = (product.product_barcodes ?? []).map(b => b.barcode)
+      setBarcodes(bars.length > 0 ? bars : (product.barcode ? [product.barcode] : []))
+      const ovMap: Record<string, string> = {}
+      for (const ov of (product.price_overrides ?? [])) {
+        ovMap[ov.price_list_id] = String(ov.price)
+      }
+      setOverridePrices(ovMap)
     } else {
       setForm(emptyForm)
       setBarcodes([])
@@ -263,7 +263,9 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
     const val = (overrideVal ?? newBarcode).replace(/\D/g, '')
     if (!val) return
     if (barcodes.includes(val)) { toast.error('Ese código ya está cargado'); return }
+    if (checkingBarcode) return
 
+    setCheckingBarcode(true)
     try {
       const existing = await api.get<Product>(`/api/products/barcode/${encodeURIComponent(val)}`)
       if (existing && existing.id !== product?.id) {
@@ -272,6 +274,8 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
       }
     } catch {
       // Not found = safe to add
+    } finally {
+      setCheckingBarcode(false)
     }
 
     setBarcodes(prev => [...prev, val])
@@ -365,7 +369,8 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         await api.put(`/api/products/${product!.id}/price-overrides`, overridePayload)
         toast.success('Producto actualizado')
         onSaved()
-        onClose()
+        // Mantenemos el panel abierto y recargamos los datos frescos del producto
+        onNavigateToProduct(product!.id)
       } else {
         const created = await api.post<{ id: string }>('/api/products', payload)
         if (overridePayload.length > 0) {
@@ -524,12 +529,19 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         <button
           type="button"
           onClick={() => addBarcode()}
-          className="flex-shrink-0 px-2 py-2 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors"
-          title="Agregar código"
+          disabled={checkingBarcode}
+          className="flex-shrink-0 px-2 py-2 rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          title={checkingBarcode ? 'Verificando código…' : 'Agregar código'}
         >
-          <Plus size={14} />
+          {checkingBarcode ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
         </button>
       </div>
+      {checkingBarcode && (
+        <p className="flex items-center gap-1.5 text-xs text-[var(--text3)] mt-1">
+          <Loader2 size={11} className="animate-spin" />
+          Verificando si el código ya existe…
+        </p>
+      )}
       {duplicateWarning && (
         <div className="flex items-center gap-2 mt-1 px-3 py-2 rounded-[var(--radius-md)] bg-amber-50 dark:bg-amber-950/20 border border-amber-300 dark:border-amber-700 text-sm">
           <AlertTriangle size={13} className="text-amber-500 flex-shrink-0" />
