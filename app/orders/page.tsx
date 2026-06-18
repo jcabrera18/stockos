@@ -1,6 +1,6 @@
 'use client'
-import { useEffect, useState, useCallback, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { HelpBanner } from '@/components/ui/HelpBanner'
@@ -25,6 +25,7 @@ import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
 import { useAuth } from '@/hooks/useAuth'
 import { usePOSSync } from '@/hooks/usePOSSync'
+import { useCollapseSidebar } from '@/contexts/SidePanelContext'
 import { searchProductsLocal, searchCustomersLocal } from '@/lib/pos-cache'
 import { queueOrder, getPendingOrdersCount, syncPendingOrders } from '@/lib/orders-queue'
 import { isNetworkError } from '@/lib/sales-queue'
@@ -123,8 +124,9 @@ const PAYMENT_METHODS = [
 ]
 
 // ─── Componente principal ─────────────────────────────────
-export default function OrdersPage() {
+function OrdersPageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { user: authUser } = useAuth()
   const stockEnabled      = authUser?.business?.stock_enabled ?? false
   const sellerWarehouseId = authUser?.role === 'seller' ? (authUser.warehouse_id ?? null) : null
@@ -867,6 +869,15 @@ export default function OrdersPage() {
     finally { setLoadingDetail(false) }
   }
 
+  // Abrir un pedido directo desde ?open= (ej. al convertir un presupuesto)
+  useEffect(() => {
+    const openId = searchParams.get('open')
+    if (openId) {
+      openDetail(openId)
+      router.replace('/orders')
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const addToCart = (product: Product) => {
     const list = priceLists.find(pl => pl.id === priceListId)
     const override = priceOverridesRef.current.get(product.id)?.get(priceListId)
@@ -1105,6 +1116,7 @@ export default function OrdersPage() {
   }
 
   const sidePanelOpen = detailModal || newOrderModal
+  useCollapseSidebar(sidePanelOpen)
 
   return (
     <AppShell>
@@ -2046,9 +2058,23 @@ export default function OrdersPage() {
             options={PAYMENT_METHODS}
             value={deliverMethod}
             onChange={e => setDeliverMethod(e.target.value as PaymentMethod)} />
-          <Input label="Monto cobrado" type="number" min="0"
-            value={deliverAmount} placeholder="0 si no cobró en la entrega"
-            onChange={e => setDeliverAmount(e.target.value)} />
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <label htmlFor="monto-cobrado" className="text-sm font-medium text-[var(--text2)]">
+                Monto cobrado
+              </label>
+              {detail && (
+                <button type="button"
+                  onClick={() => setDeliverAmount(String(detail.total))}
+                  className="text-xs font-medium text-[var(--accent)] hover:underline">
+                  Total: {formatCurrency(detail.total)}
+                </button>
+              )}
+            </div>
+            <Input id="monto-cobrado" type="number" min="0"
+              value={deliverAmount} placeholder="0 si no cobró en la entrega"
+              onChange={e => setDeliverAmount(e.target.value)} />
+          </div>
           <Input label="Notas de entrega" value={deliverNotes}
             onChange={e => setDeliverNotes(e.target.value)}
             placeholder="Observaciones de la entrega (opcional)" />
@@ -2458,5 +2484,13 @@ export default function OrdersPage() {
         </div>
       )}
     </AppShell>
+  )
+}
+
+export default function OrdersPage() {
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <OrdersPageInner />
+    </Suspense>
   )
 }

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
+import { useCollapseSidebar } from '@/contexts/SidePanelContext'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
@@ -583,6 +584,7 @@ export default function CustomersPage() {
 
   // ── Panel state ──
   const [panelOpen, setPanelOpen] = useState(false)
+  useCollapseSidebar(panelOpen)
   const [formCustomer, setFormCustomer] = useState<CustomerSummary | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 

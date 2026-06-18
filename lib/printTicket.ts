@@ -158,7 +158,7 @@ export function buildSaleTicketHtml(sale: TicketSaleData, biz: TicketBusiness): 
           <span style="flex:1;font-size:15px;font-weight:600;color:#000;line-height:1.2;">${esc(item.name)}</span>
           <span style="flex-shrink:0;font-size:15px;font-weight:700;color:#000;line-height:1.2;white-space:nowrap;">${fmt(lineTotal)}</span>
         </div>
-        <div style="font-size:12px;color:#555;margin-top:1px;">${item.quantity} × ${fmt(item.unit_price)}${(item.discount ?? 0) > 0 ? ` · dto -${fmt(item.discount!)}` : ''}</div>
+        <div style="font-size:12px;font-weight:500;color:#000;margin-top:1px;">${item.quantity} × ${fmt(item.unit_price)}${(item.discount ?? 0) > 0 ? ` · dto -${fmt(item.discount!)}` : ''}</div>
       </div>`
   }).join('')
 
@@ -211,7 +211,7 @@ export function buildInvoiceTicketHtml(inv: TicketInvoiceData, biz: TicketBusine
         <span style="flex:1;font-size:14px;font-weight:500;color:#000;line-height:1.2;">${esc(item.description)}</span>
         <span style="flex-shrink:0;font-size:14px;font-weight:700;color:#000;line-height:1.2;white-space:nowrap;">${fmt(item.subtotal)}</span>
       </div>
-      <div style="font-size:12px;color:#555;margin-top:1px;">${item.quantity} × ${fmt(item.unit_price)}</div>
+      <div style="font-size:12px;font-weight:500;color:#000;margin-top:1px;">${item.quantity} × ${fmt(item.unit_price)}</div>
     </div>`).join('')
 
   const caeBlock = inv.cae ? `
@@ -328,14 +328,16 @@ export function printThermal(title: string, bodyHtml: string, settings?: PrintSe
   // de la página = del rollo físico): así el ticket siempre llena el papel y el
   // texto mantiene el mismo tamaño físico, sin importar la config del driver.
   //
-  // Factor px→vw calibrado para que el diseño se vea igual que el 58mm que ya
-  // funcionaba. Es proporcional al ancho, así que un único valor sirve para
-  // ambos papeles (el 80mm queda como una versión más grande del 58mm).
-  const vwPerPx = 0.34 * ps.fontScale
-  const vwHtml = bodyHtml.replace(
-    /(\d+(?:\.\d+)?)px/g,
-    (_, n) => `${(Number(n) * vwPerPx).toFixed(3)}vw`,
-  )
+  // Factor px→vw por ancho. El 58mm rinde una página más angosta respecto al
+  // papel físico (corta a la derecha si es muy grande), así que usa un factor
+  // un poco menor que el 80mm. Ambos quedan calibrados para llenar su papel
+  // sin desbordar.
+  const vwPerPx = (widthMm === 58 ? 0.30 : 0.345) * ps.fontScale
+  const vwHtml = bodyHtml
+    .replace(/(\d+(?:\.\d+)?)px/g, (_, n) => `${(Number(n) * vwPerPx).toFixed(3)}vw`)
+    // Las térmicas son monocromáticas: el gris sale como puntitos dispersos
+    // (casi invisible). Forzamos todo el texto a negro sólido.
+    .replace(/#(?:222|333|444|555|666|777|888|999|aaa|bbb|ccc)\b/gi, '#000')
 
   const copies = ps.copies
   const pageBreak = `<div style="break-after:page;page-break-after:always;"></div>`
@@ -353,14 +355,14 @@ export function printThermal(title: string, bodyHtml: string, settings?: PrintSe
       html { background: #fff; }
       body {
         width: 100%;
-        padding: 2.5vw 3vw 4vw;
+        padding: 3vw 4vw 5vw;
         font-family: system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
         font-weight: 400; line-height: 1.5; color: #000;
         background: #fff;
         -webkit-print-color-adjust: exact; print-color-adjust: exact;
       }
       /* Separadores: hairline fijo, no escalan (deben verse crisp siempre). */
-      hr { border: none !important; border-top: 0.3mm dashed #555 !important; margin: 2vw 0 !important; }
+      hr { border: none !important; border-top: 0.3mm dashed #000 !important; margin: 2vw 0 !important; }
     </style>
   </head><body>${body}</body></html>`)
   win.document.close()

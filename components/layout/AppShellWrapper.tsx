@@ -7,6 +7,7 @@ import { ShoppingCart } from 'lucide-react'
 import { AuthProvider, useAuthContext } from '@/contexts/AuthContext'
 import { SubscriptionBanner } from './SubscriptionBanner'
 import { EmailConfirmBanner } from './EmailConfirmBanner'
+import { SidePanelProvider } from '@/contexts/SidePanelContext'
 
 // Rutas que manejan su propio layout full-screen (no necesitan shell)
 const NO_SHELL = ['/login', '/register', '/forgot-password', '/reset-password', '/pos', '/home']
@@ -68,16 +69,18 @@ function AppShell({ children }: { children: React.ReactNode }) {
   if (loading) return <div className="h-screen bg-[var(--bg)]" />
 
   return (
-    <div className="flex h-screen bg-[var(--bg)] overflow-hidden">
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
-        {children}
-      </main>
-      <BottomNav />
-      <POSBadge />
-      <SubscriptionBanner />
-      <EmailConfirmBanner />
-    </div>
+    <SidePanelProvider>
+      <div className="flex h-screen bg-[var(--bg)] overflow-hidden">
+        <Sidebar />
+        <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
+          {children}
+        </main>
+        <BottomNav />
+        <POSBadge />
+        <SubscriptionBanner />
+        <EmailConfirmBanner />
+      </div>
+    </SidePanelProvider>
   )
 }
 

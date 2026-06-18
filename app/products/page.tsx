@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
+import { useCollapseSidebar } from '@/contexts/SidePanelContext'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
@@ -141,6 +142,7 @@ export default function ProductsPage() {
 
   // Panel / form state
   const [panelOpen, setPanelOpen] = useState(false)
+  useCollapseSidebar(panelOpen)
   const [formProduct, setFormProduct] = useState<Product | null>(null)
   const [formStockCurrent, setFormStockCurrent] = useState<number | undefined>(undefined)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -179,6 +181,7 @@ export default function ProductsPage() {
   const stockStatusRef = useRef(stockStatusFilter)
   const minPriceRef = useRef(minPrice)
   const maxPriceRef = useRef(maxPrice)
+  const panelOpenRef = useRef(panelOpen)
   const fetchProductsRef = useRef<(() => Promise<void>) | undefined>(undefined)
 
   // Secuenciación de búsquedas: descarta respuestas que llegan fuera de orden
@@ -192,27 +195,42 @@ export default function ProductsPage() {
 
   const lookupBarcode = (value: string) => {
     const trimmed = value.trim()
-    // Feedback inmediato: spinner en el buscador + panel abierto en estado de
-    // carga, para que no parezca que se tildó mientras resolvemos el barcode.
     const reqId = ++loadReqRef.current
     setBarcodeLookup(true)
-    setSelectedId(null)
-    setFormProduct(null)
-    setFormLoading(true)
-    setPanelOpen(true)
+    // Si NO hay un producto abierto, mostramos el panel en estado de carga como
+    // feedback inmediato. Si ya hay uno abierto (posible edición en curso) NO lo
+    // desmontamos: sólo reemplazamos el contenido si el lookup tiene éxito, para
+    // no cerrar/perder lo que el usuario está editando.
+    const panelWasOpen = panelOpenRef.current
+    if (!panelWasOpen) {
+      setSelectedId(null)
+      setFormProduct(null)
+      setFormLoading(true)
+      setPanelOpen(true)
+    }
     api.get<Product>(`/api/products/barcode/${trimmed}`)
       .then(product => {
         if (reqId !== loadReqRef.current) return // llegó una selección más nueva
         setBarcodeLookup(false)
-        openEdit(product)
-        setSearch('')
+        if (panelWasOpen) {
+          // Ya hay un producto abierto: NO tocamos el drawer. Sólo filtramos la
+          // lista para mostrar el match; el usuario hace clic si quiere abrirlo.
+          setDebouncedSearch(trimmed)
+        } else {
+          // Nada abierto → atajo de escáner: abrimos el producto directo en el drawer.
+          openEdit(product)
+          setSearch('')
+        }
       })
       .catch(() => {
         if (reqId !== loadReqRef.current) return
-        // No es un barcode conocido → cerrar el panel y caer a la búsqueda por texto.
+        // No es un barcode conocido → caer a la búsqueda por texto. Sólo cerramos
+        // el panel si lo habíamos abierto nosotros para este lookup.
         setBarcodeLookup(false)
-        setPanelOpen(false)
-        setFormLoading(false)
+        if (!panelWasOpen) {
+          setPanelOpen(false)
+          setFormLoading(false)
+        }
         setDebouncedSearch(trimmed)
       })
   }
@@ -239,6 +257,7 @@ export default function ProductsPage() {
   useEffect(() => { stockStatusRef.current = stockStatusFilter }, [stockStatusFilter])
   useEffect(() => { minPriceRef.current = minPrice }, [minPrice])
   useEffect(() => { maxPriceRef.current = maxPrice }, [maxPrice])
+  useEffect(() => { panelOpenRef.current = panelOpen }, [panelOpen])
 
   const fetchProducts = useCallback(async () => {
     // Cancela la request anterior en vuelo. Combinamos con un timeout para que

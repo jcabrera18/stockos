@@ -14,9 +14,9 @@ const roleHomePage: Record<string, string> = {
 const roleAllowedPaths: Record<string, string[]> = {
   owner:   ['/'],  // owner ve todo
   admin:   ['/'],  // admin ve todo
-  cashier: ['/pos', '/sales', '/orders', '/customers', '/accounts', '/cash-register'],
+  cashier: ['/pos', '/sales', '/orders', '/quotes', '/customers', '/accounts', '/cash-register'],
   stocker: ['/purchases', '/warehouses', '/orders'],
-  seller:  ['/orders'],
+  seller:  ['/orders', '/quotes'],
 }
 
 export async function middleware(request: NextRequest) {
