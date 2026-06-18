@@ -24,16 +24,15 @@ export function Hero() {
             </div>
 
             {/* Headline */}
-            <h1 className="text-5xl sm:text-6xl font-bold text-gray-900 leading-[1.07] tracking-tight mb-6">
-              Controlá tu stock,<br />
-              tus precios y tu plata{' '}
+            <h1 className="text-5xl sm:text-6xl font-bold text-gray-900 leading-[1.07] tracking-tight mb-6 text-balance">
+              Vendé más, cobrá más rápido y controlá tu negocio{' '}
               <span className="text-[#16a34a]">en tiempo real</span>
             </h1>
 
             {/* Subheadline */}
             <p className="text-lg text-gray-500 leading-relaxed mb-8 max-w-md">
-              Vendé más rápido en caja, dejá de perder plata con stock mal contado
-              y controlá todos tus locales desde el celular. Tengas una caja o diez.
+              StockOS reúne ventas, caja, stock y facturación en una sola plataforma
+              para que dejes de trabajar a ciegas y tomes decisiones con datos reales.
             </p>
 
             {/* Pills */}

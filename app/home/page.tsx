@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Navbar } from './components/Navbar'
 import { Hero } from './components/Hero'
 import { Problems } from './components/Problems'
+import { Industries } from './components/Industries'
 import { HowItWorks } from './components/HowItWorks'
 import { Features } from './components/Features'
 import { Showcase } from './components/Showcase'
@@ -15,13 +16,13 @@ import { Footer } from './components/Footer'
 import { WhatsAppButton } from './components/WhatsAppButton'
 
 export const metadata: Metadata = {
-  title: 'StockOS — Sistema de gestión para retail en Argentina y LATAM',
+  title: 'StockOS — Sistema de ventas, caja y stock para comercios en Argentina',
   description:
-    'Controlá tu stock, precios y ventas en tiempo real. El sistema todo-en-uno para supermercados, autoservicios y ferreterías. Multi-sucursal, POS ultrarrápido y facturación completa.',
+    'Vendé más rápido, cobrá las cuentas y controlá tu negocio en tiempo real. El sistema todo-en-uno para kioscos, almacenes, ferreterías, farmacias, indumentaria y todo comercio. POS, caja, stock y facturación ARCA.',
   openGraph: {
-    title: 'StockOS — Sistema de gestión para retail en Argentina y LATAM',
+    title: 'StockOS — Sistema de ventas, caja y stock para comercios en Argentina',
     description:
-      'POS ultrarrápido, stock real por depósito, multi-sucursal y facturación para Argentina. Para supermercados, autoservicios y ferreterías en LATAM.',
+      'POS ultrarrápido, control de stock, cuentas corrientes y facturación ARCA. Para kioscos, almacenes, ferreterías, farmacias e indumentaria. Tengas un local o varios.',
     type: 'website',
     url: 'https://stockos.digital',
     siteName: 'StockOS',
@@ -30,24 +31,26 @@ export const metadata: Metadata = {
         url: 'https://stockos.digital/og.png',
         width: 1200,
         height: 630,
-        alt: 'StockOS — Sistema de gestión para retail en Argentina y LATAM',
+        alt: 'StockOS — Sistema de ventas, caja y stock para comercios en Argentina',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'StockOS — Sistema de gestión para retail en Argentina y LATAM',
+    title: 'StockOS — Sistema de ventas, caja y stock para comercios en Argentina',
     description:
-      'Stock, precios y ventas en tiempo real. Desde una caja hasta múltiples sucursales.',
+      'Vendé, cobrá y controlá tu negocio en tiempo real. Para kioscos, almacenes, ferreterías y todo comercio.',
     images: ['https://stockos.digital/og.png'],
   },
   keywords: [
-    'sistema de gestión retail',
-    'software supermercado',
+    'sistema de gestión comercio',
+    'software para kiosco',
+    'software para almacén',
+    'software para ferretería',
     'control de stock',
     'POS Argentina',
     'sistema de caja',
-    'gestión multi-sucursal',
+    'cuenta corriente clientes',
     'facturación ARCA',
   ],
 }
@@ -58,6 +61,7 @@ export default function LandingPage() {
       <Navbar />
       <Hero />
       <Problems />
+      <Industries />
       <HowItWorks />
       <Features />
       <Showcase />

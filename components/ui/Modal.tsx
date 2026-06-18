@@ -9,21 +9,26 @@ interface ModalProps {
   title?: string
   children: React.ReactNode
   footer?: React.ReactNode
+  headerActions?: React.ReactNode
   size?: 'sm' | 'md' | 'lg' | 'xl'
   zIndex?: number
   minimizable?: boolean
   minimized?: boolean
   onMinimize?: () => void
   onRestore?: () => void
+  /** Si es false, el modal solo se cierra con la X (no por click afuera ni Escape) */
+  dismissable?: boolean
 }
 
-export function Modal({ open, onClose, title, children, footer, size = 'md', zIndex, minimizable, minimized, onMinimize, onRestore }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, headerActions, size = 'md', zIndex, minimizable, minimized, onMinimize, onRestore, dismissable = true }: ModalProps) {
   useEffect(() => {
-    if (!open) return
+    if (!open || !dismissable) return
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [open, onClose])
+  }, [open, onClose, dismissable])
+
+  const handleBackdrop = dismissable ? onClose : undefined
 
   if (!open) return null
 
@@ -56,12 +61,12 @@ export function Modal({ open, onClose, title, children, footer, size = 'md', zIn
       <div
         className="fixed inset-0"
         style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', zIndex: zIndex ?? 50 }}
-        onClick={onClose}
+        onClick={handleBackdrop}
       />
       <div
         className="fixed inset-0 flex items-center justify-center p-4"
         style={{ zIndex: (zIndex ?? 50) + 1 }}
-        onClick={onClose}
+        onClick={handleBackdrop}
       >
       <div className={cn(
         'w-full bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl max-h-[90vh] flex flex-col',
@@ -73,6 +78,7 @@ export function Modal({ open, onClose, title, children, footer, size = 'md', zIn
           <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)] flex-shrink-0">
             <h2 className="text-base font-semibold text-[var(--text)]">{title}</h2>
             <div className="flex items-center gap-1 -mr-1">
+              {headerActions}
               {minimizable && (
                 <button
                   onClick={onMinimize}

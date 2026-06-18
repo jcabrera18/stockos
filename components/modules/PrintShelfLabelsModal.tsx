@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import JsBarcode from 'jsbarcode'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
@@ -82,9 +82,9 @@ function calcSaving(mainPrice: number, tierPrice: number): { pct: number; amount
 const BARCODE_OPTS = {
   format: 'CODE128' as const,
   displayValue: false,
-  margin: 2,
-  width: 1.2,
-  height: 38,
+  margin: 10, // quiet zone a izquierda/derecha
+  width: 2,
+  height: 50,
   background: 'transparent',
   lineColor: '#111',
 }
@@ -93,73 +93,136 @@ function generateBarcodeSVG(code: string): string {
   try {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg') as SVGSVGElement
     JsBarcode(svg, code, BARCODE_OPTS)
+    // Escalar a lo ancho del contenedor sin recortar las barras (los datos van
+    // a lo ancho). preserveAspectRatio=none estira parejo todos los módulos.
+    const w = svg.getAttribute('width')
+    const h = svg.getAttribute('height')
+    if (w && h) {
+      svg.setAttribute('viewBox', `0 0 ${parseFloat(w)} ${parseFloat(h)}`)
+      svg.setAttribute('preserveAspectRatio', 'none')
+      svg.setAttribute('width', '100%')
+      svg.setAttribute('height', '100%')
+    }
     return svg.outerHTML
   } catch {
     return ''
   }
 }
 
-function BarcodeStrip({ code }: { code: string }) {
-  const ref = useRef<SVGSVGElement>(null)
-  useEffect(() => {
-    if (!ref.current || !code) return
-    try { JsBarcode(ref.current, code, BARCODE_OPTS) } catch {}
-  }, [code])
-  return (
-    <div className="w-[38px] self-stretch flex items-center justify-center overflow-hidden border-l border-gray-100 bg-white flex-shrink-0">
-      <svg ref={ref} style={{ transform: 'rotate(-90deg)', flexShrink: 0 }} />
-    </div>
-  )
+const A4_WIDTH_PX = 793.7 // 210mm @ 96dpi
+
+// Lista sintética para comercios que no usan listas de precio (precio fijo).
+// getListPrice() devuelve el sell_price del producto cuando use_fixed_sell_price.
+const FALLBACK_LIST: PriceList = {
+  id: '__fixed__',
+  business_id: '',
+  name: 'Precio de venta',
+  margin_pct: 0,
+  min_quantity: 1,
+  is_default: true,
+  is_active: true,
+  created_at: '',
 }
 
-const LABELS_PER_PAGE = 15
+/**
+ * Etiquetas por página A4 (4 columnas) estimadas según la altura de fila, que
+ * depende de si hay escalas y/o código de barras. Mantiene el preview alineado
+ * con el PDF y aprovecha mejor la hoja en modo compacto.
+ */
+function labelsPerPage(showTiers: boolean, showCode: boolean): number {
+  const usableMm = 277 // A4 297mm − 2×10mm de margen
+  const gapMm = 3
+  // alto aprox. de fila: con escalas ~42mm; compacto ~23/17mm según barcode
+  const rowMm = showTiers ? 42 : (showCode ? 23 : 17)
+  const rows = Math.max(1, Math.floor((usableMm + gapMm) / (rowMm + gapMm)))
+  return rows * 4
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
+}
+
+// ─── HTML + CSS compartidos entre preview y print (WYSIWYG) ────────────────────
+
+/** Reglas de la etiqueta. `scope` permite aislarlas dentro del preview. */
+function labelStyles(scope = ''): string {
+  const s = scope ? scope + ' ' : ''
+  return `
+    ${s}.grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:3mm; align-content:start; }
+    ${s}.label { border:1px solid #d1d5db; border-radius:2mm; overflow:hidden; min-height:42mm; display:flex; flex-direction:column; background:#fff; page-break-inside:avoid; break-inside:avoid; }
+    ${s}.label.empty { border-style:dashed; border-color:#e5e7eb; }
+    ${s}.lname { font-size:8pt; font-weight:700; line-height:1.2; color:#111; padding:2.5mm 3mm 2mm; word-break:break-word; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    ${s}.lmain { flex:1; display:flex; border-top:1px solid #e5e7eb; overflow:hidden; }
+    ${s}.lmain-price { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:2mm 1.5mm; background:#f9fafb; overflow:hidden; }
+    ${s}.lbarcode { border-top:1px solid #e5e7eb; padding:1.3mm 3mm; display:flex; align-items:center; justify-content:center; background:#fff; }
+    ${s}.lbarcode svg { display:block; width:100%; height:6.5mm; }
+    /* Modo compacto: etiquetas sin escalas — sin "1 UNIDAD", más bajas */
+    ${s}.label.compact { min-height:23mm; }
+    ${s}.label.compact .lname { padding:2mm 3mm 1.5mm; }
+    ${s}.label.compact .lmain-price { padding:1.2mm 1.5mm; }
+    ${s}.label.compact .lbarcode { padding:1mm 3mm; }
+    ${s}.label.compact .lbarcode svg { height:6mm; }
+    ${s}.lqty { font-size:5.5pt; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#9ca3af; margin-bottom:0.6mm; }
+    ${s}.lprice { font-size:22pt; font-weight:900; color:#111; line-height:1; letter-spacing:-0.8pt; white-space:nowrap; font-variant-numeric:tabular-nums; max-width:100%; }
+    ${s}.lmain-cu { font-size:5.5pt; font-weight:600; color:#9ca3af; margin-top:0.5mm; letter-spacing:0.04em; }
+    ${s}.ltiers { display:flex; flex-direction:column; border-top:1px solid #e5e7eb; }
+    ${s}.ltier-row { display:flex; align-items:baseline; gap:1.5mm; padding:0.9mm 3mm; }
+    ${s}.ltier-row:not(:last-child) { border-bottom:1px solid #f1f1f0; }
+    ${s}.ltier-qty { font-size:7pt; font-weight:700; color:#6b7280; flex-shrink:0; min-width:4mm; }
+    ${s}.ltier-price { flex:1; font-size:9.5pt; font-weight:800; color:#111; line-height:1; letter-spacing:-0.4pt; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    ${s}.ltier-off { font-size:6pt; font-weight:700; color:#059669; flex-shrink:0; white-space:nowrap; }
+  `
+}
+
+/**
+ * Tamaño del precio principal calculado para llenar el ancho disponible sin
+ * desbordar. Aprovecha todo el espacio (precios cortos quedan grandes) y se
+ * achica solo lo necesario en precios largos.
+ */
+function mainPriceFontPt(formatted: string): number {
+  const n = formatted.length // incluye "$" y separadores de miles
+  const usableMm = 42 // el precio ocupa todo el ancho (el barcode va abajo)
+  const charMm = 0.212 // ancho aprox. por carácter ≈ fontPt × 0.212mm (bold)
+  const fit = usableMm / (n * charMm)
+  return Math.max(11, Math.min(28, Math.floor(fit)))
+}
+
+/** Genera el HTML de una etiqueta. Idéntico en preview y en print. */
+function buildLabelHtml(
+  p: ProductRow,
+  mainList: PriceList,
+  otherLists: PriceList[],
+  showCode: boolean,
+  showTiers: boolean,
+): string {
+  const mainPrice = getListPrice(p, mainList)
+  const mainPriceStr = formatPrice(mainPrice)
+  const code = getProductCode(p)
+  const tiers = (!p.use_fixed_sell_price && showTiers) ? otherLists : []
+  const compact = tiers.length === 0
+  // En compacto el "1 UNIDAD" es redundante; solo se muestra si la lista es por cantidad
+  const showQty = !compact || mainList.min_quantity > 1
+
+  const tiersHtml = tiers.length > 0
+    ? `<div class="ltiers">${tiers.map(l => {
+        const tierPrice = getListPrice(p, l)
+        const { pct } = calcSaving(mainPrice, tierPrice)
+        return `<div class="ltier-row"><span class="ltier-qty">${l.min_quantity}x</span><span class="ltier-price">${formatPrice(tierPrice)}</span>${pct > 0 ? `<span class="ltier-off">-${pct}%</span>` : ''}</div>`
+      }).join('')}</div>`
+    : ''
+
+  const barcodeHtml = showCode && code
+    ? `<div class="lbarcode">${generateBarcodeSVG(code)}</div>`
+    : ''
+
+  const qtyHtml = showQty ? `<p class="lqty">${qtyLabel(mainList.min_quantity)}</p>` : ''
+
+  return `<div class="label${compact ? ' compact' : ''}"><p class="lname">${escapeHtml(p.name)}</p><div class="lmain"><div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr)}pt">${mainPriceStr}</p>${mainList.min_quantity > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div></div>${tiersHtml}${barcodeHtml}</div>`
+}
 
 const selectClass =
   'w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] appearance-none'
-
-// ─── PriceLabel — reutilizable para preview y para print ──────────────────────
-
-interface LabelProps {
-  product: ProductRow
-  mainList: PriceList
-  otherLists: PriceList[]   // ordenadas por min_quantity, sin mainList
-  showCode: boolean
-  showTiers: boolean
-}
-
-export function PriceLabel({ product, mainList, otherLists, showCode, showTiers }: LabelProps) {
-  const code = getProductCode(product)
-  const mainPrice = getListPrice(product, mainList)
-  const tiers = (!product.use_fixed_sell_price && showTiers) ? otherLists : []
-
-  return (
-    <div className="label-card">
-      <p className="label-name">{product.name}</p>
-
-      {/* Precio principal — zona grande */}
-      <div className="label-main-block">
-        <p className="label-qty">{qtyLabel(mainList.min_quantity)}</p>
-        <p className="label-price">{formatPrice(mainPrice)}</p>
-      </div>
-
-      {/* Escalas — columnas inferiores */}
-      {tiers.length > 0 && (
-        <div className="label-tiers">
-          {tiers.map(l => (
-            <div key={l.id} className="label-tier-col">
-              <span className="tier-qty">{qtyLabel(l.min_quantity)}</span>
-              <span className="tier-price">{formatPrice(getListPrice(product, l))}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {showCode && code && (
-        <p className="label-code">{code}</p>
-      )}
-    </div>
-  )
-}
 
 // ─── Modal principal ──────────────────────────────────────────────────────────
 
@@ -184,7 +247,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   const [brandId, setBrandId] = useState('')
   const [recentHours, setRecentHours] = useState('0')
   const [showCode, setShowCode] = useState(false)
-  const [showTiers, setShowTiers] = useState(true)
+  const [showTiers, setShowTiers] = useState(false)
   const [copies, setCopies] = useState(1)
 
   // Productos
@@ -195,13 +258,17 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
 
   // Preview
   const [previewPage, setPreviewPage] = useState(1)
+  const previewWrapRef = useRef<HTMLDivElement>(null)
+  const previewPageRef = useRef<HTMLDivElement>(null)
+  const [previewScale, setPreviewScale] = useState(1)
+  const [previewHeight, setPreviewHeight] = useState(0)
 
   // Reset al cerrar
   useEffect(() => {
     if (!open) {
       setStep('config')
       setMainListId(''); setCategoryId(''); setBrandId(''); setRecentHours('0')
-      setShowCode(false); setShowTiers(true); setCopies(1)
+      setShowCode(false); setShowTiers(false); setCopies(1)
       setAllProducts([]); setSelected(new Set()); setSearchText('')
       setPreviewPage(1)
       return
@@ -278,61 +345,50 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     })
 
   // Datos derivados para las etiquetas
-  const mainList = priceLists.find(l => l.id === mainListId)
+  const hasLists = priceLists.length > 0
+  // Si no hay listas (comercio con precio fijo), usamos la lista sintética
+  const mainList = priceLists.find(l => l.id === mainListId) ?? (hasLists ? undefined : FALLBACK_LIST)
   const otherLists = [...priceLists]
     .filter(l => l.id !== mainListId)
     .sort((a, b) => a.min_quantity - b.min_quantity)
 
   const selectedProducts = allProducts.filter(p => selected.has(p.id))
   const labelItems: ProductRow[] = selectedProducts.flatMap(p => Array(copies).fill(p))
-  const totalPages = Math.max(1, Math.ceil(labelItems.length / LABELS_PER_PAGE))
-  const pageItems = labelItems.slice((previewPage - 1) * LABELS_PER_PAGE, previewPage * LABELS_PER_PAGE)
+
+  // Etiquetas por página según altura estimada de fila (4 columnas)
+  const perPage = labelsPerPage(showTiers, showCode)
+  const totalPages = Math.max(1, Math.ceil(labelItems.length / perPage))
+  const pageItems = labelItems.slice((previewPage - 1) * perPage, previewPage * perPage)
+
+  // HTML del preview: mismas etiquetas y CSS que el print (WYSIWYG)
+  const previewHtml = mainList
+    ? `<style>${labelStyles('.lbl-scope')}</style>` +
+      `<div class="lbl-scope" style="padding:10mm">` +
+      `<div class="grid">` +
+        pageItems.map(p => buildLabelHtml(p, mainList, otherLists, showCode, showTiers)).join('') +
+        Array(perPage - pageItems.length).fill(`<div class="label empty${showTiers ? '' : ' compact'}"></div>`).join('') +
+      `</div></div>`
+    : ''
+
+  // Escalar la página A4 (210mm) para que entre en el ancho del modal
+  useLayoutEffect(() => {
+    if (step !== 'preview') return
+    const wrap = previewWrapRef.current
+    const page = previewPageRef.current
+    if (!wrap || !page) return
+    const scale = Math.min(1, wrap.clientWidth / A4_WIDTH_PX)
+    setPreviewScale(scale)
+    setPreviewHeight(page.scrollHeight * scale)
+  }, [step, previewHtml])
 
   // ─── Print ────────────────────────────────────────────────────────────────
 
   const handlePrint = () => {
     if (!mainList) return
 
-    const labelsHtml = labelItems.map(p => {
-      const mainPrice = getListPrice(p, mainList)
-      const code = getProductCode(p)
-      const tiers = (!p.use_fixed_sell_price && showTiers) ? otherLists : []
-
-      const tiersHtml = tiers.length > 0
-        ? `<div class="ltiers">
-            ${tiers.map(l => {
-              const tierPrice = getListPrice(p, l)
-              const { pct } = calcSaving(mainPrice, tierPrice)
-              return `
-              <div class="ltier-col">
-                ${pct > 0 ? `<span class="ltier-off">${pct}% OFF</span>` : ''}
-                <span class="ltier-qty">${qtyLabel(l.min_quantity)}</span>
-                <span class="ltier-price">${formatPrice(tierPrice)}</span>
-                ${l.min_quantity > 1 ? `<span class="ltier-cu">c/u</span>` : ''}
-              </div>`
-            }).join('')}
-           </div>`
-        : ''
-
-      const barcodeHtml = showCode && code
-        ? `<div class="lbarcode">${generateBarcodeSVG(code)}</div>`
-        : ''
-
-      return `
-        <div class="label">
-          <p class="lname">${p.name}</p>
-          <div class="lmain">
-            <div class="lmain-price">
-              <p class="lqty">${qtyLabel(mainList.min_quantity)}</p>
-              <p class="lprice">${formatPrice(mainPrice)}</p>
-              ${mainList.min_quantity > 1 ? `<p class="lmain-cu">c/u</p>` : ''}
-            </div>
-            ${barcodeHtml}
-          </div>
-          ${tiersHtml}
-        </div>
-      `
-    }).join('')
+    const labelsHtml = labelItems
+      .map(p => buildLabelHtml(p, mainList, otherLists, showCode, showTiers))
+      .join('')
 
     const win = window.open('', '_blank', 'width=900,height=1100')
     if (!win) return
@@ -344,157 +400,9 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   <title>Etiquetas de precios</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
-    @page {
-      size: A4 portrait;
-      margin: 10mm;
-    }
-
-    body {
-      font-family: 'Arial', Helvetica, sans-serif;
-      background: white;
-      color: #111;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 4mm;
-    }
-
-    /* ── Etiqueta ── */
-    .label {
-      border: 1px solid #d1d5db;
-      border-radius: 2.5mm;
-      overflow: hidden;
-      min-height: 52mm;
-      display: flex;
-      flex-direction: column;
-      page-break-inside: avoid;
-      break-inside: avoid;
-    }
-
-    /* Nombre */
-    .lname {
-      font-size: 9.5pt;
-      font-weight: 700;
-      line-height: 1.3;
-      color: #111;
-      padding: 4mm 4.5mm 3mm;
-      word-break: break-word;
-    }
-
-    /* Bloque precio principal */
-    .lmain {
-      flex: 1;
-      display: flex;
-      flex-direction: row;
-      border-top: 1px solid #e5e7eb;
-      overflow: hidden;
-    }
-
-    .lmain-price {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 3mm 4mm;
-      background: #f9fafb;
-    }
-
-    .lbarcode {
-      width: 10mm;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-left: 1px solid #e5e7eb;
-      overflow: hidden;
-      background: white;
-    }
-
-    .lbarcode svg {
-      transform: rotate(-90deg);
-      flex-shrink: 0;
-    }
-
-    .lqty {
-      font-size: 7pt;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: #9ca3af;
-      margin-bottom: 1mm;
-    }
-
-    .lprice {
-      font-size: 34pt;
-      font-weight: 900;
-      color: #111;
-      line-height: 1;
-      letter-spacing: -1pt;
-    }
-
-    .lmain-cu {
-      font-size: 7.5pt;
-      font-weight: 600;
-      color: #9ca3af;
-      margin-top: 0.8mm;
-      letter-spacing: 0.04em;
-    }
-
-    /* Tira de escalas */
-    .ltiers {
-      display: flex;
-      border-top: 1px solid #e5e7eb;
-    }
-
-    .ltier-col {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 2.5mm 2mm;
-      gap: 0.8mm;
-    }
-
-    .ltier-col:not(:last-child) {
-      border-right: 1px solid #e5e7eb;
-    }
-
-    .ltier-off {
-      font-size: 6pt;
-      font-weight: 700;
-      color: #059669;
-      background: #ecfdf5;
-      padding: 0.4mm 1.2mm;
-      border-radius: 1mm;
-      letter-spacing: 0.04em;
-      line-height: 1.2;
-    }
-
-    .ltier-qty {
-      font-size: 6.5pt;
-      font-weight: 600;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: #9ca3af;
-    }
-
-    .ltier-price {
-      font-size: 15pt;
-      font-weight: 800;
-      color: #374151;
-      line-height: 1;
-      letter-spacing: -0.3pt;
-    }
-
-    .ltier-cu {
-      font-size: 6pt;
-      font-weight: 500;
-      color: #9ca3af;
-    }
-
+    @page { size: A4 portrait; margin: 10mm; }
+    body { font-family: 'Arial', Helvetica, sans-serif; background: white; color: #111; }
+    ${labelStyles('')}
     @media screen {
       body { background: #e5e7eb; padding: 20px; }
       .grid { max-width: 794px; margin: 0 auto; background: white; padding: 10mm; border-radius: 4px; }
@@ -522,26 +430,42 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={stepTitle[step]} size={step === 'preview' ? 'xl' : 'md'}>
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={stepTitle[step]}
+      size={step === 'preview' ? 'xl' : 'md'}
+      dismissable={step !== 'preview'}
+      headerActions={step === 'preview' && mainList ? (
+        <button
+          onClick={handlePrint}
+          className="flex items-center gap-1.5 mr-1 px-3 py-1.5 text-sm font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:opacity-90 transition-opacity"
+        >
+          <Printer size={14} /> Imprimir / Exportar PDF
+        </button>
+      ) : undefined}
+    >
 
       {/* ── PASO 1: Configurar ─────────────────────────────────────────────── */}
       {step === 'config' && (
         <div className="space-y-5 pb-6">
 
-          {/* Lista principal */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-[var(--text2)]">Lista de precio a mostrar</label>
-            <div className="relative">
-              <select value={mainListId} onChange={e => setMainListId(e.target.value)} className={selectClass}>
-                {priceLists.map(l => (
-                  <option key={l.id} value={l.id}>
-                    {l.name} — {l.margin_pct > 0 ? '+' : ''}{l.margin_pct}% · desde {l.min_quantity} {l.min_quantity === 1 ? 'unidad' : 'unidades'}
-                  </option>
-                ))}
-              </select>
+          {/* Lista principal — solo si el comercio usa listas de precio */}
+          {hasLists && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-[var(--text2)]">Lista de precio a mostrar</label>
+              <div className="relative">
+                <select value={mainListId} onChange={e => setMainListId(e.target.value)} className={selectClass}>
+                  {priceLists.map(l => (
+                    <option key={l.id} value={l.id}>
+                      {l.name} — {l.margin_pct > 0 ? '+' : ''}{l.margin_pct}% · desde {l.min_quantity} {l.min_quantity === 1 ? 'unidad' : 'unidades'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p className="text-xs text-[var(--text3)]">Precio grande central de la etiqueta</p>
             </div>
-            <p className="text-xs text-[var(--text3)]">Precio grande central de la etiqueta</p>
-          </div>
+          )}
 
           {/* Filtros */}
           <div className="grid grid-cols-2 gap-3">
@@ -594,15 +518,17 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium text-[var(--text2)]">Contenido de la etiqueta</label>
             <div className="flex flex-col gap-2">
-              <label className="flex items-center gap-2 text-sm text-[var(--text2)] cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={showTiers}
-                  onChange={e => setShowTiers(e.target.checked)}
-                  className="w-4 h-4 accent-[var(--accent)]"
-                />
-                Mostrar escalas de precio (otras listas activas)
-              </label>
+              {otherLists.length > 0 && (
+                <label className="flex items-center gap-2 text-sm text-[var(--text2)] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showTiers}
+                    onChange={e => setShowTiers(e.target.checked)}
+                    className="w-4 h-4 accent-[var(--accent)]"
+                  />
+                  Mostrar escalas de precio (otras listas activas)
+                </label>
+              )}
               <label className="flex items-center gap-2 text-sm text-[var(--text2)] cursor-pointer">
                 <input
                   type="checkbox"
@@ -620,7 +546,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
               className="w-full"
               onClick={handleLoadProducts}
               loading={loadingProducts}
-              disabled={!mainListId}
+              disabled={!mainList}
             >
               <Tag size={14} /> Cargar productos
             </Button>
@@ -722,80 +648,22 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
             </span>
           </div>
 
-          {/* Grid de etiquetas */}
-          <div className="grid grid-cols-3 gap-2 p-3 bg-gray-100 rounded-[var(--radius-lg)]">
-            {pageItems.map((p, i) => {
-              const mainPrice = getListPrice(p, mainList)
-              const code = getProductCode(p)
-              const tiers = (!p.use_fixed_sell_price && showTiers) ? otherLists : []
-
-              return (
-                <div
-                  key={`${p.id}-${i}`}
-                  className="bg-white border border-gray-200 rounded-lg overflow-hidden flex flex-col"
-                  style={{ minHeight: 156 }}
-                >
-                  {/* Nombre */}
-                  <p className="text-[10px] font-bold text-gray-900 leading-snug px-3 pt-2.5 pb-2 line-clamp-2">
-                    {p.name}
-                  </p>
-
-                  {/* Precio principal — zona central */}
-                  <div className="flex-1 flex flex-row border-t border-gray-100 overflow-hidden">
-                    <div className="flex-1 flex flex-col items-center justify-center bg-gray-50 py-3 px-2">
-                      <span className="text-[7px] font-semibold text-gray-400 uppercase tracking-widest mb-0.5">
-                        {qtyLabel(mainList.min_quantity)}
-                      </span>
-                      <span className="text-[30px] font-black text-gray-900 leading-none tracking-tight">
-                        {formatPrice(mainPrice)}
-                      </span>
-                      {mainList.min_quantity > 1 && (
-                        <span className="text-[7px] font-semibold text-gray-400 mt-0.5">c/u</span>
-                      )}
-                    </div>
-                    {showCode && code && <BarcodeStrip code={code} />}
-                  </div>
-
-                  {/* Escalas — tira inferior */}
-                  {tiers.length > 0 && (
-                    <div className="flex border-t border-gray-100 divide-x divide-gray-100">
-                      {tiers.map(l => {
-                        const tierPrice = getListPrice(p, l)
-                        const { pct } = calcSaving(mainPrice, tierPrice)
-                        return (
-                          <div key={l.id} className="flex-1 flex flex-col items-center py-1.5 px-1 gap-px">
-                            {pct > 0 && (
-                              <span className="text-[6px] font-bold text-emerald-600 bg-emerald-50 px-1 py-px rounded-sm leading-none">
-                                {pct}% OFF
-                              </span>
-                            )}
-                            <span className="text-[6px] font-semibold text-gray-400 uppercase tracking-wider">
-                              {qtyLabel(l.min_quantity)}
-                            </span>
-                            <span className="text-[13px] font-extrabold text-gray-700 leading-tight tracking-tight">
-                              {formatPrice(tierPrice)}
-                            </span>
-                            {l.min_quantity > 1 && (
-                              <span className="text-[6px] font-medium text-gray-400">c/u</span>
-                            )}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                </div>
-              )
-            })}
-
-            {/* Celdas vacías */}
-            {Array(LABELS_PER_PAGE - pageItems.length).fill(null).map((_, i) => (
-              <div
-                key={`empty-${i}`}
-                className="border border-dashed border-gray-200 rounded-lg"
-                style={{ minHeight: 156 }}
-              />
-            ))}
+          {/* Página A4 — mismo HTML/CSS que el print, escalado para que entre */}
+          <div
+            ref={previewWrapRef}
+            className="bg-gray-200 rounded-[var(--radius-lg)] p-3 overflow-hidden flex justify-center"
+            style={{ height: previewHeight ? previewHeight + 24 : undefined }}
+          >
+            <div
+              ref={previewPageRef}
+              className="bg-white shadow-sm"
+              style={{
+                width: '210mm',
+                transform: `scale(${previewScale})`,
+                transformOrigin: 'top center',
+              }}
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+            />
           </div>
 
           {/* Paginación */}
@@ -819,15 +687,9 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
             </div>
           )}
 
-          {/* Imprimir */}
-          <div className="border-t border-[var(--border)] pt-4">
-            <Button className="w-full" onClick={handlePrint}>
-              <Printer size={14} /> Imprimir / Exportar PDF
-            </Button>
-            <p className="text-xs text-center text-[var(--text3)] mt-2">
-              Para exportar PDF: en el diálogo de impresión elegí "Guardar como PDF"
-            </p>
-          </div>
+          <p className="text-xs text-center text-[var(--text3)] border-t border-[var(--border)] pt-3">
+            Para exportar PDF: en el diálogo de impresión elegí "Guardar como PDF"
+          </p>
         </div>
       )}
     </Modal>

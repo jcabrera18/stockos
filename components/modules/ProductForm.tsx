@@ -12,6 +12,7 @@ import { CategoryTreePicker } from '@/components/ui/CategoryTreePicker'
 import type { PriceList } from '@/app/price-lists/page'
 import { SupplierModal } from '@/components/modules/SupplierModal'
 import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useWorkstation } from '@/hooks/useWorkstation'
 
 interface ProductFormProps {
@@ -82,6 +83,20 @@ const emptyForm = {
   price_mode: 'fixed' as 'fixed' | 'custom',
 }
 
+type FormState = typeof emptyForm
+
+// Serializa el estado editable del form para comparar contra el snapshot base
+// y detectar cambios sin guardar.
+function serializeFormState(
+  form: FormState,
+  barcodes: string[],
+  overridePrices: Record<string, string>,
+  overrideModes: Record<string, 'pesos' | 'pct'>,
+  overridePctValues: Record<string, string>,
+) {
+  return JSON.stringify({ form, barcodes, overridePrices, overrideModes, overridePctValues })
+}
+
 const PRICE_MODES = [
   { value: 'fixed' as const, label: 'Precio fijo', hint: 'Vos definís el precio' },
   { value: 'list' as const, label: 'Por lista', hint: 'Margen sobre costo' },
@@ -130,9 +145,23 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
   const [expressMode, setExpressMode] = useState(true)
   const [adjustStockModal, setAdjustStockModal] = useState(false)
   const [displayStock, setDisplayStock] = useState<number>(0)
+  const [confirmClose, setConfirmClose] = useState(false)
+  const baselineRef = useRef('')
   const { workstation } = useWorkstation()
 
   const isEdit = !!product
+
+  // Detección de cambios sin guardar (solo en edición). El snapshot base se
+  // captura al cargar el producto (ver el useEffect que pobla el form).
+  const snapshot = serializeFormState(form, barcodes, overridePrices, overrideModes, overridePctValues)
+  const isDirty = isEdit && snapshot !== baselineRef.current
+
+  // Cierra el panel, pero si hay cambios sin guardar pide confirmación primero.
+  const requestClose = () => {
+    if (saving) return
+    if (isDirty) { setConfirmClose(true); return }
+    onClose()
+  }
   const costNet = Number(form.cost_price_net) || 0
   const vatRate = Number(form.vat_rate) || 0
   const costWithVat = Math.round(costNet * (1 + vatRate / 100) * 100) / 100
@@ -165,14 +194,20 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         handleSave()
         return
       }
-      // Enter pelado → Guardar y agregar otro (solo modo express al crear).
-      // Se ignora si el foco está en el input de código (el scanner usa Enter
-      // para sumar el código) o en un select/textarea.
-      if (!expressMode || isEdit) return
+      // Enter pelado: se ignora si el foco está en el input de código (el scanner
+      // usa Enter para sumar el código) o en un select/textarea.
       const ae = document.activeElement
       if (ae === newBarcodeRef.current) return
       const tag = ae?.tagName
       if (tag === 'SELECT' || tag === 'TEXTAREA') return
+      // En edición → Enter guarda los cambios.
+      if (isEdit) {
+        e.preventDefault()
+        handleSave()
+        return
+      }
+      // Al crear → Enter guarda y agrega otro (solo modo express).
+      if (!expressMode) return
       e.preventDefault()
       handleSaveAndNew()
     }
@@ -222,7 +257,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
 
   useEffect(() => {
     if (product) {
-      setForm({
+      const loadedForm = {
         name: product.name,
         sku: product.sku ?? '',
         description: product.description ?? '',
@@ -238,17 +273,25 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         use_fixed_sell_price: product.use_fixed_sell_price ?? false,
         unit: product.unit,
         price_mode: product.price_mode ?? 'fixed',
-      })
+      }
+      setForm(loadedForm)
       // El producto ya viene completo desde la página (incluye product_barcodes
       // y price_overrides), así que poblamos todo de forma síncrona — sin un
       // segundo fetch que haría aparecer el código de barras con retraso.
       const bars = (product.product_barcodes ?? []).map(b => b.barcode)
-      setBarcodes(bars.length > 0 ? bars : (product.barcode ? [product.barcode] : []))
+      const loadedBarcodes = bars.length > 0 ? bars : (product.barcode ? [product.barcode] : [])
+      setBarcodes(loadedBarcodes)
       const ovMap: Record<string, string> = {}
       for (const ov of (product.price_overrides ?? [])) {
         ovMap[ov.price_list_id] = String(ov.price)
       }
       setOverridePrices(ovMap)
+      // Los modos/porcentajes de override son helpers de UI, no se cargan del
+      // producto: arrancan limpios en cada apertura.
+      setOverrideModes({})
+      setOverridePctValues({})
+      // Snapshot base para detectar cambios sin guardar (ver `snapshot`/`isDirty`).
+      baselineRef.current = serializeFormState(loadedForm, loadedBarcodes, ovMap, {}, {})
     } else {
       setForm(emptyForm)
       setBarcodes([])
@@ -579,7 +622,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
       <div className="sticky top-0 z-10 flex items-center gap-3 px-5 py-4 bg-[var(--bg)] border-b border-[var(--border)]">
         <button
           type="button"
-          onClick={onClose}
+          onClick={requestClose}
           className="p-1.5 rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors"
           title="Cerrar"
         >
@@ -1074,7 +1117,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
 
       {/* Footer */}
       <div className="sticky bottom-0 z-10 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end px-5 py-4 bg-[var(--bg)] border-t border-[var(--border)]">
-        <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
+        <Button variant="secondary" onClick={requestClose} disabled={saving}>Cancelar</Button>
         {!isEdit && (
           <Button variant="secondary" onClick={handleSaveAndNew} loading={saving}>
             Guardar y agregar otro
@@ -1152,6 +1195,17 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
           </div>
         </div>
       )}
+
+      {/* Confirmación al salir con cambios sin guardar */}
+      <ConfirmDialog
+        open={confirmClose}
+        onClose={() => setConfirmClose(false)}
+        onConfirm={() => { setConfirmClose(false); onClose() }}
+        title="Cambios sin guardar"
+        message="Tenés cambios sin guardar. Si salís ahora se van a descartar."
+        confirmLabel="Descartar y salir"
+        danger
+      />
     </div>
   )
 }

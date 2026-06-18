@@ -1,24 +1,8 @@
 'use client'
 import { useRef, useEffect } from 'react'
-import { AlertTriangle, TrendingDown, Clock, Building2 } from 'lucide-react'
+import { AlertTriangle, TrendingDown, Clock, Wallet } from 'lucide-react'
 
 const PROBLEMS = [
-  {
-    Icon: AlertTriangle,
-    color: '#ef4444',
-    bg: 'rgba(239,68,68,0.07)',
-    border: 'rgba(239,68,68,0.18)',
-    title: 'Stock que siempre miente',
-    desc: 'Tu sistema dice que tenés 20 unidades, el depósito tiene 7, y el cliente ya compró 3 que no existen. Diferencias que se acumulan y cuestan plata real.',
-  },
-  {
-    Icon: TrendingDown,
-    color: '#d97706',
-    bg: 'rgba(217,119,6,0.07)',
-    border: 'rgba(217,119,6,0.18)',
-    title: 'Precios cargados a mano',
-    desc: 'Subiste el precio en un lado, te olvidaste en el otro. Un producto con dos precios distintos. Pérdidas por error, reclamos de clientes y tiempo perdido.',
-  },
   {
     Icon: Clock,
     color: '#ea580c',
@@ -28,12 +12,28 @@ const PROBLEMS = [
     desc: 'El código de barras no responde, el sistema tarda, hay que buscar el precio a mano. La fila crece y los clientes se van. Cada segundo en caja cuesta.',
   },
   {
-    Icon: Building2,
+    Icon: Wallet,
     color: '#7c3aed',
     bg: 'rgba(124,58,237,0.07)',
     border: 'rgba(124,58,237,0.18)',
-    title: 'Sin control por sucursal',
-    desc: 'Tenés 2 o 3 locales y no sabés qué pasa en cada uno a menos que vayas en persona. Sin visibilidad, tomás decisiones a ciegas.',
+    title: 'El fiado en el cuaderno',
+    desc: 'Anotás lo que te deben en una hoja, te olvidás de cobrar, no sabés quién te debe ni cuánto. Plata tuya que está afuera y nadie reclama.',
+  },
+  {
+    Icon: AlertTriangle,
+    color: '#ef4444',
+    bg: 'rgba(239,68,68,0.07)',
+    border: 'rgba(239,68,68,0.18)',
+    title: 'Stock que siempre miente',
+    desc: 'Tu sistema dice que tenés 20 unidades, en realidad hay 7, y el cliente ya compró 3 que no existen. Diferencias que se acumulan y cuestan plata real.',
+  },
+  {
+    Icon: TrendingDown,
+    color: '#d97706',
+    bg: 'rgba(217,119,6,0.07)',
+    border: 'rgba(217,119,6,0.18)',
+    title: 'Precios cargados a mano',
+    desc: 'Subiste el precio en un lado, te olvidaste en el otro. Un producto con dos precios distintos. Pérdidas por error, reclamos de clientes y tiempo perdido.',
   },
 ]
 
@@ -68,7 +68,7 @@ export function Problems() {
             ¿Te suena familiar?
           </h2>
           <p className="text-gray-500 text-[17px] mt-4 max-w-lg mx-auto leading-relaxed">
-            La mayoría de los negocios de retail en LATAM arrastran los mismos dolores de siempre.
+            La mayoría de los comercios arrastran los mismos dolores de siempre, sin importar el rubro.
           </p>
         </div>
 

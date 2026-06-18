@@ -8,13 +8,13 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { TableSkeleton, ProductFormSkeleton } from '@/components/ui/Skeleton'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { ProductForm } from '@/components/modules/ProductForm'
-import { api } from '@/lib/api'
+import { api, apiFetch } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import type { StockSummary, Product, Category, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import {
   Plus, Search, Package, Pencil, Trash2,
-  Tag, Filter, X, ChevronUp, ChevronDown, ArrowUpDown, MoreVertical,
+  Tag, Filter, X, ChevronUp, ChevronDown, ArrowUpDown, MoreVertical, Loader2,
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { CategoryTreePicker } from '@/components/ui/CategoryTreePicker'
@@ -126,14 +126,16 @@ function RowActionsMenu({ onEdit, onPriceRules, onDelete }: {
 
 export default function ProductsPage() {
   const [data, setData] = useState<StockSummary[]>([])
-  const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
+  const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 10, pages: 0 })
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [page, setPage] = useState(1)
-  const [limit, setLimit] = useState(15)
+  const [limit, setLimit] = useState(10)
   const [sortBy, setSortBy] = useState<SortField>('name')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [loading, setLoading] = useState(true)
+  const [searching, setSearching] = useState(false)
+  const [barcodeLookup, setBarcodeLookup] = useState(false)
   const [showFilters, setShowFilters] = useState(false)
 
   // Panel / form state
@@ -167,7 +169,7 @@ export default function ProductsPage() {
   // Refs para acceso síncrono en callbacks
   const searchRef = useRef(debouncedSearch)
   const pageRef = useRef(page)
-  const limitRef = useRef(15)
+  const limitRef = useRef(10)
   const sortByRef = useRef(sortBy)
   const sortDirRef = useRef(sortDir)
   const brandRef = useRef(brandFilter)
@@ -178,16 +180,38 @@ export default function ProductsPage() {
   const maxPriceRef = useRef(maxPrice)
   const fetchProductsRef = useRef<(() => Promise<void>) | undefined>(undefined)
 
+  // Secuenciación de búsquedas: descarta respuestas que llegan fuera de orden
+  // (ej. una request lenta de un término viejo que resuelve después de uno nuevo)
+  // y cancela la request anterior en vuelo para no malgastar backend.
+  const fetchReqRef = useRef(0)
+  const fetchAbortRef = useRef<AbortController | null>(null)
+  const firstLoadRef = useRef(true)
+
   const isBarcode = (v: string) => /^\d{8,14}$/.test(v.trim())
 
   const lookupBarcode = (value: string) => {
     const trimmed = value.trim()
+    // Feedback inmediato: spinner en el buscador + panel abierto en estado de
+    // carga, para que no parezca que se tildó mientras resolvemos el barcode.
+    const reqId = ++loadReqRef.current
+    setBarcodeLookup(true)
+    setSelectedId(null)
+    setFormProduct(null)
+    setFormLoading(true)
+    setPanelOpen(true)
     api.get<Product>(`/api/products/barcode/${trimmed}`)
       .then(product => {
+        if (reqId !== loadReqRef.current) return // llegó una selección más nueva
+        setBarcodeLookup(false)
         openEdit(product)
         setSearch('')
       })
       .catch(() => {
+        if (reqId !== loadReqRef.current) return
+        // No es un barcode conocido → cerrar el panel y caer a la búsqueda por texto.
+        setBarcodeLookup(false)
+        setPanelOpen(false)
+        setFormLoading(false)
         setDebouncedSearch(trimmed)
       })
   }
@@ -216,27 +240,49 @@ export default function ProductsPage() {
   useEffect(() => { maxPriceRef.current = maxPrice }, [maxPrice])
 
   const fetchProducts = useCallback(async () => {
-    setLoading(true)
+    // Cancela la request anterior en vuelo. Combinamos con un timeout para que
+    // una request colgada no deje el indicador de carga encendido para siempre.
+    fetchAbortRef.current?.abort()
+    const controller = new AbortController()
+    fetchAbortRef.current = controller
+    const reqId = ++fetchReqRef.current
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)])
+
+    // El skeleton completo solo en la primera carga; en búsquedas siguientes
+    // mantenemos la tabla y mostramos una barra sutil de "actualizando".
+    if (firstLoadRef.current) setLoading(true)
+    setSearching(true)
     try {
-      const res = await api.get<PaginatedResponse<StockSummary>>('/api/products', {
-        search: searchRef.current || undefined,
-        brand_id: brandRef.current || undefined,
-        supplier_id: supplierRef.current || undefined,
-        category_id: categoryRef.current || undefined,
-        stock_status: stockStatusRef.current || undefined,
-        min_price: minPriceRef.current ? Number(minPriceRef.current) : undefined,
-        max_price: maxPriceRef.current ? Number(maxPriceRef.current) : undefined,
-        sort_by: sortByRef.current,
-        sort_dir: sortDirRef.current,
-        page: pageRef.current,
-        limit: limitRef.current,
+      const res = await apiFetch<PaginatedResponse<StockSummary>>('/api/products', {
+        method: 'GET',
+        signal,
+        params: {
+          search: searchRef.current || undefined,
+          brand_id: brandRef.current || undefined,
+          supplier_id: supplierRef.current || undefined,
+          category_id: categoryRef.current || undefined,
+          stock_status: stockStatusRef.current || undefined,
+          min_price: minPriceRef.current ? Number(minPriceRef.current) : undefined,
+          max_price: maxPriceRef.current ? Number(maxPriceRef.current) : undefined,
+          sort_by: sortByRef.current,
+          sort_dir: sortDirRef.current,
+          page: pageRef.current,
+          limit: limitRef.current,
+        },
       })
+      if (reqId !== fetchReqRef.current) return // llegó una búsqueda más nueva
       setData(res.data)
       setPagination(res.pagination)
     } catch (err) {
+      // Cancelada a propósito (nueva búsqueda o timeout) o respuesta obsoleta: ignorar.
+      if (controller.signal.aborted || reqId !== fetchReqRef.current) return
       console.error(err)
     } finally {
-      setLoading(false)
+      if (reqId === fetchReqRef.current) {
+        firstLoadRef.current = false
+        setLoading(false)
+        setSearching(false)
+      }
     }
   }, [])
   useEffect(() => { fetchProductsRef.current = fetchProducts }, [fetchProducts])
@@ -401,7 +447,9 @@ export default function ProductsPage() {
         <div className="px-5 pt-4 pb-4 space-y-3">
           <div className="flex gap-2">
             <div className="relative flex-1">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
+              {barcodeLookup
+                ? <Loader2 size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--accent)] animate-spin" />
+                : <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />}
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
@@ -501,8 +549,12 @@ export default function ProductsPage() {
       </div>
 
       {/* Tabla — scrollable */}
-      <div className={cn('overflow-y-auto', panelOpen ? 'px-3 pb-4' : 'px-5 pb-5')}>
-        {loading ? <TableSkeleton rows={12} /> : data.length === 0 ? (
+      <div className={cn('relative overflow-y-auto', panelOpen ? 'px-3 pb-4' : 'px-5 pb-5')}>
+        {/* Barra fina de "actualizando" en búsquedas/filtros (no en la primera carga) */}
+        {searching && !loading && (
+          <div className="indeterminate-bar absolute top-0 left-0 z-10 h-0.5 w-full overflow-hidden bg-[var(--accent)]/15" />
+        )}
+        {loading ? <TableSkeleton rows={10} /> : data.length === 0 ? (
           <EmptyState
             icon={Package}
             title={search || activeFilterCount > 0 ? 'Sin resultados' : 'Sin productos'}
@@ -510,7 +562,10 @@ export default function ProductsPage() {
             action={!search && activeFilterCount === 0 ? <Button onClick={openCreate}><Plus size={15} /> Nuevo producto</Button> : undefined}
           />
         ) : (
-          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
+          <div className={cn(
+            'bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden transition-opacity duration-150',
+            searching && 'opacity-50 pointer-events-none'
+          )}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm table-fixed">
                 <thead>
