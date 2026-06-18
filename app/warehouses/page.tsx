@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
@@ -391,6 +392,9 @@ export default function WarehousesPage() {
       />
 
       <div className="p-5 space-y-4">
+        <HelpBanner id="warehouses" title="Depósitos y stock">
+          <p>Administrá el stock real por depósito y hacé transferencias entre ellos. Cada depósito está vinculado a una sucursal, así controlás de dónde sale la mercadería.</p>
+        </HelpBanner>
         {/* Tabs */}
         <div className="flex border-b border-[var(--border)]">
           {tabs.map(t => (

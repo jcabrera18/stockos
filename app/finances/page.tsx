@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Card } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { Button } from '@/components/ui/Button'
@@ -242,6 +243,9 @@ export default function FinancesPage() {
       />
 
       <div className="p-5 space-y-4">
+        <HelpBanner id="finances" title="Finanzas">
+          <p>Seguí tus ingresos y gastos con gráficos de evolución. Cargá y categorizá los gastos del negocio para entender mejor tu rentabilidad.</p>
+        </HelpBanner>
         {/* Período */}
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex gap-2 flex-wrap">

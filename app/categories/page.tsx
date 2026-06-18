@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
@@ -269,6 +270,9 @@ export default function CategoriesPage() {
       />
 
       <div className="p-5 space-y-4">
+        <HelpBanner id="categories" title="Categorías">
+          <p>Organizá tus productos en categorías de varios niveles. Te sirven para encontrarlos y filtrarlos más rápido, y para aplicar promociones por categoría.</p>
+        </HelpBanner>
         {/* Buscador */}
         {!loading && categories.length > 0 && (
           <div className="relative">

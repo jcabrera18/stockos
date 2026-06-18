@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
@@ -302,6 +303,9 @@ export default function PurchasesPage() {
       />
 
       <div className="p-5 space-y-4">
+        <HelpBanner id="purchases" title="Compras y proveedores">
+          <p>Cargá órdenes de compra a tus proveedores. Al recibir la mercadería se actualiza el stock del depósito y se recalcula el costo promedio ponderado de cada producto.</p>
+        </HelpBanner>
         {/* Tabs */}
         <div className="flex border-b border-[var(--border)]">
           {[

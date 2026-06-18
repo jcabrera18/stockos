@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
@@ -305,6 +306,9 @@ export default function PromotionsPage() {
       />
 
       <div className="p-5 space-y-5">
+        <HelpBanner id="promotions" title="¿Cómo funcionan las promociones?">
+          <p>Creá descuentos por producto, marca, categoría, proveedor o globales. Se aplican automáticamente en el POS al momento de cobrar, sin que tengas que cargarlos a mano.</p>
+        </HelpBanner>
         {loading ? <PageLoader /> : promotions.length === 0 ? (
           <EmptyState icon={Percent}
             title="Sin promociones"

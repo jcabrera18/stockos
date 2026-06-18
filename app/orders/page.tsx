@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
@@ -1139,6 +1140,9 @@ export default function OrdersPage() {
           </div>
 
           <div className="overflow-y-auto flex-1 p-5 space-y-4">
+        <HelpBanner id="orders" title="¿Cómo funcionan los pedidos?">
+          <p>Cargá pedidos de tus clientes y seguí su estado. Al confirmar un pedido se <strong>reserva el stock</strong> automáticamente; si lo cancelás, ese stock se libera.</p>
+        </HelpBanner>
         {/* Banner pedidos offline pendientes */}
         {pendingOrdersCount > 0 && (
           <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-300 dark:border-yellow-700">

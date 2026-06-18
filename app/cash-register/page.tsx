@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
@@ -290,6 +291,9 @@ export default function CashRegisterPage() {
       />
 
       <div className="p-5 space-y-5">
+        <HelpBanner id="cash-register" title="¿Cómo funciona la caja?">
+          <p>Abrí la caja al empezar el turno y cerrala al terminar para cuadrar el efectivo. Mientras está abierta ves los totales de ventas en tiempo real. Necesitás una caja abierta para poder cobrar en el POS.</p>
+        </HelpBanner>
         {loading ? <PageLoader /> : (
           <>
             {/* ── Cajas abiertas ── */}

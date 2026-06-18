@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
 import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -442,6 +443,13 @@ export default function ProductsPage() {
             </Button>
           }
         />
+
+        {/* Info */}
+        <div className="px-5 pt-4">
+          <HelpBanner id="products" title="Catálogo de productos">
+            <p>Cargá y editá tus productos: códigos de barra, costo, precio y stock. Usá la actualización masiva para cambiar precios de varios productos a la vez.</p>
+          </HelpBanner>
+        </div>
 
         {/* Búsqueda + filtros */}
         <div className="px-5 pt-4 pb-4 space-y-3">

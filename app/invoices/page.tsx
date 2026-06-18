@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -385,6 +386,9 @@ function InvoicesPageInner() {
       />
 
       <div className="p-5 space-y-4">
+        <HelpBanner id="invoices" title="¿Cómo funcionan los comprobantes?">
+          <p>Emití tickets X y convertilos a facturas A/B/C/R cuando lo necesites. También podés generar notas de crédito y débito. Las facturas se autorizan en AFIP/ARCA y obtienen su CAE y QR automáticamente.</p>
+        </HelpBanner>
 
         {/* Filtros */}
         <div className="flex flex-wrap gap-2 items-center">

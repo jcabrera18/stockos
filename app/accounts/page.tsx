@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -96,6 +97,9 @@ export default function AccountsPage() {
       />
 
       <div className="p-5 space-y-4">
+        <HelpBanner id="accounts" title="Cuentas corrientes">
+          <p>Vista rápida de los saldos de tus clientes: quién debe, el estado del crédito y la antigüedad de la deuda. Registrá cobros al instante sin entrar al detalle de cada cliente.</p>
+        </HelpBanner>
         <div className="flex flex-wrap items-center gap-2">
           {tabs.map(t => (
             <button key={t.key} onClick={() => setFilter(t.key)}

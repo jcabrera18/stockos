@@ -9,6 +9,7 @@ import type { PriceList } from '@/app/price-lists/page'
 import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle, RefreshCw, Truck, Banknote, CreditCard, ArrowRightLeft, QrCode, BookOpen, Pencil, Trash2, Check, Info, Printer, Layers } from 'lucide-react'
 import { toast } from 'sonner'
 import { POSTicket } from '@/components/modules/POSTicket'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { PrintSettingsModal } from '@/components/modules/PrintSettingsModal'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
 import { useWorkstation } from '@/hooks/useWorkstation'
@@ -1536,6 +1537,11 @@ export default function POSPage() {
 
         {/* Resultados */}
         <div className="flex-1 overflow-y-auto p-4">
+          <div className="mb-3">
+            <HelpBanner id="pos" title="¿Cómo cobrar en el POS?">
+              <p>Escaneá el código de barras o buscá el producto para sumarlo al ticket. Aplicá descuentos y promociones, elegí la forma de pago (efectivo, tarjeta o cuenta corriente) y cobrá. Necesitás una caja abierta para registrar la venta.</p>
+            </HelpBanner>
+          </div>
           {results.length > 0 ? (
             <div className="space-y-1">
               {results.map((product, index) => (

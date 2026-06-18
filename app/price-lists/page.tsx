@@ -9,6 +9,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/Badge'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { api } from '@/lib/api'
 import { Plus, Tag, Pencil, Trash2, Star, TrendingUp, Printer } from 'lucide-react'
 import { toast } from 'sonner'
@@ -179,12 +180,17 @@ export default function PriceListsPage() {
       <div className="p-5 space-y-4">
 
         {/* Info explicativa */}
-        <div className="px-4 py-3 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] text-sm text-[var(--text2)]">
-          <p className="font-medium text-[var(--text)] mb-1">¿Cómo funcionan las listas de precio?</p>
+        <HelpBanner id="price-lists" title="¿Cómo funcionan las listas de precio?">
           <p>Cada lista define un <strong>margen % sobre el costo</strong> del producto. El precio de venta se calcula como:</p>
           <p className="mono text-[var(--accent)] mt-1">Precio = Costo × (1 + Margen%)</p>
           <p className="mt-1 text-[var(--text3)]">En el POS podés elegir qué lista aplicar antes de cobrar. La lista por defecto se usa cuando no se elige ninguna.</p>
-        </div>
+          <p className="mt-2">Desde acá también podés:</p>
+          <ul className="mt-1 ml-4 list-disc space-y-0.5 text-[var(--text3)]">
+            <li><strong className="text-[var(--text2)]">Imprimir la lista de precios</strong> completa para consultar o entregar.</li>
+            <li><strong className="text-[var(--text2)]">Imprimir etiquetas de precio</strong> (con nombre, precio y código de barras) para pegar en cada producto.</li>
+            <li><strong className="text-[var(--text2)]">Actualizar precios masivamente</strong>: filtrás los productos, previsualizás y aplicás el cambio con redondeo.</li>
+          </ul>
+        </HelpBanner>
 
         {loading ? <PageLoader /> : lists.length === 0 ? (
           <EmptyState

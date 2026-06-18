@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { StatCard } from '@/components/ui/StatCard'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
@@ -182,6 +183,9 @@ export default function DashboardPage() {
         <div className="h-3.5 w-32 rounded bg-[var(--surface2)] animate-pulse mt-1.5 opacity-60" />
       </div>
       <div className="p-5 space-y-5">
+        <HelpBanner id="dashboard" title="Tu panel de control">
+          <p>Acá ves de un vistazo cómo va el negocio: ventas del día, productos con bajo stock y la evolución en gráficos. Los datos se actualizan en tiempo real.</p>
+        </HelpBanner>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
           {Array.from({ length: 5 }).map((_, i) => <StatCardSkeleton key={i} />)}
         </div>

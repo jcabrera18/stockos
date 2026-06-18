@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
@@ -235,6 +236,9 @@ export default function BranchesPage() {
       />
 
       <div className="p-5 space-y-4">
+        <HelpBanner id="branches" title="Sucursales y cajas">
+          <p>Administrá tus sucursales y las cajas de cada una. Acá también ves un resumen consolidado de las ventas por sucursal.</p>
+        </HelpBanner>
 
         {/* Tabs */}
         <div className="flex border-b border-[var(--border)]">
