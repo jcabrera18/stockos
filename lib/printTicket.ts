@@ -307,26 +307,40 @@ export async function buildInvoiceQrDataUrl(
  * Abre la ventana de impresión aplicando la config de la terminal:
  * ancho 58/80mm, copias y escala de fuente. `bodyHtml` es el contenido
  * generado por los builders (o el innerHTML de un recibo).
+ *
+ * Diseño resolución-independiente:
+ *  - El `body` tiene un ancho FÍSICO fijo en mm (= ancho del rollo) con
+ *    `@page margin:0`, así el contenido queda anclado al papel y el driver
+ *    no lo "encoge para ajustar" (causa típica de texto diminuto/tenue en 80mm).
+ *  - Todo el diseño de los builders está en px; acá se convierte a `rem` para
+ *    que UN SOLO `font-size` raíz escale texto + espaciado + QR de forma
+ *    uniforme (zoom real). Antes sólo se escalaba `font-size`, así que el
+ *    espaciado quedaba fijo y la densidad se desordenaba.
  */
 export function printThermal(title: string, bodyHtml: string, settings?: PrintSettings): void {
   const ps = settings ?? getPrintSettings()
-  const widthMm = ps.paperWidth
-  // El diseño base es para 80mm. En 58mm hay que ACHICAR las fuentes (si no, el total
-  // se corta y los textos se desordenan). El `zoom` lo ignora el pipeline de impresión
-  // (Chrome→CUPS→driver), así que escalamos el font-size px directamente con regex.
-  const scale = (widthMm === 58 ? 0.74 : 1) * ps.fontScale
-  const scaledHtml = bodyHtml.replace(
-    /font-size:\s*(\d+(?:\.\d+)?)px/g,
-    (_, n) => `font-size:${(Number(n) * scale).toFixed(1)}px`,
+  const widthMm = ps.paperWidth                  // 58 | 80 — ancho físico del rollo
+  // Área imprimible típica (descontando el margen de hardware del cabezal).
+  const printableMm = widthMm === 58 ? 48 : 72
+  const sidePadMm = (widthMm - printableMm) / 2  // 5mm en 58, 4mm en 80
+
+  // Font-size raíz por ancho. Como TODO el ticket está en rem, este único valor
+  // escala texto, padding, gap y QR juntos. Las dos escalas son proporcionales
+  // entre sí (15.5/11.5 ≈ 1.35 ≈ ancho 80/58), así el de 80mm es una versión
+  // más grande del de 58mm, no una versión estirada.
+  const rootPx = (widthMm === 58 ? 11.5 : 15.5) * ps.fontScale
+
+  // px → rem (base 16). Los bordes punteados son siempre `<hr>` y el CSS de
+  // abajo los fuerza con !important, así que convertirlos también es inocuo.
+  const remHtml = bodyHtml.replace(
+    /(\d+(?:\.\d+)?)px/g,
+    (_, n) => `${(Number(n) / 16).toFixed(4)}rem`,
   )
 
-  // Márgenes laterales mínimos para aprovechar el ancho del papel.
-  const sideMargin = widthMm === 58 ? 1 : 3
   const copies = ps.copies
-
   const pageBreak = `<div style="break-after:page;page-break-after:always;"></div>`
   const body = Array.from({ length: copies }, (_, i) =>
-    i < copies - 1 ? `${scaledHtml}${pageBreak}` : scaledHtml
+    i < copies - 1 ? `${remHtml}${pageBreak}` : remHtml
   ).join('')
 
   const win = window.open('', '_blank', 'width=350,height=800')
@@ -334,17 +348,18 @@ export function printThermal(title: string, bodyHtml: string, settings?: PrintSe
   win.document.write(`<!DOCTYPE html><html><head>
     <meta charset="utf-8"><title>${esc(title)}</title>
     <style>
-      @page { size: ${widthMm}mm auto; margin: 1mm ${sideMargin}mm; }
+      @page { size: ${widthMm}mm auto; margin: 0; }
       * { margin: 0; padding: 0; box-sizing: border-box; }
-      html { background: #fff; }
+      html { background: #fff; font-size: ${rootPx.toFixed(2)}px; }
       body {
-        width: 100%;
+        width: ${widthMm}mm;
+        padding: 2mm ${sidePadMm}mm;
         font-family: system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
-        font-size: 12px; font-weight: 400; line-height: 1.55; color: #000;
+        font-weight: 400; line-height: 1.5; color: #000;
         background: #fff;
         -webkit-print-color-adjust: exact; print-color-adjust: exact;
       }
-      hr { border: none !important; border-top: 1px dashed #555 !important; margin: 10px 0 !important; }
+      hr { border: none !important; border-top: 1px dashed #555 !important; margin: 0.6rem 0 !important; }
     </style>
   </head><body>${body}</body></html>`)
   win.document.close()

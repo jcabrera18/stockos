@@ -22,7 +22,7 @@ const DIFFS = [
     title: 'Crece con tu negocio',
     desc: 'Arrancás con una caja y llegás a varios depósitos, sucursales y equipos sin cambiar de sistema, sin migrar datos y sin volver a aprender a usar todo de cero.',
     stat: '1 → ∞',
-    statLabel: 'de una caja a toda una cadena',
+    statLabel: 'de una caja a todas tus sucursales',
   },
   {
     Icon: Shield,

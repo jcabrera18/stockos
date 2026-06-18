@@ -10,12 +10,14 @@ import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 import { useAuth } from '@/hooks/useAuth'
 import { getRoleLabel } from '@/lib/utils'
+import { getPlanLimits, canUpgradePlan, WHATSAPP_LINK, upgradeWhatsappLink } from '@/lib/plans'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import { Shield, Truck, Building2, Receipt, CreditCard, MessageCircle, Printer } from 'lucide-react'
 import { Toggle } from '@/components/ui/Toggle'
 import { usePrintSettings } from '@/hooks/usePrintSettings'
 import { PrintSettingsFields } from '@/components/modules/PrintSettingsModal'
+import { PlanLimitBanner } from '@/components/modules/PlanLimitBanner'
 
 const IVA_OPTIONS = [
   { value: 'RI', label: 'Responsable Inscripto (Facturas A/B)' },
@@ -257,6 +259,11 @@ export default function SettingsPage() {
       return
     }
 
+    if (planLimits.maxUsers != null && users.length >= planLimits.maxUsers) {
+      toast.error(`Tu plan permite hasta ${planLimits.maxUsers} usuarios. Actualizá tu plan para sumar más.`)
+      return
+    }
+
     if (!fullName || !email || !password) {
       toast.error('Completá nombre, email y contraseña')
       return
@@ -358,6 +365,12 @@ export default function SettingsPage() {
   }
 
   const isOwnerAdmin = ['owner', 'admin'].includes(role)
+
+  // Límites de capacidad según el plan contratado
+  const plan        = user?.business?.subscription?.plan
+  const planLimits  = getPlanLimits(plan)
+  const atUserLimit = planLimits.maxUsers != null && users.length >= planLimits.maxUsers
+  const upgradeLink = upgradeWhatsappLink(user?.business?.name, user?.business_id)
 
   return (
     <AppShell>
@@ -605,12 +618,6 @@ export default function SettingsPage() {
               const sub = user?.business?.subscription
               if (!sub) return null
 
-              const PLAN_LABELS: Record<string, string> = {
-                trial:   'Prueba gratuita',
-                local:   'Local',
-                negocio: 'Negocio',
-                cadena:  'Cadena',
-              }
               const CYCLE_LABELS: Record<string, string> = {
                 monthly: 'Mensual',
                 annual:  'Anual',
@@ -657,7 +664,7 @@ export default function SettingsPage() {
                       <div>
                         <p className="text-xs text-[var(--text3)] mb-0.5">Plan</p>
                         <p className="text-sm font-semibold text-[var(--text)]">
-                          {PLAN_LABELS[sub.plan] ?? sub.plan}
+                          {getPlanLimits(sub.plan).label}
                           {sub.billing_cycle && (
                             <span className="text-xs font-normal text-[var(--text3)] ml-1.5">
                               · {CYCLE_LABELS[sub.billing_cycle]}
@@ -710,13 +717,26 @@ export default function SettingsPage() {
                     {/* CTA */}
                     {sub.status !== 'active' && (
                       <a
-                        href="https://wa.me/5493438558913"
+                        href={WHATSAPP_LINK}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center justify-center gap-2 w-full py-2.5 rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold transition-colors"
                       >
                         <MessageCircle size={14} />
                         {sub.status === 'past_due' ? 'Reactivar cuenta' : 'Contratar plan'}
+                      </a>
+                    )}
+
+                    {/* Mejorar plan — solo si está activa y no es el plan tope */}
+                    {sub.status === 'active' && canUpgradePlan(sub.plan) && (
+                      <a
+                        href={upgradeLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-2 w-full py-2.5 rounded-[var(--radius-md)] border border-[var(--accent)]/30 bg-[var(--accent)]/8 hover:bg-[var(--accent)]/15 text-[var(--accent)] text-sm font-semibold transition-colors"
+                      >
+                        <MessageCircle size={14} />
+                        ¿Querés actualizar tu plan?
                       </a>
                     )}
 
@@ -749,6 +769,17 @@ export default function SettingsPage() {
             <CardHeader>
               <CardTitle>Gestión de usuarios</CardTitle>
             </CardHeader>
+
+            {/* Banner límite de plan */}
+            {atUserLimit && (
+              <div className="mb-5">
+                <PlanLimitBanner
+                  title={`Llegaste al límite de tu plan (${planLimits.maxUsers} usuarios)`}
+                  subtitle="Actualizá tu plan para sumar más usuarios a tu negocio."
+                />
+              </div>
+            )}
+
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
               {/* Formulario */}
@@ -832,8 +863,8 @@ export default function SettingsPage() {
                 <p className="text-xs text-[var(--text3)]">
                   Los administradores y dueños pueden crear cajeros, repositores y vendedores.
                 </p>
-                <Button onClick={handleCreateUser} disabled={creating}>
-                  {creating ? 'Creando...' : 'Crear usuario'}
+                <Button onClick={handleCreateUser} disabled={creating || atUserLimit}>
+                  {creating ? 'Creando...' : atUserLimit ? 'Límite de usuarios alcanzado' : 'Crear usuario'}
                 </Button>
               </div>
 
@@ -842,7 +873,9 @@ export default function SettingsPage() {
                 <div className="flex items-center justify-between gap-3 mb-3">
                   <div>
                     <p className="text-sm font-medium text-[var(--text)]">Usuarios del negocio</p>
-                    <p className="text-xs text-[var(--text3)]">{users.length} registrados</p>
+                    <p className="text-xs text-[var(--text3)]">
+                      {users.length}{planLimits.maxUsers != null ? ` de ${planLimits.maxUsers}` : ''} registrados
+                    </p>
                   </div>
                   <Button variant="ghost" onClick={() => void loadUsers()} disabled={loadingUsers}>
                     {loadingUsers ? 'Cargando...' : 'Actualizar'}

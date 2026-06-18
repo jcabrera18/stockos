@@ -113,6 +113,8 @@ export function PrintSettingsModal({ open, onClose }: { open: boolean; onClose: 
           <Printer size={15} className="text-[var(--accent)] mt-0.5 flex-shrink-0" />
           <p className="text-xs text-[var(--text3)]">
             Esta configuración se guarda en <strong>esta terminal</strong>. Cada caja puede tener su propia impresora.
+            Si el ticket sale chico o tenue, en el diálogo de impresión poné <strong>Escala 100%</strong> (no “Ajustar”)
+            y seleccioná el papel correcto del rollo.
           </p>
         </div>
         <PrintSettingsFields settings={settings} setSettings={setSettings} />

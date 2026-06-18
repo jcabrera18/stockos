@@ -11,6 +11,9 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { api } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
+import { useAuth } from '@/hooks/useAuth'
+import { getPlanLimits } from '@/lib/plans'
+import { PlanLimitBanner } from '@/components/modules/PlanLimitBanner'
 import { Building2, Plus, Pencil, Trash2, Star, CreditCard, TrendingUp } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -52,6 +55,7 @@ interface BranchStats {
 type Tab = 'branches' | 'stats'
 
 export default function BranchesPage() {
+  const { user } = useAuth()
   const [tab, setTab] = useState<Tab>('branches')
   const [branches, setBranches] = useState<Branch[]>([])
   const [stats, setStats] = useState<BranchStats[]>([])
@@ -98,8 +102,22 @@ export default function BranchesPage() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
+  // ── Límites por plan ──────────────────────────────────────
+  const planLimits      = getPlanLimits(user?.business?.subscription?.plan)
+  const totalRegisters  = branches.reduce((a, b) => a + b.registers.filter(r => r.is_active).length, 0)
+  const atBranchLimit   = planLimits.maxBranches  != null && branches.length  >= planLimits.maxBranches
+  const atRegisterLimit = planLimits.maxRegisters != null && totalRegisters   >= planLimits.maxRegisters
+
+  const limitParts: string[] = []
+  if (atBranchLimit)   limitParts.push(`${planLimits.maxBranches} sucursal${planLimits.maxBranches === 1 ? '' : 'es'}`)
+  if (atRegisterLimit) limitParts.push(`${planLimits.maxRegisters} caja${planLimits.maxRegisters === 1 ? '' : 's'}`)
+
   // ── Sucursales ────────────────────────────────────────────
   const openCreateBranch = () => {
+    if (atBranchLimit) {
+      toast.error(`Tu plan permite hasta ${planLimits.maxBranches} sucursal${planLimits.maxBranches === 1 ? '' : 'es'}. Actualizá tu plan para sumar más.`)
+      return
+    }
     setEditBranch(null)
     setBranchForm({ name: '', address: '', phone: '', is_main: false, warehouse_id: '' })
     setBranchModal(true)
@@ -152,6 +170,10 @@ export default function BranchesPage() {
 
   // ── Cajas ────────────────────────────────────────────────
   const openCreateRegister = (branch: Branch) => {
+    if (atRegisterLimit) {
+      toast.error(`Tu plan permite hasta ${planLimits.maxRegisters} caja${planLimits.maxRegisters === 1 ? '' : 's'}. Actualizá tu plan para sumar más.`)
+      return
+    }
     setRegisterBranch(branch)
     setEditRegister(null)
     setRegisterName('')
@@ -232,7 +254,11 @@ export default function BranchesPage() {
           <>
             {/* ── Tab: Sucursales ── */}
             {tab === 'branches' && (
-              branches.length === 0 ? (
+              <div className="space-y-4">
+              {limitParts.length > 0 && (
+                <PlanLimitBanner title={`Llegaste al límite de tu plan (${limitParts.join(' y ')})`} />
+              )}
+              {branches.length === 0 ? (
                 <EmptyState icon={Building2} title="Sin sucursales"
                   description="Creá tu primera sucursal para organizar tus cajas."
                   action={<Button onClick={openCreateBranch}><Plus size={15} /> Nueva sucursal</Button>}
@@ -314,7 +340,8 @@ export default function BranchesPage() {
                     </div>
                   ))}
                 </div>
-              )
+              )}
+              </div>
             )}
 
             {/* ── Tab: Resumen consolidado ── */}

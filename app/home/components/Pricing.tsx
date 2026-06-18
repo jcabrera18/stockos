@@ -8,47 +8,46 @@ const PLANS = [
     id: 'local',
     name: 'Local',
     subtitle: 'Para un local que arranca en serio',
-    price: 49990,
+    price: 25000,
     popular: false,
-    scale: '1 sucursal · 1 depósito · 1 caja',
-    perks: ['1 sucursal · 1 depósito · 1 caja', 'Usuarios y roles ilimitados', 'Soporte por WhatsApp'],
+    perks: ['1 sucursal', '1 depósito', '1 caja', 'Hasta 2 usuarios'],
     cta: { label: 'Probar gratis 30 días', href: '/register', primary: false },
   },
   {
     id: 'negocio',
     name: 'Negocio',
     subtitle: 'Para el negocio que ya vende fuerte',
-    price: 109990,
+    price: 50000,
     popular: true,
-    scale: '1 sucursal · cajas ilimitadas',
-    perks: ['1 sucursal · 1 depósito · cajas ilimitadas', 'Usuarios y roles ilimitados', 'Soporte prioritario'],
+    perks: ['1 sucursal', '1 depósito', 'Hasta 3 cajas', 'Hasta 10 usuarios'],
     cta: { label: 'Probar gratis 30 días', href: '/register', primary: true },
   },
   {
-    id: 'cadena',
-    name: 'Cadena',
-    subtitle: 'Para cadenas y franquicias',
-    price: 189990,
+    id: 'empresa',
+    name: 'Empresa',
+    subtitle: 'Para negocios con varias sucursales',
+    price: 100000,
     popular: false,
-    scale: 'Sucursales y depósitos ilimitados',
-    perks: ['Sucursales, depósitos y cajas ilimitados', 'Transferencias entre depósitos', 'Soporte dedicado'],
+    perks: ['Sucursales ilimitadas', 'Depósitos ilimitados', 'Cajas ilimitadas', 'Usuarios ilimitados', 'Soporte dedicado'],
     cta: { label: 'Hablar con ventas', href: 'https://wa.me/5493438558913', primary: false },
   },
 ]
 
 // Lo que viene en TODOS los planes — el diferencial es la escala, no las funciones.
 const INCLUDED = [
-  'POS completo con múltiples barcodes',
-  'Facturación ARCA A/B/C/X + NC/ND',
-  'Listas de precio y promociones',
-  'Gestión de compras y pedidos',
-  'Cuenta corriente de clientes',
-  'Stock con alertas de quiebre',
-  'Ventas, productos y facturas ilimitados',
-  'Migración asistida desde tu Excel',
+  'POS completo',
+  'Facturación ARCA',
+  'Compras y proveedores',
+  'Cuenta corriente',
+  'Etiquetas de precio',
+  'Promociones',
+  'Reportes',
+  'Migración desde Excel',
 ]
 
-const ANNUAL_DISCOUNT = 0.80
+// Anual: 2 meses gratis → pagás 10 de 12 meses
+const MONTHS_FREE = 2
+const PAID_MONTHS = 12 - MONTHS_FREE
 
 function formatPrice(n: number) {
   return n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })
@@ -56,7 +55,7 @@ function formatPrice(n: number) {
 
 export function Pricing() {
   const ref = useRef<HTMLElement>(null)
-  const [annual, setAnnual] = useState(false)
+  const [annual, setAnnual] = useState(true)
 
   useEffect(() => {
     const el = ref.current
@@ -87,9 +86,12 @@ export function Pricing() {
             <br />
             Pagás solo por cuánto crecés
           </h2>
+          <p className="text-lg sm:text-xl font-semibold text-gray-900 mt-5">
+            Sin cobrar por venta. <span className="text-[#16a34a]">Sin comisiones.</span> Sin sorpresas.
+          </p>
           <p className="text-gray-500 text-[17px] mt-4 max-w-xl mx-auto leading-relaxed">
-            Sin módulos premium ni letras chicas. Lo único que cambia entre planes es
-            cuántas <span className="text-gray-700 font-medium">sucursales, cajas y depósitos</span> podés tener.
+            Otros sistemas te cobran por factura, por venta o por usuario. Acá no: un precio fijo por mes
+            y lo único que cambia entre planes es cuántas <span className="text-gray-700 font-medium">sucursales, cajas y depósitos</span> podés tener.
           </p>
         </div>
 
@@ -144,7 +146,7 @@ export function Pricing() {
             >
               Anual
               <span className="text-[11px] font-semibold text-[#16a34a] bg-green-100 px-1.5 py-0.5 rounded-full">
-                −20%
+                2 meses gratis
               </span>
             </button>
           </div>
@@ -153,7 +155,8 @@ export function Pricing() {
         {/* Plans */}
         <div className="grid md:grid-cols-3 gap-4 items-stretch">
           {PLANS.map((plan, i) => {
-            const displayPrice = annual ? Math.round(plan.price * ANNUAL_DISCOUNT) : plan.price
+            const annualTotal = plan.price * PAID_MONTHS
+            const displayPrice = annual ? Math.round(annualTotal / 12) : plan.price
             const perDay = Math.round(displayPrice / 30)
             return (
               <div
@@ -192,7 +195,7 @@ export function Pricing() {
                     </div>
                     <p className="text-gray-400 text-xs mt-1.5">
                       ≈ ${formatPrice(perDay)} por día
-                      {annual && ` · $${formatPrice(displayPrice * 12)}/año`}
+                      {annual && ` · $${formatPrice(annualTotal)}/año`}
                     </p>
                     {/* Launch price tag */}
                     <span className="inline-flex items-center gap-1.5 mt-3 px-2.5 py-1 rounded-full bg-green-50 border border-green-200 text-[#16a34a] text-[11px] font-medium">
@@ -201,16 +204,13 @@ export function Pricing() {
                     </span>
                   </div>
 
-                  {/* Scale highlight */}
-                  <p className="text-[12px] text-gray-500 font-medium mt-4 mb-6 pb-6 border-b border-gray-100">
-                    {plan.scale}
-                  </p>
+                  <div className="mt-4 mb-6 pb-6 border-b border-gray-100" />
 
                   {/* CTA */}
                   <Link
                     href={plan.cta.href}
-                    target={plan.id === 'cadena' ? '_blank' : undefined}
-                    rel={plan.id === 'cadena' ? 'noopener noreferrer' : undefined}
+                    target={plan.id === 'empresa' ? '_blank' : undefined}
+                    rel={plan.id === 'empresa' ? 'noopener noreferrer' : undefined}
                     className={`w-full flex items-center justify-center py-3 rounded-xl text-sm font-semibold transition-all duration-200 mb-6 active:scale-[0.98] ${
                       plan.cta.primary
                         ? 'bg-[#16a34a] hover:bg-[#15803d] text-white hover:shadow-[0_4px_16px_rgba(22,163,74,0.4)]'
@@ -222,7 +222,7 @@ export function Pricing() {
 
                   {/* Plan-specific perks */}
                   <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-gray-400 mb-3">
-                    Este plan suma
+                    Capacidad del plan
                   </p>
                   <ul className="space-y-2.5 mb-5">
                     {plan.perks.map((p) => (
@@ -241,6 +241,11 @@ export function Pricing() {
             )
           })}
         </div>
+
+        {/* Upgrade reassurance */}
+        <p className="text-center text-gray-500 text-sm mt-8 section-fade" style={{ transitionDelay: '240ms' }}>
+          Empezá por donde estás hoy. <span className="text-gray-900 font-medium">A medida que crecés, cambiás de plan en un clic</span> — sin migraciones ni perder tus datos.
+        </p>
 
         {/* Everything included strip */}
         <div className="mt-6 rounded-2xl border border-gray-200 bg-white p-7 sm:p-8 section-fade" style={{ transitionDelay: '260ms' }}>

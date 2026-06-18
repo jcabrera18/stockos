@@ -14,6 +14,9 @@ import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
 import { TransferModal } from '@/components/modules/TransferModal'
 import { api } from '@/lib/api'
 import { formatCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
+import { useAuth } from '@/hooks/useAuth'
+import { getPlanLimits } from '@/lib/plans'
+import { PlanLimitBanner } from '@/components/modules/PlanLimitBanner'
 import type { PaginatedResponse, Pagination as PaginationType, Category } from '@/types'
 import {
   Plus, Warehouse, Pencil, Trash2, Star, Search, ArrowLeftRight,
@@ -75,6 +78,7 @@ function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortFi
 const emptyForm = { name: '', address: '', is_default: false }
 
 export default function WarehousesPage() {
+  const { user } = useAuth()
   const [tab, setTab] = useState<Tab>('warehouses')
   const [warehouses, setWarehouses] = useState<WarehouseItem[]>([])
   const [selectedWarehouse, setSelectedWarehouse] = useState<WarehouseItem | null>(null)
@@ -296,7 +300,14 @@ export default function WarehousesPage() {
     if (tab === 'transfers') fetchTransfers()
   }, [tab, fetchTransfers])
 
+  const planLimits        = getPlanLimits(user?.business?.subscription?.plan)
+  const atWarehouseLimit  = planLimits.maxWarehouses != null && warehouses.length >= planLimits.maxWarehouses
+
   const openCreate = () => {
+    if (atWarehouseLimit) {
+      toast.error(`Tu plan permite hasta ${planLimits.maxWarehouses} depósito${planLimits.maxWarehouses === 1 ? '' : 's'}. Actualizá tu plan para sumar más.`)
+      return
+    }
     setEditWarehouse(null)
     setForm(emptyForm)
     setWarehouseModal(true)
@@ -395,7 +406,12 @@ export default function WarehousesPage() {
 
         {/* ── Tab: Depósitos ── */}
         {tab === 'warehouses' && (
-          loading ? <PageLoader /> : warehouses.length === 0 ? (
+          loading ? <PageLoader /> : (
+            <div className="space-y-4">
+            {atWarehouseLimit && (
+              <PlanLimitBanner title={`Llegaste al límite de tu plan (${planLimits.maxWarehouses} depósito${planLimits.maxWarehouses === 1 ? '' : 's'})`} />
+            )}
+            {warehouses.length === 0 ? (
             <EmptyState icon={Warehouse} title="Sin depósitos"
               description="Creá tu primer depósito para gestionar el stock por ubicación."
               action={<Button onClick={openCreate}><Plus size={15} /> Nuevo depósito</Button>}
@@ -435,6 +451,8 @@ export default function WarehousesPage() {
                   </button>
                 </div>
               ))}
+            </div>
+          )}
             </div>
           )
         )}
