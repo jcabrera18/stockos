@@ -42,7 +42,7 @@ export function BottomNav() {
         { href: '/accounts', label: 'Cuentas ctes.', icon: Wallet, roles: ['owner', 'admin', 'cashier'] },
         { href: '/purchases', label: 'Compras', icon: Truck, roles: ['owner', 'admin', 'stocker'] },
         { href: '/warehouses', label: 'Depósitos', icon: Warehouse, roles: ['owner', 'admin', 'stocker'] },
-        { href: '/pos', label: 'POS', icon: Zap, roles: ['owner', 'admin', 'cashier'] },
+        { href: '/pos', label: 'Cobrar', icon: Zap, roles: ['owner', 'admin', 'cashier'] },
       ]
     },
     {

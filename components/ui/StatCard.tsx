@@ -11,14 +11,16 @@ interface StatCardProps {
   trend?:     { value: number; label: string }
   delta?:     { value: number; label: string }  // comparativo con flecha
   accent?:    boolean
+  danger?:    boolean
   className?: string
 }
 
-export function StatCard({ title, value, valueTitle, subtitle, icon: Icon, trend, delta, accent, className }: StatCardProps) {
+export function StatCard({ title, value, valueTitle, subtitle, icon: Icon, trend, delta, accent, danger, className }: StatCardProps) {
   return (
     <div className={cn(
       'bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4',
       accent && 'border-[var(--accent)] bg-[var(--accent-subtle)]',
+      danger && 'border-[var(--danger)] bg-[var(--danger-subtle)]',
       className
     )}>
       <div className="flex items-start justify-between gap-3">
@@ -28,7 +30,7 @@ export function StatCard({ title, value, valueTitle, subtitle, icon: Icon, trend
             title={valueTitle}
             className={cn(
               'text-2xl font-semibold mono tabular-nums truncate',
-              accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'
+              danger ? 'text-[var(--danger)]' : accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'
             )}
           >
             {value}

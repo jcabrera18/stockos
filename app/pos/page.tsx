@@ -35,6 +35,11 @@ import {
 } from '@/lib/pos-cache'
 import { queueSale, syncPendingSales, getPendingSalesCount, isNetworkError } from '@/lib/sales-queue'
 
+// Mínimo de caracteres para disparar búsqueda de texto (no aplica a códigos de barra)
+const MIN_SEARCH_LEN = 3
+// Tope de resultados mostrados en la búsqueda del POS
+const SEARCH_RESULT_LIMIT = 8
+
 interface CartItem {
   product: Product
   quantity: number
@@ -143,6 +148,7 @@ export default function POSPage() {
     setFocusedCartIndexState(next)
   }, [])
   const cartItemRefs = useRef<(HTMLDivElement | null)[]>([])
+  const resultItemRefs = useRef<(HTMLButtonElement | null)[]>([])
 
   const [step, setStep] = useState<'cart' | 'ticket'>('cart')
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
@@ -272,6 +278,13 @@ export default function POSPage() {
       cartItemRefs.current[focusedCartIndex]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     }
   }, [focusedCartIndex])
+
+  // Auto-scroll highlighted search result into view (al navegar con flechas)
+  useEffect(() => {
+    if (activeResultIndex >= 0) {
+      resultItemRefs.current[activeResultIndex]?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [activeResultIndex])
 
   // Auto-focus price input on custom price products
   useEffect(() => {
@@ -519,11 +532,17 @@ export default function POSPage() {
 
   // Search / barcode logic
   useEffect(() => {
-    if (!query.trim()) { setResults([]); return }
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-
     const trimmed   = query.trim()
+    if (!trimmed) { setResults([]); setActiveResultIndex(-1); return }
+
     const isBarcode = /^\d{8,14}$/.test(trimmed)
+    // Búsqueda de texto: exigir mínimo 3 caracteres. Con 1-2 letras el catálogo
+    // devuelve demasiadas coincidencias y el producto buscado nunca aparece por
+    // el límite de resultados. Los códigos de barra (isBarcode) no se ven
+    // afectados: se resuelven al instante sin importar la longitud.
+    if (!isBarcode && trimmed.length < MIN_SEARCH_LEN) { setResults([]); setActiveResultIndex(-1); return }
+
+    if (debounceRef.current) clearTimeout(debounceRef.current)
 
     debounceRef.current = setTimeout(async () => {
       if (isBarcode) {
@@ -679,7 +698,7 @@ export default function POSPage() {
 
       const currentWarehouse = selectedWarehouseRef.current
       if (!currentWarehouse || !stockEnabledRef.current) {
-        const localResults = await searchProductsLocal(trimmed)
+        const localResults = await searchProductsLocal(trimmed, SEARCH_RESULT_LIMIT)
         if (localResults.length > 0) {
           setResults(localResults)
           setActiveResultIndex(0)
@@ -689,7 +708,7 @@ export default function POSPage() {
       setSearching(true)
       try {
         const res = await api.get<{ data: Product[] }>('/api/products', {
-          search: trimmed, limit: 8,
+          search: trimmed, limit: SEARCH_RESULT_LIMIT,
           ...(currentWarehouse?.id && stockEnabledRef.current ? { warehouse_id: currentWarehouse.id } : {}),
         })
         setResults(res.data)
@@ -976,8 +995,15 @@ export default function POSPage() {
   }, [splitMode, applied])
 
   // Al abrir el modal arrancamos siempre en modo simple (un solo medio).
+  // Movemos el foco al monto para que el buscador de productos detrás no
+  // intercepte el Enter (si el search retiene el foco, el Enter cae en su
+  // onKeyDown en vez de confirmar la venta).
   useEffect(() => {
-    if (paymentModalOpen) setSplitMode(false)
+    if (paymentModalOpen) {
+      setSplitMode(false)
+      searchRef.current?.blur()
+      setTimeout(() => draftAmountRef.current?.focus(), 50)
+    }
   }, [paymentModalOpen])
 
   // En modo simple el monto siempre es el saldo pendiente (paga todo con un medio).
@@ -1499,9 +1525,14 @@ export default function POSPage() {
                           .catch(() => { pendingBarcodesRef.current.delete(trimmedQ); setCart(prev => prev.map(i => i.product.id === tempIdEnter ? { ...i, status: 'error' } : i)) })
                         return
                       }
+                      // Texto: exigir mínimo de caracteres también al presionar Enter
+                      if (trimmedQ.length < MIN_SEARCH_LEN) {
+                        toast.error(`Escribí al menos ${MIN_SEARCH_LEN} caracteres para buscar`)
+                        return
+                      }
                       const currentWarehouseEnter = selectedWarehouseRef.current
                       if (!currentWarehouseEnter || !stockEnabledRef.current) {
-                        const localSearchResults = await searchProductsLocal(trimmedQ)
+                        const localSearchResults = await searchProductsLocal(trimmedQ, SEARCH_RESULT_LIMIT)
                         if (localSearchResults.length > 0) {
                           setResults(localSearchResults)
                           if (localSearchResults.length === 1) addToCart(localSearchResults[0], pendingQtyRef.current)
@@ -1510,7 +1541,7 @@ export default function POSPage() {
                       }
                       setSearching(true)
                       try {
-                        const res = await api.get<{ data: Product[] }>('/api/products', { search: trimmedQ, limit: 8, ...(currentWarehouseEnter?.id && stockEnabledRef.current ? { warehouse_id: currentWarehouseEnter.id } : {}) })
+                        const res = await api.get<{ data: Product[] }>('/api/products', { search: trimmedQ, limit: SEARCH_RESULT_LIMIT, ...(currentWarehouseEnter?.id && stockEnabledRef.current ? { warehouse_id: currentWarehouseEnter.id } : {}) })
                         setResults(res.data)
                         if (res.data.length === 1) addToCart(res.data[0], pendingQtyRef.current)
                       } catch { setResults([]) } finally { setSearching(false) }
@@ -1546,6 +1577,7 @@ export default function POSPage() {
             <div className="space-y-1">
               {results.map((product, index) => (
                 <button key={product.id}
+                  ref={el => { resultItemRefs.current[index] = el }}
                   onClick={() => { addToCart(product, pendingQtyRef.current); setActiveResultIndex(-1) }}
                   disabled={stockEnabled && product.price_mode !== 'custom' && product.stock_current <= 0}
                   className={`w-full flex items-center justify-between px-4 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group ${index === activeResultIndex ? 'ring-2 ring-[var(--accent)] border-[var(--accent)]' : 'border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]'}`}>
@@ -1562,6 +1594,16 @@ export default function POSPage() {
                   </div>
                 </button>
               ))}
+              {results.length >= SEARCH_RESULT_LIMIT && (
+                <p className="pt-2 pb-1 text-center text-xs text-[var(--text3)]">
+                  Mostrando los primeros {SEARCH_RESULT_LIMIT} — escribí más para afinar la búsqueda
+                </p>
+              )}
+            </div>
+          ) : query.trim() && query.trim().length < MIN_SEARCH_LEN && !/^\d{8,14}$/.test(query.trim()) ? (
+            <div className="flex flex-col items-center justify-center h-40 text-[var(--text3)]">
+              <Search size={28} className="mb-2 opacity-40" />
+              <p className="text-sm">Seguí escribiendo… (mín. {MIN_SEARCH_LEN} letras)</p>
             </div>
           ) : query && !searching ? (
             <div className="flex flex-col items-center justify-center h-40 text-[var(--text3)]">
@@ -1749,7 +1791,7 @@ export default function POSPage() {
 
                   {/* Remove */}
                   <button
-                    onClick={e => { e.stopPropagation(); removeItem(item.product.id) }}
+                    onClick={e => { e.stopPropagation(); removeItem(item.product.id); setFocusedCartIndex(-1); setTimeout(() => searchRef.current?.focus(), 50) }}
                     className="w-7 h-7 flex items-center justify-center flex-shrink-0 text-[var(--text3)] hover:text-[var(--danger)] transition-colors opacity-0 group-hover:opacity-100"
                   >
                     <X size={13} />

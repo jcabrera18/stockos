@@ -10,10 +10,12 @@ import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { Pagination } from '@/components/ui/Pagination'
+import { StatCard } from '@/components/ui/StatCard'
+import { PaymentMixBar } from '@/components/ui/PaymentMixBar'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import type { Pagination as PaginationType } from '@/types'
-import { DollarSign, CheckCircle, Clock, TrendingUp, TrendingDown, Minus, RefreshCw } from 'lucide-react'
+import { DollarSign, CheckCircle, Clock, TrendingUp, TrendingDown, Minus, RefreshCw, ShoppingCart, Receipt, Scale, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
 import { useWorkstation } from '@/hooks/useWorkstation'
 import { useAuth } from '@/hooks/useAuth'
@@ -41,6 +43,7 @@ interface CashRegister {
   system_cc_collected?: number
   system_cash_out?: number
   system_total: number
+  system_sales_count?: number
   difference?: number
   opened_at: string
   closed_at?: string
@@ -48,6 +51,17 @@ interface CashRegister {
   closer?: { full_name: string }
   branches?: { name: string }
   registers?: { name: string }
+}
+
+interface ClosingStats {
+  count: number
+  with_difference_count: number
+  avg_difference_when_off: number
+  shortage_count: number
+  surplus_count: number
+  avg_abs_difference: number
+  avg_signed_difference: number
+  ok_rate: number
 }
 
 const RESTRICTED_ROLES = ['cashier', 'stocker', 'seller']
@@ -58,6 +72,7 @@ export default function CashRegisterPage() {
   const isRestrictedRef = useRef(false)
 
   const [openRegisters, setOpenRegisters] = useState<CashRegister[]>([])
+  const [closingStats, setClosingStats] = useState<ClosingStats | null>(null)
   const [history, setHistory] = useState<CashRegister[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
   const [page, setPage] = useState(1)
@@ -113,6 +128,24 @@ export default function CashRegisterPage() {
     }
   }, [workstation])
 
+  // Comercios chicos: si hay una sola sucursal/caja, seleccionarla por defecto
+  useEffect(() => {
+    if (RESTRICTED_ROLES.includes(user?.role ?? '')) return
+    if (!openBranchId && branches.length === 1) {
+      setOpenBranchId(branches[0].id)
+    }
+  }, [user, branches, openBranchId])
+
+  useEffect(() => {
+    if (RESTRICTED_ROLES.includes(user?.role ?? '')) return
+    if (!openBranchId || openRegisterId) return
+    const openIds = new Set(openRegisters.map(r => r.register_id))
+    const candidates = registers.filter(r => r.branch_id === openBranchId && !openIds.has(r.id))
+    if (candidates.length === 1) {
+      setOpenRegisterId(candidates[0].id)
+    }
+  }, [user, registers, openRegisters, openBranchId, openRegisterId])
+
   const pageRef = useRef(page)
   const registerIdRef = useRef(workstation?.register_id)
   useEffect(() => { registerIdRef.current = workstation?.register_id }, [workstation?.register_id])
@@ -129,14 +162,16 @@ export default function CashRegisterPage() {
         ? { register_id: registerIdRef.current }
         : {}
 
-      const [hist, br, regs, opens] = await Promise.all([
+      const [hist, br, regs, opens, stats] = await Promise.all([
         api.get<{ data: CashRegister[]; pagination: PaginationType }>('/api/cash-register', cashParams),
         api.get<Branch[]>('/api/branches'),
         api.get<Register[]>('/api/branches/all-registers'),
         api.get<CashRegister[]>('/api/cash-register/open', openParams),
+        api.get<ClosingStats>('/api/cash-register/closing-stats', openParams),
       ])
 
       setOpenRegisters(opens)
+      setClosingStats(stats)
       setHistory(hist.data)
       setPagination(hist.pagination)
       setBranches(br)
@@ -256,6 +291,26 @@ export default function CashRegisterPage() {
     Number(r.opening_amount) + r.system_efectivo
       + (r.system_cash_in ?? 0) + (r.system_cc_collected ?? 0) - (r.system_cash_out ?? 0)
 
+  // Resumen del turno: consolida las cajas abiertas visibles (1 para cajero, varias para owner)
+  const summary = openRegisters.reduce(
+    (acc, r) => {
+      acc.total += r.system_total
+      acc.count += r.system_sales_count ?? 0
+      acc.mix.efectivo += r.system_efectivo
+      acc.mix.debito += r.system_debito
+      acc.mix.credito += r.system_credito
+      acc.mix.transferencia += r.system_transferencia
+      acc.mix.qr += r.system_qr
+      acc.mix.cuenta_corriente += r.system_cuenta_corriente ?? 0
+      return acc
+    },
+    {
+      total: 0, count: 0,
+      mix: { efectivo: 0, debito: 0, credito: 0, transferencia: 0, qr: 0, cuenta_corriente: 0 },
+    }
+  )
+  const avgTicket = summary.count > 0 ? summary.total / summary.count : 0
+
   const diffColor = (diff?: number) => {
     if (diff === undefined || diff === null) return 'text-[var(--text3)]'
     if (Math.abs(diff) < 1) return 'text-[var(--accent)]'
@@ -298,7 +353,63 @@ export default function CashRegisterPage() {
           <>
             {/* ── Cajas abiertas ── */}
             {openRegisters.length > 0 ? (
-              <div>
+              <div className="space-y-5">
+                {/* Resumen del turno */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                  <StatCard
+                    title="Ventas del turno"
+                    value={summary.count}
+                    icon={ShoppingCart}
+                    subtitle={openRegisters.length > 1 ? `${openRegisters.length} cajas abiertas` : undefined}
+                  />
+                  <StatCard
+                    title="Ticket promedio"
+                    value={formatCurrency(avgTicket)}
+                    valueTitle={formatCurrency(avgTicket)}
+                    icon={Receipt}
+                  />
+                  <StatCard
+                    title="Total vendido"
+                    value={formatCurrency(summary.total)}
+                    valueTitle={formatCurrency(summary.total)}
+                    icon={DollarSign}
+                  />
+                  {(() => {
+                    const c = closingStats
+                    const hasData = !!c && c.count > 0
+                    const withDiff = c?.with_difference_count ?? 0
+                    const avgWhenOff = c?.avg_difference_when_off ?? 0
+                    const shortages = c?.shortage_count ?? 0
+                    // Verde si todos cuadraron; rojo solo si hay FALTANTES relevantes
+                    // (un sobrante es descuadre pero no pérdida → neutro). Neutro en el medio.
+                    const isGood = hasData && withDiff === 0
+                    const isBad = hasData && shortages > 0 && avgWhenOff >= 200
+                    const subtitle = !hasData
+                      ? 'Sin cierres aún'
+                      : withDiff === 0
+                        ? 'Todos cuadraron'
+                        : shortages > 0
+                          ? `Promedio: ${formatCurrency(avgWhenOff)} · ${shortages} faltante${shortages === 1 ? '' : 's'}`
+                          : `Promedio: ${formatCurrency(avgWhenOff)} · solo sobrantes`
+                    return (
+                      <StatCard
+                        title="Cierres con diferencia (30d)"
+                        value={hasData ? `${withDiff} de ${c!.count}` : '—'}
+                        icon={isBad ? AlertTriangle : isGood ? CheckCircle : Scale}
+                        accent={isGood}
+                        danger={isBad}
+                        subtitle={subtitle}
+                      />
+                    )
+                  })()}
+                </div>
+
+                {/* Composición por medio de pago */}
+                <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4">
+                  <p className="text-xs font-medium text-[var(--text3)] mb-3">Composición por medio de pago</p>
+                  <PaymentMixBar mix={summary.mix} />
+                </div>
+
                 {/* Para owner/admin: cards de todas las cajas abiertas */}
                 {!isRestrictedRef.current && openRegisters.length > 1 ? (
                   <div>

@@ -53,7 +53,7 @@ export function Sidebar() {
   const ALL_NAV_ITEMS = [
     // ── Operación diaria ──
     { href: '/dashboard', label: 'Inicio', icon: LayoutDashboard, roles: ['owner', 'admin'], tip: 'Resumen y métricas del negocio' },
-    { href: '/pos', label: 'POS', icon: Zap, roles: ['owner', 'admin', 'cashier'], tip: 'Cobrar y vender en el mostrador' },
+    { href: '/pos', label: 'Cobrar', icon: Zap, roles: ['owner', 'admin', 'cashier'], tip: 'Cobrar y vender en el mostrador' },
     { href: '/cash-register', label: 'Caja', icon: CreditCard, roles: ['owner', 'admin', 'cashier'], tip: 'Apertura y cierre de caja' },
     { href: '/sales', label: 'Ventas', icon: ShoppingCart, roles: ['owner', 'admin', 'cashier'], tip: 'Historial de ventas' },
     { href: '/invoices', label: 'Comprobantes', icon: Receipt, roles: ['owner', 'admin', 'cashier'], tip: 'Facturas y tickets AFIP' },

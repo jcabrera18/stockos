@@ -176,7 +176,7 @@ export async function resolveBarcode(
 export async function searchProductsLocal(query: string, limit = 8): Promise<Product[]> {
   try {
     const q = query.toLowerCase()
-    return posDB.products
+    const matches = await posDB.products
       .filter(
         p =>
           p.is_active !== false &&
@@ -184,8 +184,17 @@ export async function searchProductsLocal(query: string, limit = 8): Promise<Pro
             (p.barcode ?? '').includes(q) ||
             (p.sku ?? '').toLowerCase().includes(q)),
       )
-      .limit(limit)
       .toArray()
+    // Relevancia: primero los productos cuyo nombre EMPIEZA con la query
+    // (lo más probable que el usuario busca), luego orden alfabético. Sin esto,
+    // con pocas letras el producto deseado podía quedar fuera del límite.
+    matches.sort((a, b) => {
+      const aStarts = a.name.toLowerCase().startsWith(q) ? 0 : 1
+      const bStarts = b.name.toLowerCase().startsWith(q) ? 0 : 1
+      if (aStarts !== bStarts) return aStarts - bStarts
+      return a.name.localeCompare(b.name)
+    })
+    return matches.slice(0, limit)
   } catch {
     return []
   }

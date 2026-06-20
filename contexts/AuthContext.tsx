@@ -90,8 +90,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // de la pestaña. Sin throttle, eso re-pedía /api/auth/me en cada alt-tab.
     const PROFILE_RELOAD_THROTTLE_MS = 60 * 1000
     let lastProfileLoadAt = Date.now()
+    let cancelled = false
 
-    loadProfile()
+    // Hidratación optimista: si hay un perfil cacheado del MISMO usuario de la
+    // sesión activa, lo mostramos al instante y revalidamos /api/auth/me en
+    // background. Evita la pantalla en blanco del AppShell tras el login y en
+    // cada recarga mientras el backend (Railway) hace cold start. Verificamos
+    // contra getSession() para nunca mostrar el perfil de un usuario previo.
+    ;(async () => {
+      const cached = readCachedProfile()
+      if (cached) {
+        try {
+          const { data } = await supabase.auth.getSession()
+          if (!cancelled && data.session?.user?.id === cached.id) {
+            hasProfileRef.current = true
+            setUser(cached)
+            setLoading(false)
+          }
+        } catch { /* sin sesión accesible: la carga normal decide */ }
+      }
+      if (!cancelled) loadProfile()
+    })()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
@@ -109,7 +128,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     })
 
-    return () => subscription.unsubscribe()
+    return () => { cancelled = true; subscription.unsubscribe() }
   }, [loadProfile])
 
   const signOut = async () => {

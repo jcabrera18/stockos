@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import JsBarcode from 'jsbarcode'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
@@ -79,33 +79,96 @@ function calcSaving(mainPrice: number, tierPrice: number): { pct: number; amount
 
 // ─── Barcode helpers ──────────────────────────────────────────────────────────
 
-const BARCODE_OPTS = {
-  format: 'CODE128' as const,
-  displayValue: false,
-  margin: 10, // quiet zone a izquierda/derecha
-  width: 2,
-  height: 50,
-  background: 'transparent',
-  lineColor: '#111',
+const MM_TO_PX = 96 / 25.4         // ≈ 3.78 px por mm @96dpi
+const NOMINAL_MODULE_MM = 0.33     // X-dimension ideal (100% de magnificación)
+const MIN_MODULE_MM = 0.25         // X-dimension mínima aceptable (~75%, tolerable en lectores de retail)
+const QUIET_MODULES = 10           // zona muda por lado, en módulos (escala con la X-dimension)
+
+const PAGE_USABLE_MM = 190         // A4 210mm − 2×10mm de margen
+const COL_GAP_MM = 3               // separación entre columnas
+const LBARCODE_PAD_MM = 2          // padding horizontal de .lbarcode por lado
+
+/** Ancho útil para el barcode dentro de una etiqueta, según nº de columnas. */
+function barcodeMaxWidthMm(columns: number): number {
+  const colMm = (PAGE_USABLE_MM - (columns - 1) * COL_GAP_MM) / columns
+  return colMm - LBARCODE_PAD_MM * 2
 }
 
-function generateBarcodeSVG(code: string): string {
+// Validación de checksum: solo usamos EAN/UPC (más compactos y estándar de
+// retail) cuando el dígito verificador es correcto; si no, cae a CODE128.
+function ean13Ok(code: string): boolean {
+  if (!/^\d{13}$/.test(code)) return false
+  const d = code.split('').map(Number)
+  let sum = 0
+  for (let i = 0; i < 12; i++) sum += d[i] * (i % 2 === 0 ? 1 : 3)
+  return (10 - (sum % 10)) % 10 === d[12]
+}
+
+function upcOk(code: string): boolean {
+  if (!/^\d{12}$/.test(code)) return false
+  const d = code.split('').map(Number)
+  let sum = 0
+  for (let i = 0; i < 11; i++) sum += d[i] * (i % 2 === 0 ? 3 : 1)
+  return (10 - (sum % 10)) % 10 === d[11]
+}
+
+function ean8Ok(code: string): boolean {
+  if (!/^\d{8}$/.test(code)) return false
+  const d = code.split('').map(Number)
+  let sum = 0
+  for (let i = 0; i < 7; i++) sum += d[i] * (i % 2 === 0 ? 3 : 1)
+  return (10 - (sum % 10)) % 10 === d[7]
+}
+
+function detectBarcodeFormat(code: string): string {
+  if (ean13Ok(code)) return 'EAN13'
+  if (upcOk(code)) return 'UPC'
+  if (ean8Ok(code)) return 'EAN8'
+  return 'CODE128'
+}
+
+/**
+ * Genera el barcode SIEMPRE como gráfico, eligiendo el módulo (X-dimension) más
+ * grande que entre en la columna: arranca en el nominal (0.33mm) y lo achica
+ * proporcionalmente hasta el mínimo (0.25mm) si hace falta. La zona muda escala
+ * con el módulo. `fits=false` solo significa que quedó por debajo del mínimo
+ * ideal (igual se imprime, escalado por CSS); el caller lo usa para avisar, no
+ * para reemplazarlo por el número.
+ */
+function generateBarcodeSVG(code: string, maxWidthMm: number): { svg: string; fits: boolean } {
   try {
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg') as SVGSVGElement
-    JsBarcode(svg, code, BARCODE_OPTS)
-    // Escalar a lo ancho del contenedor sin recortar las barras (los datos van
-    // a lo ancho). preserveAspectRatio=none estira parejo todos los módulos.
-    const w = svg.getAttribute('width')
-    const h = svg.getAttribute('height')
-    if (w && h) {
-      svg.setAttribute('viewBox', `0 0 ${parseFloat(w)} ${parseFloat(h)}`)
-      svg.setAttribute('preserveAspectRatio', 'none')
-      svg.setAttribute('width', '100%')
-      svg.setAttribute('height', '100%')
+    const format = detectBarcodeFormat(code)
+    const render = (moduleMm: number): SVGSVGElement => {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg') as SVGSVGElement
+      JsBarcode(svg, code, {
+        format,
+        displayValue: false,                         // sin dígitos: si no escanea, se busca por nombre
+        margin: QUIET_MODULES * moduleMm * MM_TO_PX, // quiet zone proporcional a la X-dimension
+        width: moduleMm * MM_TO_PX,                  // módulo (X-dimension)
+        height: 5.5 * MM_TO_PX,
+        background: 'transparent',
+        lineColor: '#000',                           // negro puro: máximo contraste
+      })
+      return svg
     }
-    return svg.outerHTML
+    // 1) medir al tamaño nominal
+    let svg = render(NOMINAL_MODULE_MM)
+    let wMm = parseFloat(svg.getAttribute('width') || '0') / MM_TO_PX
+    if (!wMm) return { svg: '', fits: false }
+    // 2) si no entra, achicar el módulo proporcionalmente sin bajar del mínimo
+    if (wMm > maxWidthMm) {
+      const target = Math.max(MIN_MODULE_MM, NOMINAL_MODULE_MM * (maxWidthMm / wMm))
+      svg = render(target)
+      wMm = parseFloat(svg.getAttribute('width') || '0') / MM_TO_PX
+    }
+    const hPx = parseFloat(svg.getAttribute('height') || '0')
+    // Tamaño físico real en mm; el CSS solo lo centra (max-width:100% lo encoge
+    // si aun así desbordara, garantizando que siempre se imprima).
+    svg.setAttribute('width', `${wMm.toFixed(2)}mm`)
+    svg.setAttribute('height', `${(hPx / MM_TO_PX).toFixed(2)}mm`)
+    return { svg: svg.outerHTML, fits: wMm <= maxWidthMm + 0.01 }
   } catch {
-    return ''
+    return { svg: '', fits: false }
   }
 }
 
@@ -129,13 +192,13 @@ const FALLBACK_LIST: PriceList = {
  * depende de si hay escalas y/o código de barras. Mantiene el preview alineado
  * con el PDF y aprovecha mejor la hoja en modo compacto.
  */
-function labelsPerPage(showTiers: boolean, showCode: boolean): number {
+function labelsPerPage(showTiers: boolean, showCode: boolean, columns: number): number {
   const usableMm = 277 // A4 297mm − 2×10mm de margen
   const gapMm = 3
   // alto aprox. de fila: con escalas ~42mm; compacto ~23/17mm según barcode
   const rowMm = showTiers ? 42 : (showCode ? 23 : 17)
   const rows = Math.max(1, Math.floor((usableMm + gapMm) / (rowMm + gapMm)))
-  return rows * 4
+  return rows * columns
 }
 
 function escapeHtml(s: string): string {
@@ -146,23 +209,23 @@ function escapeHtml(s: string): string {
 // ─── HTML + CSS compartidos entre preview y print (WYSIWYG) ────────────────────
 
 /** Reglas de la etiqueta. `scope` permite aislarlas dentro del preview. */
-function labelStyles(scope = ''): string {
+function labelStyles(scope = '', columns = 4): string {
   const s = scope ? scope + ' ' : ''
   return `
-    ${s}.grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:3mm; align-content:start; }
+    ${s}.grid { display:grid; grid-template-columns:repeat(${columns}, 1fr); gap:3mm; align-content:start; }
     ${s}.label { border:1px solid #d1d5db; border-radius:2mm; overflow:hidden; min-height:42mm; display:flex; flex-direction:column; background:#fff; page-break-inside:avoid; break-inside:avoid; }
     ${s}.label.empty { border-style:dashed; border-color:#e5e7eb; }
     ${s}.lname { font-size:8pt; font-weight:700; line-height:1.2; color:#111; padding:2.5mm 3mm 2mm; word-break:break-word; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
     ${s}.lmain { flex:1; display:flex; border-top:1px solid #e5e7eb; overflow:hidden; }
     ${s}.lmain-price { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:2mm 1.5mm; background:#f9fafb; overflow:hidden; }
-    ${s}.lbarcode { border-top:1px solid #e5e7eb; padding:1.3mm 3mm; display:flex; align-items:center; justify-content:center; background:#fff; }
-    ${s}.lbarcode svg { display:block; width:100%; height:6.5mm; }
+    ${s}.lbarcode { border-top:1px solid #e5e7eb; padding:1.3mm 2mm; display:flex; align-items:center; justify-content:center; background:#fff; }
+    ${s}.lbarcode svg { display:block; max-width:100%; height:auto; shape-rendering:crispEdges; }
+    ${s}.lbarcode-fallback { font-family:'Courier New',monospace; font-size:8pt; font-weight:700; letter-spacing:0.06em; color:#111; word-break:break-all; text-align:center; }
     /* Modo compacto: etiquetas sin escalas — sin "1 UNIDAD", más bajas */
     ${s}.label.compact { min-height:23mm; }
     ${s}.label.compact .lname { padding:2mm 3mm 1.5mm; }
     ${s}.label.compact .lmain-price { padding:1.2mm 1.5mm; }
-    ${s}.label.compact .lbarcode { padding:1mm 3mm; }
-    ${s}.label.compact .lbarcode svg { height:6mm; }
+    ${s}.label.compact .lbarcode { padding:1mm 2mm; }
     ${s}.lqty { font-size:5.5pt; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#9ca3af; margin-bottom:0.6mm; }
     ${s}.lprice { font-size:22pt; font-weight:900; color:#111; line-height:1; letter-spacing:-0.8pt; white-space:nowrap; font-variant-numeric:tabular-nums; max-width:100%; }
     ${s}.lmain-cu { font-size:5.5pt; font-weight:600; color:#9ca3af; margin-top:0.5mm; letter-spacing:0.04em; }
@@ -180,9 +243,8 @@ function labelStyles(scope = ''): string {
  * desbordar. Aprovecha todo el espacio (precios cortos quedan grandes) y se
  * achica solo lo necesario en precios largos.
  */
-function mainPriceFontPt(formatted: string): number {
+function mainPriceFontPt(formatted: string, usableMm: number): number {
   const n = formatted.length // incluye "$" y separadores de miles
-  const usableMm = 42 // el precio ocupa todo el ancho (el barcode va abajo)
   const charMm = 0.212 // ancho aprox. por carácter ≈ fontPt × 0.212mm (bold)
   const fit = usableMm / (n * charMm)
   return Math.max(11, Math.min(28, Math.floor(fit)))
@@ -195,7 +257,9 @@ function buildLabelHtml(
   otherLists: PriceList[],
   showCode: boolean,
   showTiers: boolean,
+  columns: number,
 ): string {
+  const colContentMm = barcodeMaxWidthMm(columns) // ancho útil de la columna
   const mainPrice = getListPrice(p, mainList)
   const mainPriceStr = formatPrice(mainPrice)
   const code = getProductCode(p)
@@ -212,13 +276,14 @@ function buildLabelHtml(
       }).join('')}</div>`
     : ''
 
-  const barcodeHtml = showCode && code
-    ? `<div class="lbarcode">${generateBarcodeSVG(code)}</div>`
-    : ''
+  const barcode = showCode && code ? generateBarcodeSVG(code, colContentMm) : null
+  // Solo el gráfico; nunca el número. Si la generación falla, no se muestra nada
+  // (la etiqueta ya trae el nombre para buscar el producto).
+  const barcodeHtml = barcode?.svg ? `<div class="lbarcode">${barcode.svg}</div>` : ''
 
   const qtyHtml = showQty ? `<p class="lqty">${qtyLabel(mainList.min_quantity)}</p>` : ''
 
-  return `<div class="label${compact ? ' compact' : ''}"><p class="lname">${escapeHtml(p.name)}</p><div class="lmain"><div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr)}pt">${mainPriceStr}</p>${mainList.min_quantity > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div></div>${tiersHtml}${barcodeHtml}</div>`
+  return `<div class="label${compact ? ' compact' : ''}"><p class="lname">${escapeHtml(p.name)}</p><div class="lmain"><div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr, colContentMm)}pt">${mainPriceStr}</p>${mainList.min_quantity > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div></div>${tiersHtml}${barcodeHtml}</div>`
 }
 
 const selectClass =
@@ -249,6 +314,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   const [showCode, setShowCode] = useState(false)
   const [showTiers, setShowTiers] = useState(false)
   const [copies, setCopies] = useState(1)
+  const [columns, setColumns] = useState(4)
 
   // Productos
   const [allProducts, setAllProducts] = useState<ProductRow[]>([])
@@ -268,7 +334,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     if (!open) {
       setStep('config')
       setMainListId(''); setCategoryId(''); setBrandId(''); setRecentHours('0')
-      setShowCode(false); setShowTiers(false); setCopies(1)
+      setShowCode(false); setShowTiers(false); setCopies(1); setColumns(4)
       setAllProducts([]); setSelected(new Set()); setSearchText('')
       setPreviewPage(1)
       return
@@ -355,17 +421,28 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   const selectedProducts = allProducts.filter(p => selected.has(p.id))
   const labelItems: ProductRow[] = selectedProducts.flatMap(p => Array(copies).fill(p))
 
+  // Códigos que quedan por debajo del módulo mínimo ideal: se imprimen igual
+  // (más chicos) y solo se avisa en la vista previa.
+  const unreadableLabels = useMemo(() => {
+    if (step !== 'preview' || !showCode) return []
+    const maxW = barcodeMaxWidthMm(columns)
+    return selectedProducts.filter(p => {
+      const code = getProductCode(p)
+      return !!code && !generateBarcodeSVG(code, maxW).fits
+    })
+  }, [step, showCode, columns, allProducts, selected])
+
   // Etiquetas por página según altura estimada de fila (4 columnas)
-  const perPage = labelsPerPage(showTiers, showCode)
+  const perPage = labelsPerPage(showTiers, showCode, columns)
   const totalPages = Math.max(1, Math.ceil(labelItems.length / perPage))
   const pageItems = labelItems.slice((previewPage - 1) * perPage, previewPage * perPage)
 
   // HTML del preview: mismas etiquetas y CSS que el print (WYSIWYG)
   const previewHtml = mainList
-    ? `<style>${labelStyles('.lbl-scope')}</style>` +
+    ? `<style>${labelStyles('.lbl-scope', columns)}</style>` +
       `<div class="lbl-scope" style="padding:10mm">` +
       `<div class="grid">` +
-        pageItems.map(p => buildLabelHtml(p, mainList, otherLists, showCode, showTiers)).join('') +
+        pageItems.map(p => buildLabelHtml(p, mainList, otherLists, showCode, showTiers, columns)).join('') +
         Array(perPage - pageItems.length).fill(`<div class="label empty${showTiers ? '' : ' compact'}"></div>`).join('') +
       `</div></div>`
     : ''
@@ -387,7 +464,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     if (!mainList) return
 
     const labelsHtml = labelItems
-      .map(p => buildLabelHtml(p, mainList, otherLists, showCode, showTiers))
+      .map(p => buildLabelHtml(p, mainList, otherLists, showCode, showTiers, columns))
       .join('')
 
     const win = window.open('', '_blank', 'width=900,height=1100')
@@ -402,7 +479,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     @page { size: A4 portrait; margin: 10mm; }
     body { font-family: 'Arial', Helvetica, sans-serif; background: white; color: #111; }
-    ${labelStyles('')}
+    ${labelStyles('', columns)}
     @media screen {
       body { background: #e5e7eb; padding: 20px; }
       .grid { max-width: 794px; margin: 0 auto; background: white; padding: 10mm; border-radius: 4px; }
@@ -512,6 +589,21 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
                 className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
               />
             </div>
+          </div>
+
+          {/* Columnas por hoja — más columnas = etiquetas más chicas */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-[var(--text2)]">Columnas por hoja</label>
+            <select value={columns} onChange={e => setColumns(Number(e.target.value))} className={selectClass}>
+              <option value={3}>3 columnas — etiquetas grandes</option>
+              <option value={4}>4 columnas — estándar</option>
+              <option value={5}>5 columnas — etiquetas chicas (más por hoja)</option>
+            </select>
+            {showCode && columns >= 5 && (
+              <p className="text-xs" style={{ color: '#b45309' }}>
+                A 5 columnas el código de barras se imprime más chico; con códigos largos (no EAN/UPC) puede requerir un buen escáner.
+              </p>
+            )}
           </div>
 
           {/* Opciones etiqueta */}
@@ -647,6 +739,15 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
               Pág. {previewPage}/{totalPages} · {labelItems.length} etiquetas
             </span>
           </div>
+
+          {unreadableLabels.length > 0 && (
+            <div
+              className="px-3 py-2 rounded-[var(--radius-md)] text-xs"
+              style={{ background: 'rgba(245,158,11,0.12)', color: '#b45309', border: '1px solid rgba(245,158,11,0.3)' }}
+            >
+              ⚠ {unreadableLabels.length} {unreadableLabels.length === 1 ? 'código queda' : 'códigos quedan'} por debajo del tamaño óptimo (se imprimen igual, pero más chicos). Si tu escáner los lee bien, ignorá este aviso; si no, usá menos columnas o códigos EAN-13.
+            </div>
+          )}
 
           {/* Página A4 — mismo HTML/CSS que el print, escalado para que entre */}
           <div

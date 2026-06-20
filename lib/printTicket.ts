@@ -345,6 +345,16 @@ export function printThermal(title: string, bodyHtml: string, settings?: PrintSe
     i < copies - 1 ? `${vwHtml}${pageBreak}` : vwHtml
   ).join('')
 
+  // El área IMPRIMIBLE de un rollo es menor que el ancho del papel: en 58mm el
+  // cabezal cubre ~48mm (~83%) y en 80mm ~72-76mm (~92%). Como las filas usan
+  // `justify-content:space-between`, los valores de la derecha (Total, fecha,
+  // #ticket) se anclan al borde del contenido; si el contenido llena casi todo
+  // el papel, esos valores caen en la zona muerta de la derecha y se cortan.
+  // Por eso el padding lateral es más grande en 58mm: encoge el contenido hacia
+  // adentro para que todo entre en la franja imprimible. (El fontScale no
+  // resolvía esto: space-between fija el borde derecho sin importar la fuente.)
+  const bodyPadding = widthMm === 58 ? '3vw 17vw 5vw 5vw' : '3vw 4vw 5vw'
+
   const win = window.open('', '_blank', 'width=350,height=800')
   if (!win) return
   win.document.write(`<!DOCTYPE html><html><head>
@@ -355,7 +365,7 @@ export function printThermal(title: string, bodyHtml: string, settings?: PrintSe
       html { background: #fff; }
       body {
         width: 100%;
-        padding: 3vw 4vw 5vw;
+        padding: ${bodyPadding};
         font-family: system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
         font-weight: 400; line-height: 1.5; color: #000;
         background: #fff;

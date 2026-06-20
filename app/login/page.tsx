@@ -335,9 +335,21 @@ export default function LoginPage() {
   const [confirmLoading, setConfirmLoading]   = useState(false)
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) router.replace('/dashboard')
+    // getSession() lee el JWT de localStorage (instantáneo) en vez de getUser(),
+    // que hace un round-trip de red a Supabase. Para este redirect de conveniencia
+    // alcanza, y le saca una llamada de red al arranque de la página.
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) router.replace('/dashboard')
     })
+  }, [])
+
+  // Pre-calienta el backend (Railway duerme el contenedor) mientras el usuario
+  // tipea sus credenciales, para que el /api/auth/me posterior no pague el cold
+  // start en serie. Fire-and-forget: cualquier respuesta —incluso un 404— ya
+  // despertó el contenedor, así que ignoramos el resultado.
+  useEffect(() => {
+    const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
+    fetch(`${API_URL}/health`, { method: 'GET', cache: 'no-store' }).catch(() => {})
   }, [])
 
   // Aviso al volver del registro: confirmá tu cuenta antes de entrar.
