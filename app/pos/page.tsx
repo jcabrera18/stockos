@@ -384,6 +384,10 @@ export default function POSPage() {
   const kbHandlerRef = useRef<((e: KeyboardEvent) => void) | null>(null)
   useEffect(() => {
     kbHandlerRef.current = (e: KeyboardEvent) => {
+      // Mientras el modal de ticket está abierto, POSTicket maneja el teclado
+      // (Enter = nueva venta). No procesar atajos del POS detrás del modal.
+      if (step === 'ticket') return
+
       const active = document.activeElement
       const inSearch = active === searchRef.current
       const inInput = active?.tagName === 'INPUT' || active?.tagName === 'SELECT' || active?.tagName === 'TEXTAREA'
@@ -442,6 +446,20 @@ export default function POSPage() {
       if (e.key === 'F5') {
         e.preventDefault()
         if (cartRef.current.length > 0) {
+          // No abrir el cobro con items sin resolver (barcode pendiente/erróneo) o
+          // sin precio: el payload llevaría datos inválidos y la venta fallaría.
+          if (cartRef.current.some(i => i.status === 'error')) {
+            toast.error('Quitá los productos sin identificar (¿?) para poder cobrar')
+            return
+          }
+          if (cartRef.current.some(i => i.status === 'pending')) {
+            toast.info('Esperá a que se resuelvan los productos...')
+            return
+          }
+          if (cartRef.current.some(i => i.product.price_mode === 'custom' && i.unit_price === 0)) {
+            toast.error('Ingresá el precio de los productos de precio libre')
+            return
+          }
           const currentTotal = cartRef.current.reduce((a, i) => a + i.unit_price * i.quantity - i.discount, 0)
           setApplied([])
           setDraft({ method: 'efectivo', amount: currentTotal, installments: 1 })
@@ -905,6 +923,10 @@ export default function POSPage() {
   const total              = Math.round((Math.max(0, subtotal - saleDiscountAmount) + shipping) * 100) / 100
   const hasMissingCustomPrice = cart.some(i => i.product.price_mode === 'custom' && i.unit_price === 0)
   const hasPendingItems       = cart.some(i => i.status === 'pending')
+  const hasErrorItems         = cart.some(i => i.status === 'error')
+  // Items sin resolver (barcode aún en el server o que falló): no se puede cobrar
+  // porque el payload llevaría un product_id temporal (pending_*) inexistente.
+  const hasUnresolvedItems    = hasPendingItems || hasErrorItems
 
   // Total ya cubierto por los pagos aplicados, y saldo pendiente real (sin contar el draft)
   const totalApplied = Math.round(applied.reduce((a, s) => a + (s.amount || 0), 0) * 100) / 100
@@ -936,7 +958,7 @@ export default function POSPage() {
   )
 
   // La acción principal aplica el draft; si con eso se cubre el total, además confirma la venta.
-  const canMainAction      = !needsCustomer && !hasMissingCustomPrice && !splitBad && (fullyApplied || canApplyDraft)
+  const canMainAction      = !needsCustomer && !hasMissingCustomPrice && !hasUnresolvedItems && !splitBad && (fullyApplied || canApplyDraft)
   const mainActionConfirms = fullyApplied || (canApplyDraft && draftCovers)
 
   // Refs para los atajos de teclado (se actualizan en cada render, ver useEffect más abajo)
@@ -1418,6 +1440,7 @@ export default function POSPage() {
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
               {searching && <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />}
               <input ref={searchRef} value={query}
+                disabled={step === 'ticket'}
                 onChange={e => { setQuery(e.target.value); setActiveResultIndex(-1) }}
                 onKeyDown={async e => {
                   if (e.key === ' ' && !query.trim()) { e.preventDefault(); qtyRef.current?.focus(); return }
@@ -1935,9 +1958,12 @@ export default function POSPage() {
             {hasPendingItems && (
               <p className="text-xs text-[var(--text3)] text-center">Resolviendo productos...</p>
             )}
+            {hasErrorItems && (
+              <p className="text-xs text-[var(--danger)] text-center">Quitá los productos sin identificar (¿?) para poder cobrar</p>
+            )}
             <button
               onClick={() => { setApplied([]); setDraft({ method: 'efectivo', amount: total, installments: 1 }); setSelectedApplied(null); setPaymentModalOpen(true) }}
-              disabled={cart.length === 0 || hasMissingCustomPrice || hasPendingItems}
+              disabled={cart.length === 0 || hasMissingCustomPrice || hasUnresolvedItems}
               className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-[var(--radius-md)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
             >
               Cobrar {cart.length > 0 ? formatCurrency(total) : ''}
