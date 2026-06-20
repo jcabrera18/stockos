@@ -159,6 +159,13 @@ export function POSTicket({
       .catch(() => setQrDataUrl(''))
   }, [invoice, business])
 
+  // Al abrir el ticket sacamos el foco del buscador de productos (u otro input)
+  // que quedó detrás: si no, e.target sigue siendo ese input y los atajos
+  // (P, W, N…) caen escritos en el searchbar en vez de ejecutar el comando.
+  useEffect(() => {
+    if (open) (document.activeElement as HTMLElement | null)?.blur()
+  }, [open])
+
   useEffect(() => {
     if (!open || convertModal) return
     const handler = (e: KeyboardEvent) => {
