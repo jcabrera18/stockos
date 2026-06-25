@@ -6,6 +6,7 @@ interface StatCardProps {
   title:      string
   value:      string | number
   valueTitle?: string   // valor exacto para el tooltip nativo (hover)
+  valueClassName?: string  // override del tamaño/tracking del valor (ej. números largos)
   subtitle?:  string
   icon?:      LucideIcon
   trend?:     { value: number; label: string }
@@ -15,7 +16,7 @@ interface StatCardProps {
   className?: string
 }
 
-export function StatCard({ title, value, valueTitle, subtitle, icon: Icon, trend, delta, accent, danger, className }: StatCardProps) {
+export function StatCard({ title, value, valueTitle, valueClassName, subtitle, icon: Icon, trend, delta, accent, danger, className }: StatCardProps) {
   return (
     <div className={cn(
       'bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4',
@@ -29,7 +30,8 @@ export function StatCard({ title, value, valueTitle, subtitle, icon: Icon, trend
           <p
             title={valueTitle}
             className={cn(
-              'text-2xl font-semibold mono tabular-nums truncate',
+              'font-semibold mono tabular-nums truncate',
+              valueClassName ?? 'text-2xl',
               danger ? 'text-[var(--danger)]' : accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'
             )}
           >

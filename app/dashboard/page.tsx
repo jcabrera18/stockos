@@ -10,7 +10,7 @@ import { StatCardSkeleton, CardListSkeleton } from '@/components/ui/Skeleton'
 import { SmartInsightsCard } from '@/components/modules/SmartInsightsCard'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
-import { formatCurrency, formatCompactCurrency, formatAxisCurrency, formatNumber, formatDateTime, getPaymentMethodLabel, getPeriodDates, getLocalWeekStart } from '@/lib/utils'
+import { formatCurrency, formatCompactCurrency, formatIntCurrency, formatAxisCurrency, formatNumber, formatDateTime, getPaymentMethodLabel, getPeriodDates, getLocalWeekStart } from '@/lib/utils'
 import { TrendingUp, AlertTriangle, DollarSign, CreditCard, RefreshCw, Receipt, Package, Store } from 'lucide-react'
 import {
   Bar, ComposedChart, Area, Line, PieChart, Pie, Cell,
@@ -234,7 +234,8 @@ export default function DashboardPage() {
         <div className={`grid grid-cols-2 md:grid-cols-3 ${stockEnabled ? 'xl:grid-cols-5' : 'xl:grid-cols-4'} gap-3`}>
           <StatCard
             title="Ventas hoy"
-            value={formatCompactCurrency(data?.today_revenue ?? 0)}
+            value={formatIntCurrency(data?.today_revenue ?? 0)}
+            valueClassName="text-[clamp(1rem,1.6vw,1.5rem)] tracking-tight"
             valueTitle={formatCurrency(data?.today_revenue ?? 0)}
             subtitle={`${data?.today_sales ?? 0} ventas · ${formatNumber(data?.today_units ?? 0)} u.`}
             delta={data ? { value: data.dod_pct, label: 'vs ayer' } : undefined}
@@ -243,14 +244,16 @@ export default function DashboardPage() {
           />
           <StatCard
             title="Ganancia hoy"
-            value={data?.has_cost_data ? formatCompactCurrency(data?.today_margin ?? 0) : '—'}
+            value={data?.has_cost_data ? formatIntCurrency(data?.today_margin ?? 0) : '—'}
+            valueClassName="text-[clamp(1rem,1.6vw,1.5rem)] tracking-tight"
             valueTitle={data?.has_cost_data ? formatCurrency(data?.today_margin ?? 0) : 'Sin costos cargados'}
             subtitle={data?.has_cost_data ? `${data?.today_margin_pct ?? 0}% de margen` : 'Cargá costos de productos'}
             icon={TrendingUp}
           />
           <StatCard
             title="Ticket promedio"
-            value={formatCompactCurrency(data?.ticket_avg ?? 0)}
+            value={formatIntCurrency(data?.ticket_avg ?? 0)}
+            valueClassName="text-[clamp(1rem,1.6vw,1.5rem)] tracking-tight"
             valueTitle={formatCurrency(data?.ticket_avg ?? 0)}
             subtitle="Por venta · hoy"
             icon={Receipt}
@@ -266,7 +269,8 @@ export default function DashboardPage() {
           )}
           <StatCard
             title="Cuentas corrientes"
-            value={formatCompactCurrency(data?.accounts_receivable ?? 0)}
+            value={formatIntCurrency(data?.accounts_receivable ?? 0)}
+            valueClassName="text-[clamp(1rem,1.6vw,1.5rem)] tracking-tight"
             valueTitle={formatCurrency(data?.accounts_receivable ?? 0)}
             subtitle="Saldo por cobrar"
             icon={CreditCard}

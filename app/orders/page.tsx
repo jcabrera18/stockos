@@ -11,6 +11,7 @@ import { Select } from '@/components/ui/Select'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
+import { TableSkeleton } from '@/components/ui/Skeleton'
 import { Pagination } from '@/components/ui/Pagination'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
@@ -25,6 +26,7 @@ import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
 import { useAuth } from '@/hooks/useAuth'
 import { usePOSSync } from '@/hooks/usePOSSync'
+import { useDebounce } from '@/hooks/useDebounce'
 import { useCollapseSidebar } from '@/contexts/SidePanelContext'
 import { searchProductsLocal, searchCustomersLocal } from '@/lib/pos-cache'
 import { queueOrder, getPendingOrdersCount, syncPendingOrders } from '@/lib/orders-queue'
@@ -76,6 +78,7 @@ interface OrderDetail extends OrderSummary {
   }[]
   warehouses?: { name: string }
   users?: { full_name: string }
+  price_lists?: { name: string; margin_pct: number } | null
   customers?: { full_name: string; current_balance: number; document?: string; phone?: string }
   invoices?: { id: string; invoice_type: string; numero: number; afip_status: string } | null
 }
@@ -130,11 +133,14 @@ function OrdersPageInner() {
   const { user: authUser } = useAuth()
   const stockEnabled      = authUser?.business?.stock_enabled ?? false
   const sellerWarehouseId = authUser?.role === 'seller' ? (authUser.warehouse_id ?? null) : null
-  const { cacheReady, syncing: cacheSyncing, forceSync } = usePOSSync(null)
+  // El form de nuevo pedido necesita el catálogo local (productos/promos/precios).
+  // Solo sincronizamos cuando se abre, no en cada carga de la lista de pedidos.
+  const [newOrderModal, setNewOrderModal] = useState(false)
+  const { cacheReady, syncing: cacheSyncing, forceSync } = usePOSSync(null, newOrderModal)
 
   // Lista
   const [orders, setOrders] = useState<OrderSummary[]>([])
-  const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
+  const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 10, pages: 0 })
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<OrderStatus | ''>('')
@@ -147,7 +153,6 @@ function OrdersPageInner() {
   const [loadingDetail, setLoadingDetail] = useState(false)
 
   // Nuevo pedido
-  const [newOrderModal, setNewOrderModal] = useState(false)
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
   // Map<product_id, Map<price_list_id, price>> — cargado una vez
@@ -646,18 +651,27 @@ function OrdersPageInner() {
       return next
     })
 
+  // Debounce de ambos buscadores → menos requests mientras se tipea
+  const debouncedSearch = useDebounce(search.trim(), 300)
+  const debouncedIdSearch = useDebounce(idSearch.trim(), 300)
+
   const statusFilterRef = useRef(statusFilter)
-  const searchRef = useRef(search)
+  const searchRef = useRef(debouncedSearch)
+  const idSearchRef = useRef(debouncedIdSearch)
   const pageRef = useRef(page)
   useEffect(() => { statusFilterRef.current = statusFilter }, [statusFilter])
-  useEffect(() => { searchRef.current = search }, [search])
+  useEffect(() => { searchRef.current = debouncedSearch }, [debouncedSearch])
+  useEffect(() => { idSearchRef.current = debouncedIdSearch }, [debouncedIdSearch])
 
   const fetchOrders = useCallback(async () => {
     setLoading(true)
     try {
-      const params: Record<string, string | number | undefined> = { page: pageRef.current, limit: 20 }
+      const params: Record<string, string | number | undefined> = { page: pageRef.current, limit: 10 }
       if (statusFilterRef.current) params.status = statusFilterRef.current
-      if (searchRef.current) params.search = searchRef.current
+      // El N° de pedido se busca en la base (prefijo del UUID), no solo en la
+      // página cargada → permite ir directo a un pedido viejo de cualquier página.
+      if (idSearchRef.current) params.order_number = idSearchRef.current
+      else if (searchRef.current) params.search = searchRef.current
       const res = await api.get<{ data: OrderSummary[]; pagination: PaginationType }>('/api/orders', params)
       setOrders(res.data)
       setPagination(res.pagination)
@@ -669,7 +683,7 @@ function OrdersPageInner() {
     pageRef.current = 1
     setPage(1)
     fetchOrders()
-  }, [statusFilter, search, fetchOrders])
+  }, [statusFilter, debouncedSearch, debouncedIdSearch, fetchOrders])
 
   const handlePageChange = useCallback((newPage: number) => {
     pageRef.current = newPage
@@ -697,14 +711,11 @@ function OrdersPageInner() {
     return () => window.removeEventListener('online', handleOnline)
   }, [fetchOrders])
 
+  // Depósitos: los usan también "Lista de carga" / "Por cliente" en la vista de
+  // lista → se cargan al entrar (request chico). Setean el depósito por defecto.
   useEffect(() => {
-    Promise.all([
-      api.get<Warehouse[]>('/api/warehouses'),
-      api.get<PriceList[]>('/api/price-lists'),
-      api.get<{ product_id: string; price_list_id: string; price: number }[]>('/api/products/price-overrides').catch(() => []),
-    ]).then(([wh, pl, ovRaw]) => {
+    api.get<Warehouse[]>('/api/warehouses').then(wh => {
       setWarehouses(wh)
-      setPriceLists(pl)
       if (sellerWarehouseId) {
         setWarehouseId(sellerWarehouseId)
       } else {
@@ -712,6 +723,19 @@ function OrdersPageInner() {
         // No pisar un depósito ya restaurado desde el borrador
         setWarehouseId(current => current || def?.id || '')
       }
+    }).catch(() => { })
+  }, [])
+
+  // Listas de precio + overrides solo se usan en el form de nuevo pedido → lazy.
+  const orderCatalogsLoadedRef = useRef(false)
+  useEffect(() => {
+    if (!newOrderModal || orderCatalogsLoadedRef.current) return
+    orderCatalogsLoadedRef.current = true
+    Promise.all([
+      api.get<PriceList[]>('/api/price-lists'),
+      api.get<{ product_id: string; price_list_id: string; price: number }[]>('/api/products/price-overrides').catch(() => []),
+    ]).then(([pl, ovRaw]) => {
+      setPriceLists(pl)
       setPriceListId(current => current || pl.find(list => list.is_default)?.id || pl[0]?.id || '')
       // Construir mapa de overrides para uso sin re-render
       const ovMap = new Map<string, Map<string, number>>()
@@ -722,7 +746,7 @@ function OrdersPageInner() {
       }
       priceOverridesRef.current = ovMap
     }).catch(() => { })
-  }, [])
+  }, [newOrderModal])
 
   // ─── Borrador del nuevo pedido (persistente) ─────────────
   const DRAFT_KEY = 'stockos_order_draft'
@@ -1195,37 +1219,59 @@ function OrdersPageInner() {
             ))}
           </div>
           {/* Búsqueda */}
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <div className="relative flex-1 min-w-0">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
               <input value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Buscar cliente..."
-                className="w-full pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+                disabled={!!idSearch.trim()}
+                className="w-full pl-7 pr-8 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed"
               />
+              {search && (
+                <button type="button" onClick={() => setSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text3)] hover:text-[var(--text)]">
+                  <X size={13} />
+                </button>
+              )}
             </div>
             <div className="relative flex-1 min-w-0">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
               <input value={idSearch} onChange={e => setIdSearch(e.target.value)}
-                placeholder="N° remito..."
-                className="w-full pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] font-mono"
+                placeholder="N° pedido..."
+                className="w-full pl-7 pr-8 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] font-mono uppercase"
               />
+              {idSearch && (
+                <button type="button" onClick={() => setIdSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text3)] hover:text-[var(--text)]">
+                  <X size={13} />
+                </button>
+              )}
             </div>
           </div>
         </div>
 
         {/* Tabla */}
-        {loading ? <PageLoader /> : orders.length === 0 ? (
-          <EmptyState icon={Package} title="Sin pedidos"
-            description="Los vendedores pueden crear pedidos desde el botón 'Nuevo pedido'."
-            action={<Button onClick={openNewOrder}><Plus size={15} />Nuevo pedido</Button>}
-          />
+        {loading ? <TableSkeleton rows={8} /> : orders.length === 0 ? (
+          (search.trim() || idSearch.trim() || statusFilter) ? (
+            <EmptyState icon={Search} title="Sin resultados"
+              description={idSearch.trim()
+                ? `No encontramos ningún pedido con el N° "${idSearch.trim().toUpperCase()}".`
+                : 'Ningún pedido coincide con la búsqueda o el filtro aplicado.'}
+              action={<Button variant="secondary" onClick={() => { setSearch(''); setIdSearch(''); setStatusFilter('') }}><X size={15} />Limpiar filtros</Button>}
+            />
+          ) : (
+            <EmptyState icon={Package} title="Sin pedidos"
+              description="Los vendedores pueden crear pedidos desde el botón 'Nuevo pedido'."
+              action={<Button onClick={openNewOrder}><Plus size={15} />Nuevo pedido</Button>}
+            />
+          )
         ) : (
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
             <div className="overflow-x-auto">
               <table className={cn('w-full text-sm', !sidePanelOpen && 'min-w-[640px]')}>
                 <thead>
                   <tr className="border-b border-[var(--border)]">
-                    {!sidePanelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">N° Remito</th>}
+                    {!sidePanelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">N° Pedido</th>}
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Cliente</th>
                     {!sidePanelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Vendedor</th>}
                     {!sidePanelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Depósito</th>}
@@ -1237,7 +1283,7 @@ function OrdersPageInner() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--border)]">
-                  {orders.filter(o => !idSearch || o.id.slice(0, 8).toUpperCase().includes(idSearch.toUpperCase())).map(order => {
+                  {orders.map(order => {
                     return (
                       <tr key={order.id}
                         onClick={() => openDetail(order.id)}
@@ -1383,8 +1429,8 @@ function OrdersPageInner() {
               {detail.status === 'pending' && (
                 <button
                   onClick={() => setCancelConfirmOrder({ id: detail.id, customer_name: detail.customer_name })}
-                  className="text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">
-                  Cancelar pedido
+                  className="inline-flex items-center gap-1.5 self-start rounded-[var(--radius-md)] border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--danger)] hover:bg-[var(--danger)]/20 transition-colors">
+                  <X size={14} /> Cancelar pedido
                 </button>
               )}
             </div>
@@ -1446,11 +1492,15 @@ function OrdersPageInner() {
             {/* Info adicional — chips */}
             <div className="flex gap-1.5 flex-wrap">
               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--surface2)] text-[11px] text-[var(--text3)]">
-                Remito <strong className="mono font-semibold text-[var(--text2)]">{detail.id.slice(0, 8).toUpperCase()}</strong>
+                Pedido <strong className="mono font-semibold text-[var(--text2)]">{detail.id.slice(0, 8).toUpperCase()}</strong>
               </span>
-              {detail.price_list_id && (
+              {(detail.price_lists || detail.price_list_id) && (
                 <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--surface2)] text-[11px] text-[var(--text3)]">
-                  Lista <strong className="font-semibold text-[var(--text2)]">{getPriceListLabel(detail.price_list_id)}</strong>
+                  Lista <strong className="font-semibold text-[var(--text2)]">{
+                    detail.price_lists
+                      ? `${detail.price_lists.name} (+${detail.price_lists.margin_pct}%)`
+                      : getPriceListLabel(detail.price_list_id)
+                  }</strong>
                 </span>
               )}
               {(detail.seller_name || detail.users?.full_name) && (
@@ -1561,30 +1611,13 @@ function OrdersPageInner() {
               </div>
             )}
 
-            {/* Cambiar depósito — solo en pending */}
-            {detail.status === 'pending' && (
+            {/* Depósito del pedido (solo lectura) — el stock se descuenta del
+                depósito al crear el pedido; cambiarlo después no revalida ni
+                mueve stock, por eso se muestra como info, no editable. */}
+            {detail.warehouse_name && (
               <div className="flex items-center gap-2 px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)]">
                 <span className="text-xs text-[var(--text3)] flex-shrink-0">Depósito:</span>
-                <select
-                  defaultValue={detail.warehouse_id ?? ''}
-                  onChange={async e => {
-                    try {
-                      await api.patch(`/api/orders/${detail.id}`, { warehouse_id: e.target.value || null })
-                      const updated = await api.get<OrderDetail>(`/api/orders/${detail.id}`)
-                      setDetail(updated)
-                      fetchOrders()
-                      toast.success('Depósito actualizado')
-                    } catch (err: unknown) {
-                      toast.error(err instanceof Error ? err.message : 'Error al cambiar depósito')
-                    }
-                  }}
-                  className="flex-1 text-sm bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] px-2 py-1.5 text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-                >
-                  <option value="">Sin depósito</option>
-                  {warehouses.map(w => (
-                    <option key={w.id} value={w.id}>{w.name}</option>
-                  ))}
-                </select>
+                <span className="text-sm font-medium text-[var(--text)]">{detail.warehouse_name}</span>
               </div>
             )}
 

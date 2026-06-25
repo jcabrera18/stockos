@@ -15,7 +15,7 @@ const FOCUS_THROTTLE_MS = 2 * 60 * 1000 // mínimo entre syncs disparados por fo
  * Si init falla (sin conexión) el POS sigue funcionando vía server fallback.
  * `cacheReady` indica si el cache tiene datos para ser usado.
  */
-export function usePOSSync(warehouseId?: string | null) {
+export function usePOSSync(warehouseId?: string | null, enabled: boolean = true) {
   const [cacheReady, setCacheReady] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const initialized = useRef(false)
@@ -32,15 +32,19 @@ export function usePOSSync(warehouseId?: string | null) {
   }, [])
 
   useEffect(() => {
+    // `enabled=false` difiere la descarga del catálogo hasta que se necesite
+    // (ej. en /orders, recién al abrir el form de nuevo pedido). El POS lo deja
+    // en true para sincronizar al entrar.
+    if (!enabled) return
     if (initialized.current) return
     initialized.current = true
 
     setSyncing(true)
-    initPOSCache(warehouseId)
+    initPOSCache(warehouseIdRef.current)
       .then(() => { lastSyncAtRef.current = Date.now(); setCacheReady(true) })
       .catch(() => { setCacheReady(false) })
       .finally(() => setSyncing(false))
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-sync cuando cambia el warehouse (ej: workstation carga después del init)
   const prevWarehouseRef = useRef<string | null | undefined>(undefined)
@@ -49,6 +53,7 @@ export function usePOSSync(warehouseId?: string | null) {
     if (prevWarehouseRef.current === warehouseId) return
     prevWarehouseRef.current = warehouseId
     if (!warehouseId) return
+    if (!initialized.current) return // no sincronizar antes del init lazy
     runSync()
   }, [warehouseId, runSync])
 

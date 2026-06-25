@@ -47,6 +47,14 @@ export function formatCompactCurrency(amount: number | string): string {
   return `${sign}$${Math.round(abs).toLocaleString('es-AR')}`
 }
 
+// Moneda entera para KPIs: número completo sin abreviar y sin decimales.
+// $1.003.764 → "$1.003.764" · $282.857 → "$282.857"
+// El valor exacto siempre se preserva con formatCurrency() en tooltips/title.
+export function formatIntCurrency(amount: number | string): string {
+  const n = Math.round(Number(amount))
+  return `$${n.toLocaleString('es-AR')}`
+}
+
 // Solo para ejes de gráficos: brevedad máxima (k/M es convención universal en charts).
 // No usar en KPIs/headlines — ahí va formatCompactCurrency().
 export function formatAxisCurrency(amount: number | string): string {
