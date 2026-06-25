@@ -33,19 +33,26 @@ export function Sidebar() {
   const { workstation } = useWorkstation()
 
   useEffect(() => {
+    let lastCheckAt = 0
     const check = () => {
+      lastCheckAt = Date.now()
       const params = workstation?.register_id
         ? `?register_id=${workstation.register_id}`
         : ''
-      api.get(`/api/cash-register/current${params}`)
-        .then((data: unknown) => setCajaAbierta(data !== null))
+      // Endpoint liviano: sólo el booleano de "hay caja abierta" (no los totales RT).
+      api.get<{ open: boolean }>(`/api/cash-register/status${params}`)
+        .then((data) => setCajaAbierta(data?.open ?? false))
         .catch(() => { })
     }
+    // El evento focus se dispara en cada alt-tab. Throttle de 30s para no pegarle
+    // a /cash-register/current cada vez que la pestaña recupera el foco.
+    const FOCUS_THROTTLE_MS = 30_000
+    const onFocus = () => { if (Date.now() - lastCheckAt > FOCUS_THROTTLE_MS) check() }
     check()
-    window.addEventListener('focus', check)
-    window.addEventListener('caja-changed', check)
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('caja-changed', check)  // cambio real de caja: siempre refresca
     return () => {
-      window.removeEventListener('focus', check)
+      window.removeEventListener('focus', onFocus)
       window.removeEventListener('caja-changed', check)
     }
   }, [workstation])

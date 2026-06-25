@@ -339,11 +339,23 @@ export default function ProductsPage() {
     fetchProducts()
   }, [fetchProducts])
 
+  // categories se usa para la columna "Categoría" de la tabla → se carga al entrar.
   useEffect(() => {
     api.get<Category[]>('/api/products/categories').then(setAllCategories).catch(() => {})
-    api.get<{ id: string; name: string }[]>('/api/brands').then(setBrands).catch(() => {})
-    api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => {})
   }, [])
+
+  // brands y suppliers solo se usan en el panel de filtros y en el form de
+  // crear/editar. Se cargan lazy la primera vez que se abre cualquiera de los dos,
+  // en vez de en cada carga de /products. (api.get deduplica si ambos disparan.)
+  const catalogsLoadedRef = useRef(false)
+  useEffect(() => {
+    if (!(panelOpen || showFilters) || catalogsLoadedRef.current) return
+    catalogsLoadedRef.current = true
+    api.get<{ id: string; name: string }[]>('/api/brands')
+      .then(setBrands).catch(() => { catalogsLoadedRef.current = false })
+    api.get<Supplier[]>('/api/purchases/suppliers')
+      .then(setSuppliers).catch(() => { catalogsLoadedRef.current = false })
+  }, [panelOpen, showFilters])
 
   const categoryMap = new Map(allCategories.map(c => [c.id, c]))
   const childrenMap = new Map<string | null, Category[]>()

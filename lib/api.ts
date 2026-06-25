@@ -16,7 +16,10 @@ export type ApiError = Error & {
 // Timeout base por intento. Tras una inactividad larga (ej. POS abierto horas)
 // la primera request puede tardar más por el cold start del backend en Railway
 // y/o por el refresh del token de Supabase, así que damos margen y reintentamos.
-const BASE_TIMEOUT_MS = 15_000
+// Se subió de 15s a 22s: en prod vimos TTFB de hasta ~17s con el server vivo
+// pero lento; con 15s la 1ª intento abortaba y reintentaba, duplicando la carga
+// sobre una instancia ya saturada (death spiral). 22s deja completar el intento 1.
+const BASE_TIMEOUT_MS = 22_000
 // Máximo de intentos ante timeouts / errores de red transitorios.
 const MAX_ATTEMPTS = 3
 
@@ -133,10 +136,26 @@ export async function apiFetch<T = unknown>(
   throw lastError ?? new Error('Error en la API')
 }
 
+// Deduplicación de GETs en vuelo: si dos componentes piden el mismo recurso al
+// mismo tiempo (ej. varios consumidores de auth/me, o el poller de caja), comparten
+// la misma promesa en lugar de abrir N requests idénticas contra el backend.
+const inFlightGets = new Map<string, Promise<unknown>>()
+
+function dedupedGet<T>(path: string, params?: FetchOptions['params']): Promise<T> {
+  const key = params ? `${path}?${JSON.stringify(params)}` : path
+  const existing = inFlightGets.get(key)
+  if (existing) return existing as Promise<T>
+
+  const p = apiFetch<T>(path, { method: 'GET', params })
+    .finally(() => { inFlightGets.delete(key) })
+  inFlightGets.set(key, p)
+  return p
+}
+
 // Helpers tipados
 export const api = {
   get:    <T>(path: string, params?: FetchOptions['params']) =>
-    apiFetch<T>(path, { method: 'GET', params }),
+    dedupedGet<T>(path, params),
   post:   <T>(path: string, body: unknown) =>
     apiFetch<T>(path, { method: 'POST', body: JSON.stringify(body) }),
   patch:  <T>(path: string, body: unknown) =>

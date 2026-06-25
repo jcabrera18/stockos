@@ -35,8 +35,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
   // Ref para saber si ya tenemos un perfil cargado (evita limpiar sesión en errores transitorios)
   const hasProfileRef = useRef(false)
+  // Coalesce de cargas concurrentes: el mount llama loadProfile y Supabase emite
+  // SIGNED_IN al suscribirse, ambos casi simultáneos. Compartimos la misma promesa
+  // para no disparar dos /api/auth/me (además del dedup en la capa api).
+  const loadingPromiseRef = useRef<Promise<void> | null>(null)
 
   const loadProfile = useCallback(async () => {
+    if (loadingPromiseRef.current) return loadingPromiseRef.current
+    const run = (async () => {
     try {
       const profile = await api.get<UserProfile>('/api/auth/me')
       hasProfileRef.current = true
@@ -83,6 +89,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setLoading(false)
     }
+    })()
+    loadingPromiseRef.current = run
+    try { await run } finally { loadingPromiseRef.current = null }
   }, [])
 
   useEffect(() => {
