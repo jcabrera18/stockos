@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { initCatalogCache, syncCatalog, getLastCatalogSync } from '@/lib/catalog-cache'
+import { loadCatalogMemory, syncCatalog, getLastCatalogSync } from '@/lib/catalog-cache'
 
 const SYNC_INTERVAL_MS = 5 * 60 * 1000  // 5 minutos
 const FOCUS_THROTTLE_MS = 2 * 60 * 1000 // mínimo entre syncs disparados por foco
@@ -45,12 +45,14 @@ export function useCatalogSync() {
     if (initialized.current) return
     initialized.current = true
 
-    setSyncing(true)
-    initCatalogCache()
-      .then(() => { lastSyncAtRef.current = Date.now(); setReady(true); refreshTimestamp() })
-      .catch(() => setReady(false))
-      .finally(() => setSyncing(false))
-  }, [refreshTimestamp])
+    // 1) Pintar lo cacheado al instante (visitas repetidas → grilla lista sin esperar red).
+    loadCatalogMemory()
+      .then(hasData => { if (hasData) { setReady(true); refreshTimestamp() } })
+      .catch(() => {})
+
+    // 2) Refrescar en background (primera carga descarga todo; luego incremental).
+    runSync()
+  }, [refreshTimestamp, runSync])
 
   useEffect(() => {
     if (!ready) return

@@ -163,10 +163,14 @@ export async function syncCatalog(): Promise<void> {
   await buildMemory()
 }
 
-/** Primera carga: construye el cache en memoria y dispara el sync. */
-export async function initCatalogCache(): Promise<void> {
-  await buildMemory()       // pinta lo que ya haya cacheado de inmediato
-  await syncCatalog()       // freshen (incremental si ya había datos)
+/**
+ * Carga el cache en memoria desde IndexedDB y retorna si había datos cacheados.
+ * Permite que la grilla quede "lista" al instante en visitas repetidas, mientras
+ * el sync de red corre en background.
+ */
+export async function loadCatalogMemory(): Promise<boolean> {
+  await buildMemory()
+  return catalogMemory.length > 0
 }
 
 // ── Mutaciones locales ──────────────────────────────────────────────────────────

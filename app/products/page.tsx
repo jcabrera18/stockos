@@ -13,10 +13,12 @@ import { ProductForm } from '@/components/modules/ProductForm'
 import { api, apiFetch } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
+import { useCatalogSync } from '@/hooks/useCatalogSync'
+import { queryCatalog, removeCatalogProduct } from '@/lib/catalog-cache'
 import type { StockSummary, Product, Category, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import {
   Plus, Search, Package, Pencil, Trash2,
-  Tag, Filter, X, ChevronUp, ChevronDown, ArrowUpDown, MoreVertical, Loader2,
+  Tag, Filter, X, ChevronUp, ChevronDown, ArrowUpDown, MoreVertical, Loader2, RefreshCw,
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { CategoryTreePicker } from '@/components/ui/CategoryTreePicker'
@@ -24,6 +26,30 @@ import { toast } from 'sonner'
 import { ProductPriceRulesModal } from '@/components/modules/ProductPriceRulesModal'
 
 interface Supplier { id: string; name: string }
+
+// Resuelve la categoría seleccionada + todos sus descendientes (igual que el backend),
+// para el filtrado jerárquico cuando la grilla consulta el cache local.
+function collectDescendantIds(rootId: string, cats: Category[]): Set<string> {
+  const ids = new Set<string>([rootId])
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const c of cats) {
+      if (c.parent_id && ids.has(c.parent_id) && !ids.has(c.id)) {
+        ids.add(c.id)
+        changed = true
+      }
+    }
+  }
+  return ids
+}
+
+function relativeSyncTime(date: Date): string {
+  const min = Math.floor((Date.now() - date.getTime()) / 60_000)
+  if (min < 1) return 'recién'
+  if (min < 60) return `hace ${min} min`
+  return `hace ${Math.floor(min / 60)} h`
+}
 
 const STOCK_STATUS_OPTIONS = [
   { value: 'ok', label: 'Stock OK' },
@@ -184,6 +210,13 @@ export default function ProductsPage() {
   const panelOpenRef = useRef(panelOpen)
   const fetchProductsRef = useRef<(() => Promise<void>) | undefined>(undefined)
 
+  // Cache local del catálogo: la grilla busca/filtra/ordena/pagina en cliente
+  // (instantáneo) y sincroniza en background, evitando la latencia del backend.
+  const { ready: catalogReady, syncing: catalogSyncing, lastSyncedAt, forceSync: forceCatalogSync } = useCatalogSync()
+  const catalogReadyRef = useRef(catalogReady)
+  useEffect(() => { catalogReadyRef.current = catalogReady }, [catalogReady])
+  const allCategoriesRef = useRef<Category[]>([])
+
   // Secuenciación de búsquedas: descarta respuestas que llegan fuera de orden
   // (ej. una request lenta de un término viejo que resuelve después de uno nuevo)
   // y cancela la request anterior en vuelo para no malgastar backend.
@@ -260,13 +293,44 @@ export default function ProductsPage() {
   useEffect(() => { panelOpenRef.current = panelOpen }, [panelOpen])
 
   const fetchProducts = useCallback(async () => {
+    // Camino rápido: si el cache local está listo, resolvemos búsqueda/filtros/orden/
+    // paginación en cliente (sub-ms) sin tocar la red. Esto elimina la latencia del
+    // backend (cold start / query pesada) que dejaba la grilla colgada o vacía.
+    if (catalogReadyRef.current) {
+      const reqId = ++fetchReqRef.current
+      const categoryIds = categoryRef.current
+        ? collectDescendantIds(categoryRef.current, allCategoriesRef.current)
+        : undefined
+      const res = queryCatalog({
+        search: searchRef.current || undefined,
+        brand_id: brandRef.current || undefined,
+        supplier_id: supplierRef.current || undefined,
+        categoryIds,
+        stock_status: stockStatusRef.current || undefined,
+        min_price: minPriceRef.current ? Number(minPriceRef.current) : undefined,
+        max_price: maxPriceRef.current ? Number(maxPriceRef.current) : undefined,
+        sort_by: sortByRef.current,
+        sort_dir: sortDirRef.current,
+        page: pageRef.current,
+        limit: limitRef.current,
+      })
+      if (reqId !== fetchReqRef.current) return
+      setData(res.data)
+      setPagination(res.pagination)
+      firstLoadRef.current = false
+      setLoading(false)
+      setSearching(false)
+      return
+    }
+
+    // Fallback al server mientras el cache no esté listo (primera carga / sin conexión).
     // Cancela la request anterior en vuelo. Combinamos con un timeout para que
     // una request colgada no deje el indicador de carga encendido para siempre.
     fetchAbortRef.current?.abort()
     const controller = new AbortController()
     fetchAbortRef.current = controller
     const reqId = ++fetchReqRef.current
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(20_000)])
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(35_000)])
 
     // El skeleton completo solo en la primera carga; en búsquedas siguientes
     // mantenemos la tabla y mostramos una barra sutil de "actualizando".
@@ -307,6 +371,13 @@ export default function ProductsPage() {
   }, [])
   useEffect(() => { fetchProductsRef.current = fetchProducts }, [fetchProducts])
 
+  // Cuando el cache queda listo (o cada sync en background) re-consultamos para
+  // pasar del fallback del server a la lectura local y reflejar datos frescos.
+  useEffect(() => {
+    if (!catalogReady) return
+    fetchProductsRef.current?.()
+  }, [catalogReady, lastSyncedAt])
+
   useEffect(() => {
     pageRef.current = 1
     setPage(1)
@@ -343,6 +414,9 @@ export default function ProductsPage() {
   useEffect(() => {
     api.get<Category[]>('/api/products/categories').then(setAllCategories).catch(() => {})
   }, [])
+
+  // Espejo en ref para el filtrado jerárquico de categorías en el cache local.
+  useEffect(() => { allCategoriesRef.current = allCategories }, [allCategories])
 
   // brands y suppliers solo se usan en el panel de filtros y en el form de
   // crear/editar. Se cargan lazy la primera vez que se abre cualquiera de los dos,
@@ -426,6 +500,9 @@ export default function ProductsPage() {
     try {
       await api.delete(`/api/products/${deleteProduct.id}`)
       toast.success('Producto eliminado')
+      // Reflejamos la baja en el cache local al instante (el backend hace soft-delete
+      // y el producto desaparece de /api/products, así que no volvería por sync).
+      await removeCatalogProduct(deleteProduct.id)
       setDeleteModal(false)
       setDeleteProduct(null)
       if (selectedId === deleteProduct.id) {
@@ -511,6 +588,19 @@ export default function ProductsPage() {
               {activeFilterCount > 0 && (
                 <span className="bg-white/25 text-white text-xs font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">
                   {activeFilterCount}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => forceCatalogSync()}
+              disabled={catalogSyncing}
+              title={lastSyncedAt ? `Catálogo actualizado ${relativeSyncTime(lastSyncedAt)}` : 'Sincronizar catálogo'}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] text-[var(--text3)] hover:border-[var(--accent)] hover:text-[var(--text2)] transition-colors disabled:opacity-60"
+            >
+              <RefreshCw size={14} className={catalogSyncing ? 'animate-spin text-[var(--accent)]' : ''} />
+              {!panelOpen && (
+                <span className="hidden sm:inline text-xs">
+                  {catalogSyncing ? 'Sync...' : lastSyncedAt ? relativeSyncTime(lastSyncedAt) : '—'}
                 </span>
               )}
             </button>
@@ -728,7 +818,12 @@ export default function ProductsPage() {
                 <ProductForm
                   product={formProduct}
                   stockCurrent={formStockCurrent}
-                  onSaved={() => fetchProductsRef.current?.()}
+                  onSaved={() => {
+                    // Sync incremental: trae al cache la fila recién creada/editada
+                    // (su updated_at cambió) y luego re-consulta. Si el sync falla,
+                    // re-consultamos igual con lo que haya.
+                    forceCatalogSync().finally(() => fetchProductsRef.current?.())
+                  }}
                   onClose={closePanel}
                   onNavigateToProduct={handleNavigateToProduct}
                 />
