@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback, useRef, Suspense } from 'react'
+import { useEffect, useState, useCallback, useRef, Suspense, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -34,7 +34,7 @@ import { isNetworkError } from '@/lib/sales-queue'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────
-type OrderStatus = 'pending' | 'confirmed' | 'delivered' | 'cancelled'
+type OrderStatus = 'pending' | 'confirmed' | 'partially_delivered' | 'delivered' | 'cancelled'
 type PaymentStatus = 'unpaid' | 'partial' | 'paid' | 'credit'
 type PaymentMethod = 'efectivo' | 'transferencia' | 'debito' | 'credito' | 'qr' | 'cuenta_corriente'
 
@@ -55,6 +55,7 @@ interface OrderSummary {
   seller_name?: string
   warehouse_name?: string
   notes?: string
+  pickup_mode?: boolean
   created_at: string
   confirmed_at?: string
   dispatched_at?: string
@@ -71,6 +72,7 @@ interface OrderDetail extends OrderSummary {
     product_id: string
     product_name?: string
     quantity: number
+    quantity_delivered?: number
     unit_price: number
     discount: number
     subtotal: number
@@ -81,6 +83,20 @@ interface OrderDetail extends OrderSummary {
   price_lists?: { name: string; margin_pct: number } | null
   customers?: { full_name: string; current_balance: number; document?: string; phone?: string }
   invoices?: { id: string; invoice_type: string; numero: number; afip_status: string } | null
+}
+
+interface OrderDelivery {
+  id: string
+  delivered_at: string
+  notes?: string | null
+  user_id?: string | null
+  order_delivery_items: {
+    id: string
+    order_item_id: string
+    product_id: string
+    product_name?: string | null
+    quantity: number
+  }[]
 }
 
 interface CartItem {
@@ -100,6 +116,7 @@ interface Warehouse {
 const STATUS_LABELS: Record<OrderStatus, string> = {
   pending: 'Pendiente',
   confirmed: 'Confirmado',
+  partially_delivered: 'Retiro parcial',
   delivered: 'Entregado',
   cancelled: 'Cancelado',
 }
@@ -107,6 +124,7 @@ const STATUS_LABELS: Record<OrderStatus, string> = {
 const STATUS_VARIANTS: Record<OrderStatus, 'default' | 'success' | 'warning' | 'danger'> = {
   pending: 'warning',
   confirmed: 'default',
+  partially_delivered: 'warning',
   delivered: 'success',
   cancelled: 'danger',
 }
@@ -151,6 +169,7 @@ function OrdersPageInner() {
   const [detailModal, setDetailModal] = useState(false)
   const [detail, setDetail] = useState<OrderDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [deliveries, setDeliveries] = useState<OrderDelivery[]>([])
 
   // Nuevo pedido
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
@@ -167,11 +186,24 @@ function OrdersPageInner() {
   const [cart, setCart] = useState<CartItem[]>([])
   const [productQuery, setProductQuery] = useState('')
   const [productResults, setProductResults] = useState<Product[]>([])
+  const [productHighlight, setProductHighlight] = useState(0)
   const [searchingProducts, setSearchingProducts] = useState(false)
   const [payAlreadyCollected, setPayAlreadyCollected] = useState(false)
   const [collectedMethod, setCollectedMethod] = useState<PaymentMethod>('efectivo')
   const [collectedAmount, setCollectedAmount] = useState('')
+  const [pickupMode, setPickupMode] = useState(false)
   const [savingOrder, setSavingOrder] = useState(false)
+
+  // Modo retiro: retiros parciales (corralón). El cobro va por el flujo de pago
+  // existente (/payment); la deuda ya se carga a la CC al crear el pedido.
+  const [withdrawModal, setWithdrawModal] = useState(false)
+  const [withdrawOrderId, setWithdrawOrderId] = useState<string | null>(null)
+  const [withdrawQty, setWithdrawQty] = useState<Record<string, string>>({})
+  const [withdrawNotes, setWithdrawNotes] = useState('')
+  const [withdrawing, setWithdrawing] = useState(false)
+  const [withdrawSearch, setWithdrawSearch] = useState('')
+  const [withdrawShowDelivered, setWithdrawShowDelivered] = useState(false)
+  const [withdrawShowNote, setWithdrawShowNote] = useState(false)
 
   // Entrega
   const [deliverModal, setDeliverModal] = useState(false)
@@ -199,8 +231,9 @@ function OrdersPageInner() {
   const [registeringPayment, setRegisteringPayment] = useState(false)
 
   const [customerQuery, setCustomerQuery] = useState('')
-  const [customerResults, setCustomerResults] = useState<{ id: string; full_name: string; phone?: string; current_balance: number; credit_limit: number }[]>([])
+  const [customerResults, setCustomerResults] = useState<{ id: string; full_name: string; phone?: string; document?: string; current_balance: number; credit_limit: number }[]>([])
   const [searchingCustomers, setSearchingCustomers] = useState(false)
+  const [customerHighlight, setCustomerHighlight] = useState(0)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
   const [selectedCustomerBalance, setSelectedCustomerBalance] = useState<number>(0)
   const [selectedCustomerCreditLimit, setSelectedCustomerCreditLimit] = useState<number>(0)
@@ -475,16 +508,29 @@ function OrdersPageInner() {
     setTimeout(() => win.print(), 300)
   }
 
-  const printRemito = (d: OrderDetail) => {
+  // lines: si se pasan, el remito lista esas cantidades (ej. un retiro parcial)
+  // en vez del pedido completo.
+  const printRemito = (
+    d: OrderDetail,
+    lines?: { name: string; barcode?: string; quantity: number; unit?: string }[],
+    opts?: { date?: string; remitoId?: string },
+  ) => {
     const win = window.open('', '_blank', 'width=750,height=700')
     if (!win) return
-    const date = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    const date = opts?.date
+      ? new Date(opts.date).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+      : new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
     const biz = authUser?.business
-    const rows = (d.order_items ?? []).map(i =>
+    const remitoLines = lines ?? (d.order_items ?? []).map(i => ({
+      name: i.products?.name ?? i.product_name ?? '(producto eliminado)',
+      barcode: i.products?.barcode,
+      quantity: i.quantity,
+      unit: i.products?.unit,
+    }))
+    const rows = remitoLines.map(i =>
       `<tr>
-        <td>${i.products?.name ?? i.product_name ?? '(producto eliminado)'}${i.products?.barcode ? `<br><span class="small">${i.products.barcode}</span>` : ''}</td>
-        <td class="center">${i.quantity}</td>
-        <td class="center">${i.products?.unit ?? ''}</td>
+        <td>${i.name}</td>
+        <td class="center">${i.quantity} ${i.unit ?? ''}</td>
       </tr>`
     ).join('')
     win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito</title>
@@ -503,8 +549,8 @@ function OrdersPageInner() {
       .box p{font-size:13px}
       .box .sub{font-size:12px;color:#555;margin-top:3px}
       table{width:100%;border-collapse:collapse;margin-bottom:24px}
-      th{background:#f0f0f0;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;color:#555;border:1px solid #ccc}
-      td{padding:9px 10px;border:1px solid #ddd;font-size:13px;vertical-align:top}
+      th{background:#f0f0f0;text-align:left;padding:5px 10px;font-size:11px;text-transform:uppercase;color:#555;border:1px solid #ccc}
+      td{padding:3px 10px;border:1px solid #ddd;font-size:12px;vertical-align:top}
       .center{text-align:center}
       .small{font-size:11px;color:#888}
       .footer{margin-top:48px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:32px}
@@ -523,7 +569,7 @@ function OrdersPageInner() {
       </div>
       <div class="remito-box">
         <div class="remito-title">Remito</div>
-        <div class="remito-num">N° ${d.id.slice(0, 8).toUpperCase()}<br>${date}</div>
+        <div class="remito-num">N° ${(opts?.remitoId ?? d.id).slice(0, 8).toUpperCase()}<br>${date}</div>
       </div>
     </div>
 
@@ -544,7 +590,7 @@ function OrdersPageInner() {
     </div>
 
     <table>
-      <thead><tr><th>Producto</th><th class="center">Cantidad</th><th class="center">Unidad</th></tr></thead>
+      <thead><tr><th>Producto</th><th class="center">Cantidad</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
 
@@ -771,6 +817,7 @@ function OrdersPageInner() {
         if (d.payAlreadyCollected) setPayAlreadyCollected(true)
         if (d.collectedMethod) setCollectedMethod(d.collectedMethod)
         if (d.collectedAmount) setCollectedAmount(d.collectedAmount)
+        if (d.pickupMode) setPickupMode(true)
       }
     } catch { /* ignore */ }
     draftLoadedRef.current = true
@@ -784,11 +831,11 @@ function OrdersPageInner() {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({
         cart, selectedCustomerId, customerName, selectedCustomerBalance, selectedCustomerCreditLimit,
-        warehouseId, priceListId, orderNotes, orderDiscount, payAlreadyCollected, collectedMethod, collectedAmount,
+        warehouseId, priceListId, orderNotes, orderDiscount, payAlreadyCollected, collectedMethod, collectedAmount, pickupMode,
       }))
     } catch { /* ignore */ }
   }, [cart, selectedCustomerId, customerName, selectedCustomerBalance, selectedCustomerCreditLimit,
-    warehouseId, priceListId, orderNotes, orderDiscount, payAlreadyCollected, collectedMethod, collectedAmount])
+    warehouseId, priceListId, orderNotes, orderDiscount, payAlreadyCollected, collectedMethod, collectedAmount, pickupMode])
 
   // Búsqueda de productos para el pedido
   useEffect(() => {
@@ -851,7 +898,7 @@ function OrdersPageInner() {
     const timer = setTimeout(async () => {
       // Cache local primero → resultados instantáneos y soporte offline
       const local = (await searchCustomersLocal(query)).map(c => ({
-        id: c.id, full_name: c.full_name, phone: c.phone,
+        id: c.id, full_name: c.full_name, phone: c.phone, document: c.document,
         current_balance: c.current_balance, credit_limit: c.credit_limit,
       }))
       if (customerSearchRequestRef.current === requestId && local.length > 0) setCustomerResults(local)
@@ -859,7 +906,7 @@ function OrdersPageInner() {
       setSearchingCustomers(true)
       try {
         // Refresca con el server para tener saldos al día
-        const data = await api.get<{ id: string; full_name: string; phone?: string; current_balance: number; credit_limit: number }[]>(
+        const data = await api.get<{ id: string; full_name: string; phone?: string; document?: string; current_balance: number; credit_limit: number }[]>(
           `/api/customers/search?q=${encodeURIComponent(query)}`
         )
         if (customerSearchRequestRef.current === requestId) setCustomerResults(data)
@@ -873,14 +920,24 @@ function OrdersPageInner() {
     return () => clearTimeout(timer)
   }, [customerQuery])
 
+  // Modo retiro: historial de retiros parciales del pedido.
+  const fetchDeliveries = async (id: string) => {
+    try {
+      const data = await api.get<OrderDelivery[]>(`/api/orders/${id}/deliveries`)
+      setDeliveries(data ?? [])
+    } catch { setDeliveries([]) }
+  }
+
   const openDetail = async (id: string) => {
     setNewOrderModal(false)
     setDetailModal(true)
     setLoadingDetail(true)
     setDetailInvoice(null)
+    setDeliveries([])
     try {
       const d = await api.get<OrderDetail>(`/api/orders/${id}`)
       setDetail(d)
+      if (d.pickup_mode) fetchDeliveries(id)
       // Usar invoice directo del pedido si existe
       if (d.invoices) {
         setDetailInvoice(d.invoices)
@@ -911,6 +968,25 @@ function OrdersPageInner() {
     setCart(prev => [...prev, { product, quantity: 1, unit_price: price, discount: 0 }])
     setProductQuery('')
     setProductResults([])
+  }
+
+  // Navegación con teclado del dropdown de productos (↑/↓ + Enter, Esc para cerrar)
+  const handleProductKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (productResults.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setProductHighlight(h => Math.min(h + 1, productResults.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setProductHighlight(h => Math.max(h - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const p = productResults[productHighlight]
+      if (p) addToCart(p)
+    } else if (e.key === 'Escape') {
+      setProductQuery('')
+      setProductResults([])
+    }
   }
 
   const updateCartQty = (id: string, delta: number) =>
@@ -952,6 +1028,7 @@ function OrdersPageInner() {
   const resetOrderForm = () => {
     setOrderNotes(''); setOrderDiscount(''); setCart([])
     setPayAlreadyCollected(false); setCollectedAmount(''); setCollectedMethod('efectivo')
+    setPickupMode(false)
     setCustomerQuery(''); setCustomerResults([]); setSelectedCustomerId(null)
     setSelectedCustomerBalance(0); setSelectedCustomerCreditLimit(0)
     setCustomerName(''); setQuickCustomerModal(false)
@@ -1004,6 +1081,40 @@ function OrdersPageInner() {
   const trimmedCustomerQuery = customerQuery.trim()
   const showCustomerDropdown = !selectedCustomerId && trimmedCustomerQuery.length >= 2
 
+  const selectCustomer = (c: { id: string; full_name: string; current_balance: number; credit_limit: number }) => {
+    setSelectedCustomerId(c.id)
+    setCustomerName(c.full_name)
+    setSelectedCustomerBalance(Number(c.current_balance))
+    setSelectedCustomerCreditLimit(Number(c.credit_limit))
+    setCustomerQuery('')
+    setCustomerResults([])
+  }
+  const openQuickCustomerCreate = () => {
+    setQcForm({ full_name: trimmedCustomerQuery, document: '', phone: '', credit_limit: '' })
+    setQuickCustomerModal(true)
+  }
+  // Navegación con teclado del dropdown de clientes (↑/↓ + Enter, Esc para cerrar)
+  const handleCustomerKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (!showCustomerDropdown) return
+    const optionsCount = customerResults.length + 1 // +1 por la opción "Crear cliente"
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setCustomerHighlight(h => Math.min(h + 1, optionsCount - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setCustomerHighlight(h => Math.max(h - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      if (customerHighlight < customerResults.length) selectCustomer(customerResults[customerHighlight])
+      else openQuickCustomerCreate()
+    } else if (e.key === 'Escape') {
+      setCustomerQuery('')
+      setCustomerResults([])
+    }
+  }
+  useEffect(() => { setCustomerHighlight(0) }, [customerResults])
+  useEffect(() => { setProductHighlight(0) }, [productResults])
+
   const handleCreateOrder = async () => {
     if (!selectedCustomerId) { toast.error('Seleccioná un cliente de la lista'); return }
     if (selectedCustomerCreditLimit > 0 && selectedCustomerBalance >= selectedCustomerCreditLimit) {
@@ -1033,6 +1144,7 @@ function OrdersPageInner() {
       payment_status: payAlreadyCollected
         ? ((Number(collectedAmount) || cartTotal) >= cartTotal ? 'paid' : 'partial')
         : 'unpaid',
+      pickup_mode: pickupMode,
     }
 
     // Guarda el pedido en la cola offline y limpia el formulario
@@ -1069,6 +1181,21 @@ function OrdersPageInner() {
       }
     } finally { setSavingOrder(false) }
   }
+
+  // Ctrl+Enter dispara "Crear pedido" cuando el panel está abierto (atajo de teclado).
+  // Usamos un ref para tomar siempre la última versión de handleCreateOrder.
+  const handleCreateOrderRef = useRef(handleCreateOrder)
+  handleCreateOrderRef.current = handleCreateOrder
+  useEffect(() => {
+    if (!newOrderModal) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return
+      e.preventDefault()
+      if (!savingOrder && cart.length > 0) handleCreateOrderRef.current()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [newOrderModal, savingOrder, cart.length])
 
   const handleAction = async (id: string, action: string) => {
     try {
@@ -1114,6 +1241,49 @@ function OrdersPageInner() {
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al confirmar entrega')
     } finally { setDelivering(false) }
+  }
+
+  // Modo retiro: registra un retiro parcial e imprime su remito.
+  // Llena (o limpia) todas las cantidades pendientes de un toque
+  const fillAllPending = () => {
+    if (!detail) return
+    const next: Record<string, string> = {}
+    detail.order_items.forEach(i => {
+      const pending = i.quantity - (i.quantity_delivered ?? 0)
+      if (pending > 0) next[i.id] = String(pending)
+    })
+    setWithdrawQty(next)
+  }
+  const setWithdrawClamped = (id: string, pending: number, raw: number) => {
+    const n = Math.max(0, Math.min(pending, Math.floor(raw) || 0))
+    setWithdrawQty(prev => ({ ...prev, [id]: n === 0 ? '' : String(n) }))
+  }
+
+  const handleWithdraw = async () => {
+    if (!withdrawOrderId || !detail) return
+    const items = Object.entries(withdrawQty)
+      .map(([order_item_id, qty]) => ({ order_item_id, quantity: Number(qty) || 0 }))
+      .filter(i => i.quantity > 0)
+    if (items.length === 0) { toast.error('Ingresá al menos una cantidad a retirar'); return }
+
+    setWithdrawing(true)
+    try {
+      await api.post(`/api/orders/${withdrawOrderId}/deliveries`, {
+        items,
+        notes: withdrawNotes || null,
+      })
+      toast.success('Retiro registrado')
+      setWithdrawModal(false)
+      setWithdrawOrderId(null)
+      setWithdrawQty({}); setWithdrawNotes('')
+      fetchOrders()
+      // El remito de cada retiro se imprime a demanda desde el historial.
+      const updated = await api.get<OrderDetail>(`/api/orders/${withdrawOrderId}`)
+      setDetail(updated)
+      fetchDeliveries(withdrawOrderId)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al registrar el retiro')
+    } finally { setWithdrawing(false) }
   }
 
   const handleRegisterPayment = async () => {
@@ -1379,7 +1549,33 @@ function OrdersPageInner() {
                       Cancelado
                     </div>
                   </>
-                ) : (() => {
+                ) : detail.pickup_mode ? (() => {
+                  // Modo retiro: pendiente → retiro parcial → entregado (no interactivo;
+                  // las acciones viven en la tarjeta "Modo retiro" más abajo). El pago es
+                  // independiente (ver tarjeta "Pago"). Usa las mismas etiquetas que la tabla.
+                  const statuses: OrderStatus[] = ['pending', 'partially_delivered', 'delivered']
+                  const currentIdx = Math.max(0, statuses.indexOf(detail.status))
+                  return statuses.map((s, i) => {
+                    const done = i < currentIdx
+                    const current = i === currentIdx
+                    return (
+                      <div key={s} className="flex items-center gap-1 flex-shrink-0">
+                        <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${current ? 'bg-[var(--accent)] text-white' :
+                          done ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' :
+                            'bg-[var(--surface2)] text-[var(--text3)]'
+                          }`}>
+                          {done && (
+                            <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                              <path d="M1 4L3.5 6.5L9 1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          )}
+                          {STATUS_LABELS[s]}
+                        </div>
+                        {i < statuses.length - 1 && <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />}
+                      </div>
+                    )
+                  })
+                })() : (() => {
                   const statuses: OrderStatus[] = ['pending', 'confirmed', 'delivered']
                   const currentIdx = statuses.indexOf(detail.status)
                   const NEXT_LABELS: Partial<Record<OrderStatus, string>> = { confirmed: 'Confirmar', delivered: 'Entregar' }
@@ -1434,6 +1630,82 @@ function OrdersPageInner() {
                 </button>
               )}
             </div>
+
+            {/* ── Modo retiro: retiros parciales (la deuda ya está en la cuenta corriente) ── */}
+            {detail.pickup_mode && detail.status !== 'cancelled' && (
+              <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3.5 space-y-3 border border-[var(--accent)]/30">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-[var(--text)]">Modo retiro</p>
+                    <p className="text-[11px] text-[var(--text3)]">La deuda está cargada en la cuenta corriente. El cliente puede retirar aunque no haya pagado.</p>
+                  </div>
+                  {detail.status !== 'delivered' && (
+                    <Button size="sm" className="flex-shrink-0" onClick={() => { setWithdrawOrderId(detail.id); setWithdrawQty({}); setWithdrawNotes(''); setWithdrawSearch(''); setWithdrawShowDelivered(false); setWithdrawShowNote(false); setWithdrawModal(true) }}>
+                      Registrar retiro
+                    </Button>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  {detail.order_items.map(i => {
+                    const delivered = i.quantity_delivered ?? 0
+                    const pending = i.quantity - delivered
+                    return (
+                      <div key={i.id} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-[var(--text2)] truncate">{i.products?.name ?? i.product_name}</span>
+                        <span className="flex-shrink-0 text-[var(--text3)]">
+                          Retirado <span className="font-medium text-[var(--text)]">{delivered}</span>/{i.quantity}
+                          {pending > 0
+                            ? <span className="ml-1.5 font-medium text-[var(--accent)]">· faltan {pending}</span>
+                            : <span className="ml-1.5 font-medium text-[var(--accent)]">· completo</span>}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Historial de retiros: cada uno con su remito imprimible */}
+                {deliveries.length > 0 && (
+                  <div className="space-y-2 pt-3 border-t border-[var(--border)]">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text3)]">
+                      Retiros realizados ({deliveries.length})
+                    </p>
+                    {deliveries.map((dl, idx) => {
+                      const when = new Date(dl.delivered_at).toLocaleString('es-AR', {
+                        day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                      })
+                      const lines = dl.order_delivery_items.map(di => {
+                        const oi = detail.order_items.find(o => o.id === di.order_item_id)
+                        return {
+                          name: oi?.products?.name ?? di.product_name ?? 'Producto',
+                          barcode: oi?.products?.barcode,
+                          quantity: di.quantity,
+                          unit: oi?.products?.unit,
+                        }
+                      })
+                      return (
+                        <div key={dl.id} className="flex items-start justify-between gap-2 bg-[var(--surface)] rounded-[var(--radius-sm)] p-2.5 border border-[var(--border)]">
+                          <div className="min-w-0">
+                            <p className="text-xs font-medium text-[var(--text)]">
+                              Retiro #{deliveries.length - idx} · <span className="text-[var(--text3)] font-normal">{when}</span>
+                            </p>
+                            <p className="text-[11px] text-[var(--text2)] mt-0.5 leading-snug">
+                              {lines.map(l => `${l.name} ×${l.quantity}`).join(' · ')}
+                            </p>
+                            {dl.notes && <p className="text-[11px] text-[var(--text3)] mt-0.5 italic">{dl.notes}</p>}
+                          </div>
+                          <Button
+                            size="sm" variant="secondary" className="flex-shrink-0"
+                            onClick={() => printRemito(detail, lines, { date: dl.delivered_at, remitoId: dl.id })}
+                          >
+                            <Printer size={14} /> Remito
+                          </Button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Info cliente + pago */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1623,7 +1895,7 @@ function OrdersPageInner() {
 
             {/* Acciones del detalle */}
             {(() => {
-              const canPay = (detail.payment_status === 'unpaid' || detail.payment_status === 'partial') && detail.status !== 'cancelled'
+              const canPay = (detail.payment_status === 'unpaid' || detail.payment_status === 'partial' || detail.payment_status === 'credit') && detail.status !== 'cancelled'
               const canInvoice = detail.status !== 'pending' && detail.status !== 'cancelled' && (!detailInvoice || detailInvoice.invoice_type === 'X')
               return (
                 <div className="sticky bottom-0 z-10 -mx-5 mt-4 border-t border-[var(--border)] bg-[var(--surface)] px-5 pt-4 pb-5">
@@ -1799,6 +2071,7 @@ function OrdersPageInner() {
                         setCustomerQuery(e.target.value)
                         setCustomerName(e.target.value)
                       }}
+                      onKeyDown={handleCustomerKeyDown}
                       placeholder="Buscar y seleccionar cliente..."
                       className="w-full pl-9 pr-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
                     />
@@ -1807,20 +2080,14 @@ function OrdersPageInner() {
                     <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-20 overflow-hidden">
                       {customerResults.length > 0 ? (
                         <>
-                          {customerResults.map(c => (
+                          {customerResults.map((c, idx) => (
                             <button key={c.id}
-                              onClick={() => {
-                                setSelectedCustomerId(c.id)
-                                setCustomerName(c.full_name)
-                                setSelectedCustomerBalance(Number(c.current_balance))
-                                setSelectedCustomerCreditLimit(Number(c.credit_limit))
-                                setCustomerQuery('')
-                                setCustomerResults([])
-                              }}
-                              className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
+                              onClick={() => selectCustomer(c)}
+                              onMouseEnter={() => setCustomerHighlight(idx)}
+                              className={`w-full flex items-center justify-between px-3 py-2.5 transition-colors text-left border-b border-[var(--border)] last:border-0 ${customerHighlight === idx ? 'bg-[var(--surface2)]' : ''}`}>
                               <div>
                                 <p className="text-sm font-medium text-[var(--text)]">{c.full_name}</p>
-                                {c.phone && <p className="text-xs text-[var(--text3)]">{c.phone}</p>}
+                                {(c.phone || c.document) && <p className="text-xs text-[var(--text3)]">{c.phone || `DNI ${c.document}`}</p>}
                               </div>
                               {Number(c.current_balance) > 0 && (
                                 <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>
@@ -1828,8 +2095,9 @@ function OrdersPageInner() {
                             </button>
                           ))}
                           <button
-                            onClick={() => { setQcForm({ full_name: trimmedCustomerQuery, document: '', phone: '', credit_limit: '' }); setQuickCustomerModal(true) }}
-                            className="w-full flex items-center gap-2 px-3 py-2.5 bg-[var(--surface)] hover:bg-[var(--accent-subtle)] transition-colors text-left border-t border-[var(--border)]">
+                            onClick={openQuickCustomerCreate}
+                            onMouseEnter={() => setCustomerHighlight(customerResults.length)}
+                            className={`w-full flex items-center gap-2 px-3 py-2.5 transition-colors text-left border-t border-[var(--border)] ${customerHighlight === customerResults.length ? 'bg-[var(--accent-subtle)]' : 'bg-[var(--surface)]'}`}>
                             <Plus size={14} className="text-[var(--accent)]" />
                             <span className="text-sm font-medium text-[var(--accent)]">Crear cliente &quot;{trimmedCustomerQuery}&quot;</span>
                           </button>
@@ -1909,15 +2177,17 @@ function OrdersPageInner() {
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
               )}
               <input value={productQuery} onChange={e => setProductQuery(e.target.value)}
+                onKeyDown={handleProductKeyDown}
                 placeholder="Buscar producto por nombre o código..."
                 className="w-full pl-9 pr-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
               />
             </div>
             {productResults.length > 0 && (
               <div className="mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] overflow-hidden shadow-lg">
-                {productResults.map(p => (
+                {productResults.map((p, idx) => (
                   <button key={p.id} onClick={() => addToCart(p)}
-                    className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
+                    onMouseEnter={() => setProductHighlight(idx)}
+                    className={`w-full flex items-center justify-between px-3 py-2.5 transition-colors text-left border-b border-[var(--border)] last:border-0 ${productHighlight === idx ? 'bg-[var(--surface2)]' : ''}`}>
                     <div>
                       <p className="text-sm font-medium text-[var(--text)]">{p.name}</p>
                       {p.barcode && <p className="text-xs mono text-[var(--text3)]">{p.barcode}</p>}
@@ -2057,11 +2327,39 @@ function OrdersPageInner() {
                   options={PAYMENT_METHODS}
                   value={collectedMethod}
                   onChange={e => setCollectedMethod(e.target.value as PaymentMethod)} />
-                <Input label="Monto cobrado" type="number" min="0"
-                  value={collectedAmount} placeholder={String(cartTotal)}
-                  onChange={e => setCollectedAmount(e.target.value)}
-                  hint="Dejá vacío para el total completo" />
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label htmlFor="monto-cobrado-pedido" className="text-sm font-medium text-[var(--text2)]">
+                      Monto cobrado
+                    </label>
+                    <button type="button"
+                      onClick={() => setCollectedAmount(String(Math.round(cartTotal * 100) / 100))}
+                      className="text-xs font-medium text-[var(--accent)] hover:underline">
+                      Total: {formatCurrency(cartTotal)}
+                    </button>
+                  </div>
+                  <Input id="monto-cobrado-pedido" type="number" min="0"
+                    value={collectedAmount} placeholder={String(Math.round(cartTotal * 100) / 100)}
+                    onChange={e => setCollectedAmount(e.target.value)} />
+                </div>
               </div>
+            )}
+          </div>
+
+          {/* Modo retiro (corralón): deuda a cuenta corriente + retiros en varias veces */}
+          <div className="border border-[var(--border)] rounded-[var(--radius-md)] p-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={pickupMode}
+                onChange={e => setPickupMode(e.target.checked)}
+                className="w-4 h-4 accent-[var(--accent)]" />
+              <span className="text-sm font-medium text-[var(--text)]">
+                Modo retiro (retira en varias veces)
+              </span>
+            </label>
+            {pickupMode && (
+              <p className="mt-2 text-[11px] text-[var(--text3)]">
+                La deuda se carga a la cuenta corriente del cliente al crear el pedido. Puede ir retirando la mercadería en varias veces y pagar cuando quiera (parcial o total).
+              </p>
             )}
           </div>
 
@@ -2070,8 +2368,9 @@ function OrdersPageInner() {
                   <Button variant="secondary" className="flex-1 sm:flex-none" onClick={discardNewOrder} disabled={savingOrder}>
                     Descartar
                   </Button>
-                  <Button className="flex-1" onClick={handleCreateOrder} loading={savingOrder} disabled={cart.length === 0}>
+                  <Button className="flex-1" onClick={handleCreateOrder} loading={savingOrder} disabled={cart.length === 0} title="Atajo: Ctrl+Enter">
                     Crear pedido {cart.length > 0 ? `· ${formatCurrency(cartTotal)}` : ''}
+                    <kbd className="ml-2 hidden sm:inline-block text-[10px] font-mono px-1.5 py-0.5 rounded border border-current/30 opacity-70">Ctrl+↵</kbd>
                   </Button>
                 </div>
               </div>
@@ -2123,6 +2422,143 @@ function OrdersPageInner() {
           </div>
         </div>
       </Modal>
+
+      {/* ── Modal registrar retiro parcial (modo retiro) ── */}
+      {(() => {
+        const allItems = detail?.order_items ?? []
+        const pendingItems = allItems.filter(i => (i.quantity - (i.quantity_delivered ?? 0)) > 0)
+        const deliveredItems = allItems.filter(i => (i.quantity - (i.quantity_delivered ?? 0)) <= 0)
+        const totalPending = pendingItems.reduce((s, i) => s + (i.quantity - (i.quantity_delivered ?? 0)), 0)
+        const q = withdrawSearch.trim().toLowerCase()
+        const visiblePending = q
+          ? pendingItems.filter(i => (i.products?.name ?? i.product_name ?? '').toLowerCase().includes(q))
+          : pendingItems
+        const selUnits = Object.values(withdrawQty).reduce((s, v) => s + (Number(v) || 0), 0)
+        const selCount = Object.values(withdrawQty).filter(v => (Number(v) || 0) > 0).length
+        const allFilled = totalPending > 0 && selUnits >= totalPending
+
+        return (
+      <Modal open={withdrawModal} onClose={() => { setWithdrawModal(false); setWithdrawOrderId(null) }}
+        title="Registrar retiro" size="sm"
+        footer={
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3 min-h-[20px]">
+              {!withdrawShowNote && (
+                <button type="button" onClick={() => setWithdrawShowNote(true)}
+                  className="text-xs font-medium text-[var(--accent)] hover:underline">
+                  + Agregar nota
+                </button>
+              )}
+              {selCount > 0 && (
+                <span className="ml-auto text-xs text-[var(--text3)] whitespace-nowrap">
+                  <span className="font-semibold text-[var(--text)]">{selCount}</span> ítem{selCount !== 1 ? 's' : ''} · <span className="font-semibold text-[var(--text)]">{selUnits}</span> u
+                </span>
+              )}
+            </div>
+            {withdrawShowNote && (
+              <Input value={withdrawNotes} autoFocus
+                onChange={e => setWithdrawNotes(e.target.value)}
+                placeholder="Observaciones del retiro (opcional)" />
+            )}
+            <div className="flex gap-2">
+              <Button variant="secondary" className="flex-1" onClick={() => { setWithdrawModal(false); setWithdrawOrderId(null) }} disabled={withdrawing}>
+                Cancelar
+              </Button>
+              <Button className="flex-1" onClick={handleWithdraw} loading={withdrawing} disabled={selCount === 0}>
+                Registrar
+              </Button>
+            </div>
+          </div>
+        }>
+        <div className="space-y-2.5">
+          {/* Buscador (solo con muchos ítems) */}
+          {pendingItems.length > 6 && (
+            <div className="relative">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)] pointer-events-none" />
+              <Input className="pl-9" value={withdrawSearch} placeholder="Buscar producto…"
+                onChange={e => setWithdrawSearch(e.target.value)} />
+            </div>
+          )}
+
+          {/* Encabezado: conteo + retirar todo */}
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] uppercase tracking-wide text-[var(--text3)] font-medium">
+              {pendingItems.length} pendiente{pendingItems.length !== 1 ? 's' : ''} de retiro
+            </span>
+            {totalPending > 0 && (
+              <button type="button" onClick={() => allFilled ? setWithdrawQty({}) : fillAllPending()}
+                className="text-xs font-medium text-[var(--accent)] hover:underline">
+                {allFilled ? 'Limpiar todo' : 'Retirar todo'}
+              </button>
+            )}
+          </div>
+
+          {/* Lista de pendientes */}
+          {pendingItems.length === 0 ? (
+            <p className="py-6 text-center text-sm text-[var(--text3)]">No hay productos pendientes de retiro.</p>
+          ) : visiblePending.length === 0 ? (
+            <p className="py-6 text-center text-sm text-[var(--text3)]">Sin resultados para «{withdrawSearch}».</p>
+          ) : (
+            <div className="space-y-1.5">
+              {visiblePending.map(i => {
+                const pending = i.quantity - (i.quantity_delivered ?? 0)
+                const qty = Number(withdrawQty[i.id]) || 0
+                return (
+                  <div key={i.id} className={cn(
+                    'flex items-center gap-3 px-2.5 py-2.5 rounded-[var(--radius-md)] border transition-colors',
+                    qty > 0 ? 'bg-[var(--accent-subtle)] border-[var(--accent)]' : 'border-[var(--border)]'
+                  )}>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-[var(--text)] truncate">{i.products?.name ?? i.product_name}</p>
+                      <p className="text-[11px] text-[var(--text3)]">Pendiente: {pending} {i.products?.unit ?? ''}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button type="button" onClick={() => setWithdrawClamped(i.id, pending, qty - 1)}
+                        disabled={qty <= 0}
+                        className="w-9 h-9 flex items-center justify-center rounded-[var(--radius-md)] border border-[var(--border)] text-[var(--text2)] hover:bg-[var(--surface)] disabled:opacity-40 disabled:cursor-default transition-colors">
+                        <Minus size={15} />
+                      </button>
+                      <input type="number" inputMode="numeric" min="0" max={pending}
+                        value={withdrawQty[i.id] ?? ''} placeholder="0"
+                        onChange={e => setWithdrawClamped(i.id, pending, Number(e.target.value))}
+                        className="w-20 h-9 text-center text-sm tabular-nums rounded-md bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                      <button type="button" onClick={() => setWithdrawClamped(i.id, pending, qty + 1)}
+                        disabled={qty >= pending}
+                        className="w-9 h-9 flex items-center justify-center rounded-[var(--radius-md)] border border-[var(--border)] text-[var(--text2)] hover:bg-[var(--surface)] disabled:opacity-40 disabled:cursor-default transition-colors">
+                        <Plus size={15} />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Acordeón: ya retirados */}
+          {deliveredItems.length > 0 && (
+            <div className="pt-1">
+              <button type="button" onClick={() => setWithdrawShowDelivered(v => !v)}
+                className="flex items-center gap-1.5 text-xs font-medium text-[var(--text3)] hover:text-[var(--text2)] transition-colors">
+                <ChevronRight size={14} className={cn('transition-transform', withdrawShowDelivered && 'rotate-90')} />
+                {deliveredItems.length} producto{deliveredItems.length !== 1 ? 's' : ''} ya retirado{deliveredItems.length !== 1 ? 's' : ''}
+              </button>
+              {withdrawShowDelivered && (
+                <div className="mt-1.5 space-y-1">
+                  {deliveredItems.map(i => (
+                    <div key={i.id} className="flex items-center gap-2 px-2 py-1.5 text-xs text-[var(--text3)]">
+                      <CheckCircle size={14} className="text-[var(--accent)] flex-shrink-0" />
+                      <span className="truncate">{i.products?.name ?? i.product_name}</span>
+                      <span className="ml-auto flex-shrink-0">{i.quantity} {i.products?.unit ?? ''}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Modal>
+        )
+      })()}
 
       {/* ── Modal registrar cobro ── */}
       <Modal open={paymentModal} onClose={() => { setPaymentModal(false); setPaymentOrderId(null); setPaymentOrderPending(0) }}

@@ -10,7 +10,7 @@ interface ModalProps {
   children: React.ReactNode
   footer?: React.ReactNode
   headerActions?: React.ReactNode
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl'
   zIndex?: number
   minimizable?: boolean
   minimized?: boolean
@@ -37,6 +37,7 @@ export function Modal({ open, onClose, title, children, footer, headerActions, s
     md: 'max-w-lg',
     lg: 'max-w-2xl',
     xl: 'max-w-4xl',
+    '2xl': 'max-w-6xl',
   }
 
   // Minimizado: muestra una pastilla flotante para restaurar

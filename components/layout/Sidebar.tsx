@@ -116,7 +116,7 @@ export function Sidebar() {
     const pending = pendingHref === href
     const showDot = href === '/cash-register'
     return (
-      <Link key={href} href={href}
+      <Link key={href} href={href} prefetch={false}
         onClick={() => { if (!active) setPendingHref(href) }}
         onMouseEnter={(e) => {
           if (collapsed) showTip(e, label)

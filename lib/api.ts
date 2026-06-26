@@ -34,19 +34,130 @@ function isTransientError(err: unknown): boolean {
   return false
 }
 
-async function getAccessToken(): Promise<string | null> {
+// Cache en memoria del access token. `getSession()` adquiere el Web Lock de gotrue
+// ("lock:sb-...-auth-token") para leer/refrescar la sesión de forma segura entre
+// pestañas. Ante un burst de requests en paralelo (ej. la página de productos +
+// sidebar disparando N llamadas a la vez), cada `getSession()` pelea por ese lock y
+// uno se lo "roba" a otro → NavigatorLockAcquireTimeoutError. Cacheando el token y
+// deduplicando el getSession en vuelo, un burst de N requests hace 1 sola
+// adquisición de lock en lugar de N.
+let cachedToken: string | null = null
+let cachedTokenExp = 0 // unix seconds (session.expires_at)
+let inFlightSession: Promise<string | null> | null = null
+let authListenerSet = false
+
+// Refrescamos con 30s de margen antes del vencimiento real.
+const TOKEN_SKEW_S = 30
+
+// `getSession()` puede colgarse indefinidamente si el Web Lock de gotrue quedó
+// tomado por una pestaña colgada/crasheada. Como ese await ocurre ANTES del fetch,
+// un cuelgue acá congela la UI sin que corra ningún timeout de red (síntoma: la
+// página de productos con skeleton infinito y "0 productos" que nunca resuelve).
+// Lo corremos con un techo de tiempo y caemos al token cacheado o fallamos rápido.
+const SESSION_TIMEOUT_MS = 8_000
+
+// Corre getSession() con un timeout. Preserva el manejo de error de red existente
+// (status 0 / AuthRetryableFetchError → TypeError para no deslogear) y rechaza con
+// TimeoutError si el lock no responde a tiempo.
+function getSessionWithTimeout(): Promise<{ access_token: string; expires_at?: number } | null> {
   const supabase = createClient()
-  const { data, error } = await supabase.auth.getSession()
-  if (error) {
-    // status === 0 o name === 'AuthRetryableFetchError' indica fallo de red al
-    // intentar refrescar el token (ej. offline). No es un logout real: propagamos
-    // como TypeError para que los handlers de red lo detecten y no deslogeen al usuario.
-    if (error.status === 0 || (error as { name?: string }).name === 'AuthRetryableFetchError') {
-      throw new TypeError(error.message || 'Failed to fetch')
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new DOMException('getSession lock timeout', 'TimeoutError')),
+      SESSION_TIMEOUT_MS,
+    )
+    supabase.auth.getSession().then(
+      ({ data, error }) => {
+        clearTimeout(timer)
+        if (error) {
+          if (error.status === 0 || (error as { name?: string }).name === 'AuthRetryableFetchError') {
+            reject(new TypeError(error.message || 'Failed to fetch'))
+          } else {
+            resolve(null)
+          }
+          return
+        }
+        resolve(data.session ?? null)
+      },
+      err => { clearTimeout(timer); reject(err) },
+    )
+  })
+}
+
+// Mantiene el cache sincronizado con gotrue: el auto-refresh interno, login y
+// logout emiten eventos acá, así getAccessToken casi siempre acierta el fast-path
+// y nunca toca el lock.
+function ensureAuthListener() {
+  if (authListenerSet || typeof window === 'undefined') return
+  authListenerSet = true
+  createClient().auth.onAuthStateChange((_event, session) => {
+    cachedToken = session?.access_token ?? null
+    cachedTokenExp = session?.expires_at ?? 0
+  })
+}
+
+// Lee la sesión real (con lock), deduplicando llamadas concurrentes en una sola promesa.
+function readSession(): Promise<string | null> {
+  if (inFlightSession) return inFlightSession
+  inFlightSession = (async () => {
+    try {
+      const session = await getSessionWithTimeout()
+      cachedToken = session?.access_token ?? null
+      cachedTokenExp = session?.expires_at ?? 0
+      return cachedToken
+    } catch (err) {
+      // Lock trabado: si tenemos un token cacheado (aunque sea de un request previo)
+      // lo usamos en vez de congelar la UI. Sin token, fallamos rápido como error
+      // transitorio para que el caller reintente o muestre estado vacío recuperable
+      // en vez de quedar con el skeleton colgado para siempre.
+      if (err instanceof DOMException && err.name === 'TimeoutError') {
+        if (cachedToken) return cachedToken
+        throw new TypeError('Auth lock timeout')
+      }
+      throw err
     }
+  })().finally(() => { inFlightSession = null })
+  return inFlightSession
+}
+
+async function getAccessToken(): Promise<string | null> {
+  ensureAuthListener()
+  const now = Math.floor(Date.now() / 1000)
+  if (cachedToken && now < cachedTokenExp - TOKEN_SKEW_S) return cachedToken
+  return readSession()
+}
+
+// Renueva el token tras un 401. El refresh token es de un solo uso con rotación: si
+// forzamos `refreshSession()` con un token que otra pestaña (o el auto-refresh de
+// gotrue, o el resto del burst) ya rotó, el server responde
+// 400 "Invalid Refresh Token: Refresh Token Not Found".
+//
+// Para evitarlo: primero releemos la sesión con `getSession()` (deduplicado por
+// inFlightSession), que lee de storage y toma el token ya rotado sin reusar el viejo,
+// y solo auto-refresca si realmente venció. Solo si el token sigue igual (el cliente
+// lo cree vigente pero el server lo rechazó: clock skew / revocado) forzamos un
+// `refreshSession()`, tolerando que otra pestaña ya lo haya rotado.
+async function refreshAccessToken(prevToken: string): Promise<string | null> {
+  cachedToken = null
+  cachedTokenExp = 0
+  const token = await readSession()
+  if (token && token !== prevToken) return token
+
+  try {
+    const { data, error } = await createClient().auth.refreshSession()
+    if (error) {
+      // refresh_token_not_found u otro: otra pestaña ya rotó. Releer la sesión vigente.
+      const { data: current } = await createClient().auth.getSession()
+      cachedToken = current.session?.access_token ?? null
+      cachedTokenExp = current.session?.expires_at ?? 0
+      return cachedToken
+    }
+    cachedToken = data.session?.access_token ?? null
+    cachedTokenExp = data.session?.expires_at ?? 0
+    return cachedToken
+  } catch {
     return null
   }
-  return data.session?.access_token ?? null
 }
 
 export async function apiFetch<T = unknown>(
@@ -95,11 +206,10 @@ export async function apiFetch<T = unknown>(
     try {
       let res = await makeRequest(token, timeoutMs)
 
-      // Si el token expiró (race con auto-refresh), intentar renovar una vez
+      // Si el token expiró (race con auto-refresh), renovar una vez sin reusar un
+      // refresh token ya rotado (ver refreshAccessToken).
       if (res.status === 401) {
-        const supabase = createClient()
-        const { data } = await supabase.auth.refreshSession()
-        const newToken = data.session?.access_token
+        const newToken = await refreshAccessToken(token)
         if (!newToken) throw new Error('No autenticado')
         res = await makeRequest(newToken, timeoutMs)
       }

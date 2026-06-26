@@ -12,10 +12,21 @@ import { toast } from 'sonner'
 
 interface Warehouse { id: string; name: string; is_default: boolean }
 
+const VAT_OPTIONS = [
+  { value: '0', label: '0%' },
+  { value: '10.5', label: '10,5%' },
+  { value: '21', label: '21%' },
+  { value: '27', label: '27%' },
+]
+
+const round2 = (n: number) => Math.round(n * 100) / 100
+const grossCost = (i: OrderItem) => round2(i.unit_cost_net * (1 + i.vat_rate / 100))
+
 interface OrderItem {
   product: Product
   quantity: number
-  unit_cost: number
+  unit_cost_net: number
+  vat_rate: number
 }
 
 interface PurchaseOrderModalProps {
@@ -80,13 +91,14 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
     setItems(prev => [...prev, {
       product,
       quantity: 1,
-      unit_cost: product.cost_price,
+      unit_cost_net: product.cost_price_net ?? product.cost_price,
+      vat_rate: product.vat_rate ?? 0,
     }])
     setQuery('')
     setResults([])
   }
 
-  const updateItem = (id: string, field: 'quantity' | 'unit_cost', value: string) => {
+  const updateItem = (id: string, field: 'quantity' | 'unit_cost_net' | 'vat_rate', value: string) => {
     setItems(prev => prev.map(i =>
       i.product.id === id
         ? { ...i, [field]: Math.max(field === 'quantity' ? 1 : 0, Number(value) || 0) }
@@ -96,7 +108,7 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
 
   const removeItem = (id: string) => setItems(prev => prev.filter(i => i.product.id !== id))
 
-  const total = items.reduce((a, i) => a + i.quantity * i.unit_cost, 0)
+  const total = items.reduce((a, i) => a + i.quantity * grossCost(i), 0)
 
   const handleSave = async () => {
     if (items.length === 0) { toast.error('Agregá al menos un producto'); return }
@@ -109,7 +121,7 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
         items: items.map(i => ({
           product_id: i.product.id,
           quantity:   i.quantity,
-          unit_cost:  i.unit_cost,
+          unit_cost:  grossCost(i),
         })),
       })
       toast.success('Orden de compra creada')
@@ -125,7 +137,7 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
   const supplierOptions = suppliers.map(s => ({ value: s.id, label: s.name }))
 
   return (
-    <Modal open={open} onClose={onClose} title="Nueva orden de compra" size="xl">
+    <Modal open={open} onClose={onClose} title="Nueva orden de compra" size="2xl">
       <div className="space-y-5">
 
         {/* Proveedor + depósito + notas */}
@@ -189,56 +201,92 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
               ))}
             </div>
           )}
+
+          {/* Sin resultados */}
+          {query.trim() && !searching && results.length === 0 && (
+            <div className="mt-1 px-3 py-2.5 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)]">
+              <p className="text-sm text-[var(--text2)]">
+                No se encontró ningún producto con “{query.trim()}”.
+              </p>
+              <p className="text-xs text-[var(--text3)] mt-0.5">
+                Si el producto no existe todavía, cargalo primero desde la sección{' '}
+                <a href="/products" target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] font-medium hover:underline">
+                  Productos
+                </a>{' '}y después agregalo a la compra.
+              </p>
+            </div>
+          )}
+
+          <p className="text-xs text-[var(--text3)] mt-1.5">
+            Solo podés comprar productos ya cargados. ¿No aparece? Cargalo desde{' '}
+            <a href="/products" target="_blank" rel="noopener noreferrer" className="text-[var(--accent)] font-medium hover:underline">
+              Productos
+            </a>.
+          </p>
         </div>
 
         {/* Lista de ítems */}
         {items.length > 0 && (
           <div className="bg-[var(--surface2)] rounded-[var(--radius-lg)] overflow-hidden">
             <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[380px]">
+            <table className="w-full text-base min-w-[680px]">
               <thead>
                 <tr className="border-b border-[var(--border)]">
-                  <th className="text-left px-3 py-2 text-xs font-medium text-[var(--text3)]">Producto</th>
-                  <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Cantidad</th>
-                  <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Precio costo</th>
-                  <th className="text-right px-3 py-2 text-xs font-medium text-[var(--text3)]">Subtotal</th>
-                  <th className="px-3 py-2" />
+                  <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Producto</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Cantidad</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Costo neto</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">IVA</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">c/IVA</th>
+                  <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Subtotal</th>
+                  <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--border)]">
                 {items.map(item => (
                   <tr key={item.product.id}>
-                    <td className="px-3 py-2.5">
+                    <td className="px-4 py-3">
                       <p className="font-medium text-[var(--text)]">{item.product.name}</p>
                     </td>
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-4 py-3 text-right">
                       <input
                         type="number"
                         min="1"
                         value={item.quantity}
                         onChange={e => updateItem(item.product.id, 'quantity', e.target.value)}
-                        className="w-16 text-sm mono text-right bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 focus:outline-none focus:border-[var(--accent)]"
+                        className="w-20 text-base mono text-right bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] px-3 py-2 focus:outline-none focus:border-[var(--accent)]"
                       />
                     </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <span className="text-xs text-[var(--text3)]">$</span>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        <span className="text-sm text-[var(--text3)]">$</span>
                         <input
                           type="number"
                           min="0"
                           step="0.01"
-                          value={item.unit_cost}
-                          onChange={e => updateItem(item.product.id, 'unit_cost', e.target.value)}
-                          className="w-24 text-sm mono text-right bg-[var(--surface)] border border-[var(--border)] rounded px-2 py-1 focus:outline-none focus:border-[var(--accent)]"
+                          value={item.unit_cost_net}
+                          onChange={e => updateItem(item.product.id, 'unit_cost_net', e.target.value)}
+                          className="w-36 text-base mono text-right bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] px-3 py-2 focus:outline-none focus:border-[var(--accent)]"
                         />
                       </div>
                     </td>
-                    <td className="px-3 py-2.5 text-right mono font-semibold text-[var(--text)]">
-                      {formatCurrency(item.quantity * item.unit_cost)}
+                    <td className="px-4 py-3 text-right">
+                      <select
+                        value={String(item.vat_rate)}
+                        onChange={e => updateItem(item.product.id, 'vat_rate', e.target.value)}
+                        className="text-base mono text-right bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] px-3 py-2 focus:outline-none focus:border-[var(--accent)]"
+                      >
+                        {VAT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
                     </td>
-                    <td className="px-3 py-2.5 text-right">
+                    <td className="px-4 py-3 text-right mono text-[var(--text2)]">
+                      {formatCurrency(grossCost(item))}
+                    </td>
+                    <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)]">
+                      {formatCurrency(item.quantity * grossCost(item))}
+                    </td>
+                    <td className="px-4 py-3 text-right">
                       <button onClick={() => removeItem(item.product.id)} className="text-[var(--text3)] hover:text-[var(--danger)]">
-                        <Trash2 size={13} />
+                        <Trash2 size={16} />
                       </button>
                     </td>
                   </tr>
@@ -246,8 +294,8 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-[var(--border)]">
-                  <td colSpan={3} className="px-3 py-2.5 text-sm font-semibold text-[var(--text)]">Total</td>
-                  <td className="px-3 py-2.5 text-right mono font-bold text-[var(--accent)]">
+                  <td colSpan={5} className="px-4 py-3.5 text-base font-semibold text-[var(--text)]">Total c/IVA</td>
+                  <td className="px-4 py-3.5 text-right mono text-lg font-bold text-[var(--accent)]">
                     {formatCurrency(total)}
                   </td>
                   <td />

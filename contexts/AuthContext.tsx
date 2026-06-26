@@ -134,6 +134,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         hasProfileRef.current = false
         setUser(null)
         setLoading(false)
+        // Sesión muerta de verdad: Supabase emite SIGNED_OUT cuando el auto-refresh
+        // falla con un error de auth genuino (ej. "Invalid Refresh Token" tras
+        // suspender la PC mucho tiempo). Los fallos de red NO disparan este evento
+        // (son retryables), así que no rompemos el login offline cacheado.
+        // Sin este redirect la página queda con datos viejos y cada request falla;
+        // el middleware no ayuda porque solo corre en navegaciones server-side.
+        clearCachedProfile()
+        const path = window.location.pathname
+        const isPublic =
+          path === '/login' || path === '/register' ||
+          path === '/forgot-password' || path === '/reset-password' ||
+          path === '/home' || path.startsWith('/home/')
+        if (!isPublic) window.location.replace('/login')
       }
     })
 

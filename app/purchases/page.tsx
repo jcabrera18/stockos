@@ -13,9 +13,12 @@ import { PurchaseOrderModal } from '@/components/modules/PurchaseOrderModal'
 import { SupplierModal } from '@/components/modules/SupplierModal'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { useDebounce } from '@/hooks/useDebounce'
 import type { PurchaseOrder, Supplier, PaginatedResponse, Pagination as PaginationType } from '@/types'
-import { Plus, Truck, Building2 } from 'lucide-react'
+import { Plus, Truck, Building2, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
+
+const ORDERS_PER_PAGE = 10
 
 type Tab          = 'orders' | 'suppliers'
 type StatusFilter = 'all' | 'pending' | 'received' | 'cancelled'
@@ -49,13 +52,21 @@ const statusConfig: Record<string, { label: string; variant: 'warning' | 'succes
   cancelled: { label: 'Cancelada',  variant: 'danger'  },
 }
 
+// Número de orden legible. Fallback al prefijo del UUID para órdenes
+// antiguas que aún no tengan order_number asignado.
+const orderLabel = (o: { order_number?: number; id: string }) =>
+  o.order_number != null ? `#${o.order_number}` : `#${o.id.slice(0, 8).toUpperCase()}`
+
 export default function PurchasesPage() {
   const [tab, setTab] = useState<Tab>('orders')
 
   // ── Órdenes ────────────────────────────────────────────
   const [orders, setOrders]           = useState<PurchaseOrder[]>([])
-  const [orderPag, setOrderPag]       = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
+  const [orderPag, setOrderPag]       = useState<PaginationType>({ total: 0, page: 1, limit: ORDERS_PER_PAGE, pages: 0 })
   const [statusFilter, setStatus]     = useState<StatusFilter>('all')
+  const [supplierFilter, setSupplierFilter] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+  const debouncedSearch               = useDebounce(searchInput.trim(), 350)
   const [orderPage, setOrderPage]     = useState(1)
   const [loadingOrders, setLoadingOrders] = useState(true)
   const [orderModal, setOrderModal]   = useState(false)
@@ -88,15 +99,21 @@ export default function PurchasesPage() {
 
   // ── Fetch órdenes ──────────────────────────────────────
   const statusFilterRef = useRef(statusFilter)
+  const supplierFilterRef = useRef(supplierFilter)
+  const searchRef = useRef(debouncedSearch)
   const orderPageRef = useRef(orderPage)
   useEffect(() => { statusFilterRef.current = statusFilter }, [statusFilter])
+  useEffect(() => { supplierFilterRef.current = supplierFilter }, [supplierFilter])
+  useEffect(() => { searchRef.current = debouncedSearch }, [debouncedSearch])
 
   const fetchOrders = useCallback(async () => {
     setLoadingOrders(true)
     try {
       const res = await api.get<PaginatedResponse<PurchaseOrder>>('/api/purchases', {
         status: statusFilterRef.current !== 'all' ? statusFilterRef.current : undefined,
-        page: orderPageRef.current, limit: 20,
+        supplier_id: supplierFilterRef.current || undefined,
+        search: searchRef.current || undefined,
+        page: orderPageRef.current, limit: ORDERS_PER_PAGE,
       })
       setOrders(res.data)
       setOrderPag(res.pagination)
@@ -108,7 +125,7 @@ export default function PurchasesPage() {
     orderPageRef.current = 1
     setOrderPage(1)
     fetchOrders()
-  }, [statusFilter, fetchOrders])
+  }, [statusFilter, supplierFilter, debouncedSearch, fetchOrders])
 
   const handlePageChange = useCallback((newPage: number) => {
     orderPageRef.current = newPage
@@ -127,6 +144,9 @@ export default function PurchasesPage() {
   }, [])
 
   useEffect(() => { if (tab === 'suppliers') fetchSuppliers() }, [tab, fetchSuppliers])
+
+  // Cargar proveedores al montar para el filtro de órdenes (dropdown)
+  useEffect(() => { fetchSuppliers() }, [fetchSuppliers])
 
   // ── Imprimir remito de compra ──────────────────────────
   const printRemito = (d: PurchaseOrder) => {
@@ -168,7 +188,7 @@ export default function PurchasesPage() {
       @media print{button{display:none}}
     </style></head><body>
     <h1>Remito de compra</h1>
-    <p class="num">N° ${d.id.slice(0, 8).toUpperCase()} · ${date}</p>
+    <p class="num">N° ${d.order_number ?? d.id.slice(0, 8).toUpperCase()} · ${date}</p>
 
     <div class="grid">
       <div class="box">
@@ -330,26 +350,73 @@ export default function PurchasesPage() {
         {/* ── TAB: ÓRDENES ─────────────────────────────── */}
         {tab === 'orders' && (
           <>
-            <div className="flex gap-2 flex-wrap">
-              {statusFilters.map(f => (
-                <button key={f.key} onClick={() => setStatus(f.key)}
-                  className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${
-                    statusFilter === f.key
-                      ? 'bg-[var(--accent)] text-white'
-                      : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-                  }`}>
-                  {f.label}
+            {/* Buscador */}
+            <div className="relative">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text3)]" />
+              <input
+                value={searchInput}
+                onChange={e => setSearchInput(e.target.value)}
+                placeholder="Buscar por N° de orden, proveedor o notas..."
+                className="w-full pl-9 pr-9 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+              />
+              {searchInput && (
+                <button
+                  onClick={() => setSearchInput('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text3)] hover:text-[var(--text)]"
+                  aria-label="Limpiar búsqueda"
+                >
+                  <X size={15} />
                 </button>
-              ))}
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
+                {statusFilters.map(f => (
+                  <button key={f.key} onClick={() => setStatus(f.key)}
+                    className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${
+                      statusFilter === f.key
+                        ? 'bg-[var(--accent)] text-white'
+                        : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                    }`}>
+                    {f.label}
+                  </button>
+                ))}
+                {suppliers.length > 0 && (
+                  <select
+                    value={supplierFilter}
+                    onChange={e => setSupplierFilter(e.target.value)}
+                    className="px-3 py-1.5 text-xs rounded-full font-medium bg-[var(--surface2)] text-[var(--text2)] border border-[var(--border)] focus:outline-none focus:border-[var(--accent)] cursor-pointer"
+                  >
+                    <option value="">Todos los proveedores</option>
+                    {suppliers.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              {!loadingOrders && orderPag.total > 0 && (
+                <span className="text-xs text-[var(--text3)]">
+                  {orderPag.total} {orderPag.total === 1 ? 'orden' : 'órdenes'}
+                </span>
+              )}
             </div>
 
             {loadingOrders ? <PageLoader /> : orders.length === 0 ? (
-              <EmptyState
-                icon={Truck}
-                title="Sin órdenes de compra"
-                description="Creá tu primera orden para gestionar las compras a proveedores."
-                action={<Button onClick={() => setOrderModal(true)}><Plus size={15} /> Nueva orden</Button>}
-              />
+              debouncedSearch || statusFilter !== 'all' || supplierFilter ? (
+                <EmptyState
+                  icon={Search}
+                  title="Sin resultados"
+                  description="No se encontraron órdenes con los filtros aplicados. Probá con otra búsqueda o estado."
+                />
+              ) : (
+                <EmptyState
+                  icon={Truck}
+                  title="Sin órdenes de compra"
+                  description="Creá tu primera orden para gestionar las compras a proveedores."
+                  action={<Button onClick={() => setOrderModal(true)}><Plus size={15} /> Nueva orden</Button>}
+                />
+              )
             ) : (
               <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
                 <table className="w-full text-sm">
@@ -358,6 +425,7 @@ export default function PurchasesPage() {
                       <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">N°</th>
                       <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Fecha</th>
                       <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Proveedor</th>
+                      <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Ítems</th>
                       <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Estado</th>
                       <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Total</th>
                     </tr>
@@ -366,6 +434,7 @@ export default function PurchasesPage() {
                     {orders.map(order => {
                       const sc = statusConfig[order.status]
                       const supplier = order.suppliers as { name: string } | undefined
+                      const itemCount = order.items_count?.[0]?.count ?? 0
                       return (
                         <tr
                           key={order.id}
@@ -373,13 +442,16 @@ export default function PurchasesPage() {
                           className="hover:bg-[var(--surface2)] transition-colors cursor-pointer"
                         >
                           <td className="px-4 py-3 mono text-xs font-medium text-[var(--text2)]">
-                            #{order.id.slice(0, 8).toUpperCase()}
+                            {orderLabel(order)}
                           </td>
                           <td className="px-4 py-3 text-xs mono text-[var(--text2)]">
                             {formatDate(order.created_at)}
                           </td>
                           <td className="px-4 py-3 font-medium text-[var(--text)]">
                             {supplier?.name ?? <span className="text-[var(--text3)]">Sin proveedor</span>}
+                          </td>
+                          <td className="px-4 py-3 text-center text-xs text-[var(--text2)] hidden sm:table-cell">
+                            {itemCount}
                           </td>
                           <td className="px-4 py-3 text-center">
                             <Badge variant={sc.variant}>{sc.label}</Badge>
@@ -522,7 +594,7 @@ export default function PurchasesPage() {
               <div>
                 <h2 className="text-base font-semibold text-[var(--text)]">Detalle de orden</h2>
                 {detailOrder && (
-                  <p className="text-xs mono text-[var(--text3)] mt-0.5">#{detailOrder.id.slice(0, 8).toUpperCase()}</p>
+                  <p className="text-xs mono text-[var(--text3)] mt-0.5">{orderLabel(detailOrder)}</p>
                 )}
               </div>
               <button onClick={() => setDetailModal(false)} className="p-1 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)]">✕</button>

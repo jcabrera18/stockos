@@ -140,6 +140,7 @@ export interface PurchaseOrder {
   business_id: string
   supplier_id?: string
   user_id?: string
+  order_number?: number
   status: 'pending' | 'received' | 'cancelled'
   subtotal: number
   total: number
@@ -151,6 +152,7 @@ export interface PurchaseOrder {
   suppliers?: { name: string }
   users?: { full_name: string }
   purchase_items?: PurchaseItem[]
+  items_count?: { count: number }[]
 }
 
 export interface PurchaseItem {

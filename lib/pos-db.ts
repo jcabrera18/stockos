@@ -4,7 +4,7 @@
  * scan offline y búsqueda sin latencia de red.
  */
 import Dexie, { type Table } from 'dexie'
-import type { Product } from '@/types'
+import type { Product, StockSummary } from '@/types'
 import type { Promotion } from '@/lib/promoUtils'
 import type { CustomerSummary } from '@/app/customers/page'
 
@@ -64,6 +64,7 @@ export interface PendingOrder {
 
 class POSDatabase extends Dexie {
   products!: Table<Product>
+  catalogProducts!: Table<StockSummary>
   barcodes!: Table<LocalBarcode>
   priceLists!: Table<LocalPriceList>
   priceRules!: Table<LocalPriceRule>
@@ -125,6 +126,22 @@ class POSDatabase extends Dexie {
       syncMeta:       'key',
       pendingSales:   'id, status, created_at',
       pendingOrders:  'id, status, created_at',
+    })
+    // catalogProducts: catálogo business-wide (stock agregado, sin warehouse_id)
+    // para la página /products. Separado del store `products` del POS, que guarda
+    // stock por depósito y rompería la semántica business-wide de la grilla admin.
+    this.version(6).stores({
+      products:        'id, name, barcode, updated_at',
+      catalogProducts: 'id, name, sku, barcode, updated_at',
+      barcodes:        'barcode, product_id',
+      priceLists:      'id',
+      priceRules:      'id, product_id, price_list_id',
+      priceOverrides:  'id, product_id',
+      promotions:      'id, scope, scope_id',
+      customers:       'id, full_name, document, phone, customer_code',
+      syncMeta:        'key',
+      pendingSales:    'id, status, created_at',
+      pendingOrders:   'id, status, created_at',
     })
   }
 }

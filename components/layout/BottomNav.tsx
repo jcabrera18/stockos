@@ -121,7 +121,7 @@ export function BottomNav() {
                 const active = pathname === href || pathname.startsWith(href + '/')
                 const pending = pendingHref === href
                 return (
-                  <Link key={href} href={href}
+                  <Link key={href} href={href} prefetch={false}
                     onClick={() => { if (!active) setPendingHref(href) }}
                     className={cn(
                       'relative flex flex-col items-center justify-center gap-0.5 px-3 py-2.5 min-w-0 flex-1 transition-colors',
@@ -199,7 +199,7 @@ export function BottomNav() {
                       {visibleItems.map(({ href, label, icon: Icon }) => {
                         const active = pathname === href || pathname.startsWith(href + '/')
                         return (
-                          <Link key={href} href={href}
+                          <Link key={href} href={href} prefetch={false}
                             className={cn(
                               'flex flex-col items-center gap-1.5 px-2 py-3 rounded-xl transition-all',
                               active
