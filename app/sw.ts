@@ -4,6 +4,7 @@ import {
   CacheableResponsePlugin,
   ExpirationPlugin,
   NetworkFirst,
+  NetworkOnly,
   Serwist,
   StaleWhileRevalidate,
 } from 'serwist'
@@ -31,6 +32,18 @@ const REALTIME_API = /\/api\/(cash-register|sales|pos|auth)\b/
 // un catch-all NetworkOnly y antes tiene un `cross-origin` NetworkFirst que si no
 // caparía estas requests). El orden de registro define qué regla gana.
 const apiCaching: RuntimeCaching[] = [
+  // Sync masivo del catálogo (grilla /products + cache del POS): estas requests
+  // (limit=500 o updated_since) ya tienen su cache persistente en IndexedDB. Pasarlas
+  // por StaleWhileRevalidate las duplicaría (doble cache) y le devolvería al sync datos
+  // stale, dejando el catálogo un ciclo atrasado. Van siempre a red fresca; si no hay
+  // conexión el sync falla y reintenta, y IndexedDB sigue sirviendo lo último guardado.
+  {
+    matcher: ({ url, request }) =>
+      request.method === 'GET' &&
+      url.href.startsWith(API_URL) &&
+      (url.searchParams.get('limit') === '500' || url.searchParams.has('updated_since')),
+    handler: new NetworkOnly(),
+  },
   // Tiempo real → NetworkFirst: red primero, cache solo si no hay internet.
   {
     matcher: ({ url, request }) =>
@@ -41,7 +54,9 @@ const apiCaching: RuntimeCaching[] = [
       cacheName: 'api-realtime',
       networkTimeoutSeconds: 10,
       plugins: [
-        new CacheableResponsePlugin({ statuses: [0, 200] }),
+        // Solo 200: NO cachear status 0 (respuestas opacas / errores de red), que
+        // si no se guardan como "vacío" y se sirven stale rompiendo la pantalla.
+        new CacheableResponsePlugin({ statuses: [200] }),
         new ExpirationPlugin({ maxEntries: 32, maxAgeSeconds: 60 * 60 }),
       ],
     }),
@@ -55,7 +70,9 @@ const apiCaching: RuntimeCaching[] = [
     handler: new StaleWhileRevalidate({
       cacheName: 'api-data',
       plugins: [
-        new CacheableResponsePlugin({ statuses: [0, 200] }),
+        // Solo 200: ver nota arriba. Cachear status 0 hacía que una respuesta
+        // fallida/vacía quedara servida indefinidamente (catálogo en blanco).
+        new CacheableResponsePlugin({ statuses: [200] }),
         new ExpirationPlugin({ maxEntries: 128, maxAgeSeconds: 60 * 60 * 24 }),
       ],
     }),

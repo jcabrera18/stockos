@@ -142,8 +142,16 @@ async function fetchAllCatalog(since?: string): Promise<StockSummary[]> {
  */
 export async function syncCatalog(): Promise<void> {
   const meta = await posDB.syncMeta.get('catalog_products')
-  const since = meta?.synced_at
   const now = new Date().toISOString()
+
+  // Self-heal de cursor envenenado: si hay cursor incremental pero el store está
+  // VACÍO, significa que un sync previo recibió una respuesta vacía (ej. el service
+  // worker sirviendo cache stale durante una caída del backend) y guardó el
+  // timestamp. A partir de ahí cada sync incremental pregunta "¿qué cambió desde
+  // entonces?" → nada → el catálogo queda vacío para siempre en ese dispositivo.
+  // Si está vacío, ignoramos el cursor y hacemos full fetch para recuperarlo.
+  const cachedCount = await posDB.catalogProducts.count()
+  const since = cachedCount > 0 ? meta?.synced_at : undefined
 
   const products = await fetchAllCatalog(since)
 
