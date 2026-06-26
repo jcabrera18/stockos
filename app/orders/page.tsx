@@ -20,7 +20,7 @@ import type { PriceList } from '@/app/price-lists/page'
 import {
   Plus, Search, Package, CheckCircle, Clock, Truck,
   X, Minus, Trash2, ChevronRight, DollarSign, AlertCircle,
-  ClipboardList, Printer, Receipt, FileText, RefreshCw,
+  ClipboardList, Printer, Receipt, FileText, RefreshCw, Copy,
 } from 'lucide-react'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
@@ -1259,6 +1259,55 @@ function OrdersPageInner() {
     setWithdrawQty(prev => ({ ...prev, [id]: n === 0 ? '' : String(n) }))
   }
 
+  // Modo retiro: arma un texto estilo WhatsApp con lo que al cliente le queda
+  // pendiente de retirar (lo que tiene "a favor") y lo copia al portapapeles para
+  // pegarlo en el chat. Mismo patrón que "Copiar para WhatsApp" de presupuestos.
+  const copyPickupText = async (d: OrderDetail) => {
+    const biz = authUser?.business
+    const num = d.id.slice(0, 8).toUpperCase()
+    const firstName = d.customer_name?.trim().split(/\s+/)[0] ?? ''
+
+    const pendingItems = d.order_items
+      .map(i => ({ name: i.products?.name ?? i.product_name ?? '(producto)', pending: i.quantity - (i.quantity_delivered ?? 0) }))
+      .filter(i => i.pending > 0)
+
+    if (pendingItems.length === 0) {
+      toast.info('Este pedido ya fue retirado por completo')
+      return
+    }
+
+    const totalUnits = pendingItems.reduce((s, i) => s + i.pending, 0)
+    const lines: string[] = []
+    lines.push(`*Pedido N° ${num}*`)
+    if (biz?.name) lines.push(biz.name)
+    lines.push('')
+    lines.push(firstName ? `Hola ${firstName}! Te queda a favor para retirar:` : 'Te queda a favor para retirar:')
+    lines.push('')
+    for (const i of pendingItems) {
+      lines.push(`• ${i.pending} × ${i.name}`)
+    }
+    lines.push('')
+    lines.push(`*Total a retirar: ${totalUnits} ${totalUnits === 1 ? 'unidad' : 'unidades'}*`)
+
+    const text = lines.join('\n')
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success('Copiado — pegalo en el chat del cliente')
+    } catch {
+      // Fallback para navegadores sin permiso de Clipboard API (o contexto no seguro).
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'; ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try {
+        document.execCommand('copy')
+        toast.success('Copiado — pegalo en el chat del cliente')
+      } catch { toast.error('No se pudo copiar') }
+      document.body.removeChild(ta)
+    }
+  }
+
   const handleWithdraw = async () => {
     if (!withdrawOrderId || !detail) return
     const items = Object.entries(withdrawQty)
@@ -1266,9 +1315,10 @@ function OrdersPageInner() {
       .filter(i => i.quantity > 0)
     if (items.length === 0) { toast.error('Ingresá al menos una cantidad a retirar'); return }
 
+    const orderId = withdrawOrderId
     setWithdrawing(true)
     try {
-      await api.post(`/api/orders/${withdrawOrderId}/deliveries`, {
+      await api.post(`/api/orders/${orderId}/deliveries`, {
         items,
         notes: withdrawNotes || null,
       })
@@ -1276,11 +1326,26 @@ function OrdersPageInner() {
       setWithdrawModal(false)
       setWithdrawOrderId(null)
       setWithdrawQty({}); setWithdrawNotes('')
+      // Actualización optimista del drawer: incrementamos quantity_delivered con lo
+      // que acabamos de retirar para que la info refleje el retiro al instante, sin
+      // depender de que el refetch (que puede tardar varios segundos) llegue antes
+      // de que el usuario reabra el modal y reintente sobre datos viejos.
+      const deltas = new Map(items.map(i => [i.order_item_id, i.quantity]))
+      setDetail(prev => prev && prev.id === orderId ? {
+        ...prev,
+        order_items: prev.order_items.map(oi =>
+          deltas.has(oi.id)
+            ? { ...oi, quantity_delivered: (oi.quantity_delivered ?? 0) + deltas.get(oi.id)! }
+            : oi
+        ),
+      } : prev)
       fetchOrders()
       // El remito de cada retiro se imprime a demanda desde el historial.
-      const updated = await api.get<OrderDetail>(`/api/orders/${withdrawOrderId}`)
-      setDetail(updated)
-      fetchDeliveries(withdrawOrderId)
+      // Refetch de confirmación: reconcilia el estado real (status del pedido, etc.).
+      api.get<OrderDetail>(`/api/orders/${orderId}`)
+        .then(updated => setDetail(prev => prev && prev.id === orderId ? updated : prev))
+        .catch(() => {})
+      fetchDeliveries(orderId)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al registrar el retiro')
     } finally { setWithdrawing(false) }
@@ -1640,9 +1705,14 @@ function OrdersPageInner() {
                     <p className="text-[11px] text-[var(--text3)]">La deuda está cargada en la cuenta corriente. El cliente puede retirar aunque no haya pagado.</p>
                   </div>
                   {detail.status !== 'delivered' && (
-                    <Button size="sm" className="flex-shrink-0" onClick={() => { setWithdrawOrderId(detail.id); setWithdrawQty({}); setWithdrawNotes(''); setWithdrawSearch(''); setWithdrawShowDelivered(false); setWithdrawShowNote(false); setWithdrawModal(true) }}>
-                      Registrar retiro
-                    </Button>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <Button size="sm" variant="secondary" onClick={() => copyPickupText(detail)}>
+                        <Copy size={14} /> <span className="hidden sm:inline">Enviar pendientes</span>
+                      </Button>
+                      <Button size="sm" onClick={() => { setWithdrawOrderId(detail.id); setWithdrawQty({}); setWithdrawNotes(''); setWithdrawSearch(''); setWithdrawShowDelivered(false); setWithdrawShowNote(false); setWithdrawModal(true) }}>
+                        Registrar retiro
+                      </Button>
+                    </div>
                   )}
                 </div>
                 <div className="space-y-1.5">
