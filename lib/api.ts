@@ -160,7 +160,39 @@ async function refreshAccessToken(prevToken: string): Promise<string | null> {
   }
 }
 
+// ── Indicador global de carga ──────────────────────────────────────────────
+// Contador de requests en vuelo para que la UI pueda mostrar una barra de
+// progreso global. Centralizado acá porque TODA la app pasa por apiFetch, así
+// no hace falta instrumentar página por página. El caso que cubre: navegás en
+// mobile, la ruta cambia al instante pero el fetch de datos tarda (cold start
+// de Railway, ~20s) y la pantalla quedaba en blanco sin ninguna señal de vida.
+let activeRequests = 0
+const loadingListeners = new Set<(active: number) => void>()
+
+export function subscribeLoading(listener: (active: number) => void): () => void {
+  loadingListeners.add(listener)
+  listener(activeRequests)
+  return () => { loadingListeners.delete(listener) }
+}
+
+function setActiveRequests(n: number) {
+  activeRequests = n < 0 ? 0 : n
+  for (const l of loadingListeners) l(activeRequests)
+}
+
 export async function apiFetch<T = unknown>(
+  path: string,
+  options: FetchOptions = {}
+): Promise<T> {
+  setActiveRequests(activeRequests + 1)
+  try {
+    return await apiFetchImpl<T>(path, options)
+  } finally {
+    setActiveRequests(activeRequests - 1)
+  }
+}
+
+async function apiFetchImpl<T = unknown>(
   path: string,
   options: FetchOptions = {}
 ): Promise<T> {

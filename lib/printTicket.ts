@@ -261,6 +261,84 @@ export function buildInvoiceTicketHtml(inv: TicketInvoiceData, biz: TicketBusine
     ${footer}`)
 }
 
+// ── Recibo de estado de cuenta corriente (canónico) ─────────────────────────
+export interface TicketAccountData {
+  customerName: string
+  document?: string | null
+  documentType?: string | null
+  phone?: string | null
+  address?: string | null
+  currentBalance: number
+  movements: Array<{
+    type: 'sale' | 'payment' | 'adjustment'
+    description: string
+    amount: number
+    balance_after: number
+    created_at: string
+  }>
+}
+
+const MOV_LABELS: Record<string, string> = { sale: 'Venta', payment: 'Pago', adjustment: 'Ajuste' }
+
+export function buildAccountReceiptHtml(acc: TicketAccountData, biz: TicketBusiness): string {
+  const meta = [
+    metaRow('Cliente', esc(acc.customerName), { strong: true }),
+    acc.document ? metaRow(acc.documentType ?? 'Documento', esc(acc.document), { mono: true }) : '',
+    acc.phone ? metaRow('Teléfono', esc(acc.phone)) : '',
+    acc.address ? metaRow('Domicilio', esc(acc.address)) : '',
+  ].join('')
+
+  const balance = acc.currentBalance
+  const balanceLabel = balance > 0 ? 'Saldo deudor' : balance < 0 ? 'Saldo a favor' : 'Saldo'
+  const balanceVal = fmt(Math.abs(balance))
+
+  const shown = acc.movements.slice(0, 12)
+  const movs = shown.map(m => {
+    const label = MOV_LABELS[m.type] ?? 'Movimiento'
+    const amt = m.amount
+    return `
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <span style="flex:1;font-size:13px;font-weight:600;color:#000;line-height:1.25;">${esc(label)} — ${esc(m.description)}</span>
+          <span style="flex-shrink:0;font-size:13px;font-weight:700;color:#000;line-height:1.25;white-space:nowrap;">${amt > 0 ? '+' : ''}${fmt(amt)}</span>
+        </div>
+        <div style="font-size:11px;font-weight:500;color:#000;margin-top:1px;">${esc(fmtDateTime(m.created_at))} · Saldo: ${fmt(m.balance_after)}</div>
+      </div>`
+  }).join('')
+
+  const moreNote = acc.movements.length > shown.length
+    ? `<div style="text-align:center;font-size:10px;color:#666;margin-top:2px;">… ${acc.movements.length - shown.length} movimientos anteriores</div>`
+    : ''
+
+  const accFooter = `
+    ${SEP}
+    <div style="text-align:center;line-height:1.8;">
+      <div style="font-size:13px;font-weight:600;color:#000;">¡Gracias por su confianza!</div>
+      <div style="font-size:10px;color:#888;margin-top:2px;letter-spacing:0.05em;">stockos.digital</div>
+    </div>`
+
+  return wrap(`
+    ${bizHeader(biz)}
+    ${SEP}
+    <div style="text-align:center;padding:4px 0;">
+      <div style="font-size:16px;font-weight:800;letter-spacing:0.06em;text-transform:uppercase;color:#000;">Estado de cuenta</div>
+      <div style="font-size:10px;color:#666;margin-top:3px;">${esc(fmtDateTime(new Date().toISOString()))}</div>
+    </div>
+    ${SEP}
+    <div style="line-height:1.4;">${meta}</div>
+    ${SEP}
+    <div style="padding-top:2px;">
+      <div style="font-size:11px;font-weight:700;color:#000;text-transform:uppercase;letter-spacing:0.06em;">${balanceLabel}</div>
+      <div style="font-size:24px;font-weight:800;color:#000;letter-spacing:-0.02em;line-height:1.15;margin-top:2px;word-break:break-word;">${balanceVal}</div>
+    </div>
+    ${shown.length ? `
+    ${SEP}
+    <div style="font-size:10px;font-weight:700;color:#000;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">Últimos movimientos</div>
+    ${movs}
+    ${moreNote}` : ''}
+    ${accFooter}`)
+}
+
 // ── QR de ARCA ────────────────────────────────────────────────────────────
 const QR_TIPO_CMP: Record<string, number> = {
   A: 1, B: 6, C: 11, R: 91, NCA: 3, NCB: 8, NCC: 13, NDA: 2, NDB: 7, NDC: 12,

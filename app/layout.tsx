@@ -7,6 +7,7 @@ import './globals.css'
 const inter = Inter({ subsets: ['latin'], weight: ['400', '500', '600', '700', '800'], display: 'swap' })
 import { Toaster } from 'sonner'
 import { AppShellWrapper } from '@/components/layout/AppShellWrapper'
+import { GlobalLoadingBar } from '@/components/layout/GlobalLoadingBar'
 import { OfflineBanner } from '@/components/layout/OfflineBanner'
 import { ServiceWorkerUpdater } from '@/components/layout/ServiceWorkerUpdater'
 import { PostHogProvider } from '@/components/PostHogProvider'
@@ -68,6 +69,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="es" data-theme="dark" suppressHydrationWarning className={inter.className}>
       <body>
+        <GlobalLoadingBar />
         <Suspense>
           <PostHogProvider>
             <AppShellWrapper>

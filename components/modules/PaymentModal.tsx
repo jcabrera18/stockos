@@ -18,6 +18,8 @@ interface PaymentModalProps {
   onClose: () => void
   onSaved: () => void
   customer: CustomerSummary | null
+  /** Segmento inicial: 'pay' (cobrar) o 'debt' (agregar deuda). Default: 'pay'. */
+  initialTab?: 'pay' | 'debt'
 }
 
 interface ReceiptData {
@@ -45,29 +47,47 @@ const METHOD_LABELS: Record<string, string> = {
   debito: 'Débito', credito: 'Crédito', qr: 'QR', cheque: 'Cheque',
 }
 
-export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalProps) {
+export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'pay' }: PaymentModalProps) {
   const { user } = useAuth()
   const { workstation } = useWorkstation()
+  // Solo owner/admin puede agregar deuda (coincide con el backend: /adjustment es adminOnly)
+  const canAddDebt = user?.role === 'owner' || user?.role === 'admin'
+
+  const [tab, setTab] = useState<'pay' | 'debt'>(initialTab)
   const [step, setStep] = useState<'form' | 'receipt'>('form')
+
+  // ── Cobrar ──
   const [amount, setAmount] = useState('')
   const [method, setMethod] = useState('efectivo')
   const [description, setDesc] = useState('Pago de cuenta corriente')
-  const [saving, setSaving] = useState(false)
   const [payAll, setPayAll] = useState(false)
+
+  // ── Agregar deuda ──
+  const [debtMode, setDebtMode] = useState<'percent' | 'fixed'>('percent')
+  const [percent, setPercent] = useState('')
+  const [debtAmount, setDebtAmount] = useState('')
+  const [debtReason, setDebtReason] = useState('Recargo por mora')
+
+  const [saving, setSaving] = useState(false)
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
   const receiptRef = useRef<HTMLDivElement>(null)
   const printRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (open) {
+      setTab(canAddDebt ? initialTab : 'pay')
       setStep('form')
       setAmount('')
       setMethod('efectivo')
       setDesc('Pago de cuenta corriente')
       setPayAll(false)
+      setDebtMode('percent')
+      setPercent('')
+      setDebtAmount('')
+      setDebtReason('Recargo por mora')
       setReceipt(null)
     }
-  }, [open])
+  }, [open, initialTab, canAddDebt])
 
   useEffect(() => {
     if (payAll && customer) setAmount(String(customer.current_balance))
@@ -106,6 +126,30 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
     } finally { setSaving(false) }
   }
 
+  const handleAddDebt = async () => {
+    if (!customer) return
+    const debtNum = Math.round(debtComputed * 100) / 100
+    if (!debtNum || debtNum <= 0) { toast.error('Ingresá un monto o porcentaje válido'); return }
+
+    const reason = debtReason.trim() || 'Ajuste de deuda'
+    const fullDesc = debtMode === 'percent' && Number(percent) > 0
+      ? `${reason} (${percent}%)`
+      : reason
+
+    setSaving(true)
+    try {
+      await api.post(`/api/customers/${customer.id}/adjustment`, {
+        amount: debtNum, // positivo = suma deuda
+        description: fullDesc,
+      })
+      toast.success(`Se agregaron ${formatCurrency(debtNum)} a la deuda`)
+      onSaved()
+      onClose()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al agregar la deuda')
+    } finally { setSaving(false) }
+  }
+
   const handlePrint = () => {
     const content = printRef.current
     if (!content) return
@@ -119,8 +163,17 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
   const hasCredit = currentBalance < 0
   const balanceAfter = currentBalance - amountNum
 
+  const debtComputed = debtMode === 'percent'
+    ? Math.abs(currentBalance) * (Number(percent) || 0) / 100
+    : Number(debtAmount) || 0
+  const balanceAfterDebt = currentBalance + debtComputed
+
+  const modalTitle = step === 'receipt'
+    ? 'Recibo de pago'
+    : tab === 'debt' ? 'Agregar deuda' : 'Registrar pago'
+
   return (
-    <Modal open={open} onClose={onClose} title={step === 'receipt' ? 'Recibo de pago' : 'Registrar pago'} size="sm">
+    <Modal open={open} onClose={onClose} title={modalTitle} size="sm">
 
       {/* ── Paso 1: Formulario ── */}
       {step === 'form' && (
@@ -141,55 +194,141 @@ export function PaymentModal({ open, onClose, onSaved, customer }: PaymentModalP
             )}
           </div>
 
-          {!hasCredit && (
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={payAll}
-                onChange={e => setPayAll(e.target.checked)}
-                className="w-4 h-4 accent-[var(--accent)]" />
-              <span className="text-sm text-[var(--text2)]">
-                Pagar saldo completo ({formatCurrency(customer.current_balance)})
-              </span>
-            </label>
-          )}
-
-          <Input label="Monto *" type="number" min="0.01" step="0.01"
-            value={amount} onChange={e => { setAmount(e.target.value); setPayAll(false) }}
-            placeholder="0.00" disabled={payAll} />
-
-          <Select label="Método de pago" options={PAYMENT_OPTIONS}
-            value={method} onChange={e => setMethod(e.target.value)} />
-
-          <Input label="Descripción" value={description}
-            onChange={e => setDesc(e.target.value)}
-            placeholder="Ej: Pago parcial, Pago con cheque..." />
-
-          {amountNum > 0 && (
-            <div className="space-y-1 px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)]">
-              <div className="flex justify-between text-xs text-[var(--text3)]">
-                <span>Saldo anterior</span>
-                <span className="mono">{formatCurrency(customer.current_balance)}</span>
-              </div>
-              <div className="flex justify-between text-xs text-[var(--accent)]">
-                <span>Pago aplicado</span>
-                <span className="mono">− {formatCurrency(amountNum)}</span>
-              </div>
-              <div className="flex justify-between text-sm font-bold pt-1 border-t border-[var(--border)]">
-                <span className="text-[var(--text)]">
-                  {balanceAfter === 0 ? '✓ Saldo cancelado' : balanceAfter < 0 ? 'Saldo a favor' : 'Saldo restante'}
-                </span>
-                <span className={`mono ${balanceAfter < 0 ? 'text-[var(--accent)]' : balanceAfter === 0 ? 'text-[var(--accent)]' : 'text-[var(--warning)]'}`}>
-                  {formatCurrency(balanceAfter)}
-                </span>
-              </div>
+          {/* Control segmentado: Cobrar / Agregar deuda (solo owner/admin) */}
+          {canAddDebt && (
+            <div className="flex p-1 gap-1 bg-[var(--surface2)] rounded-[var(--radius-md)]">
+              {(['pay', 'debt'] as const).map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTab(t)}
+                  className={`flex-1 py-1.5 text-sm font-medium rounded-[var(--radius-sm)] transition-colors ${tab === t
+                    ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm'
+                    : 'text-[var(--text3)] hover:text-[var(--text2)]'
+                    }`}
+                >
+                  {t === 'pay' ? 'Cobrar' : 'Agregar deuda'}
+                </button>
+              ))}
             </div>
           )}
 
-          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 border-t border-[var(--border)]">
-            <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
-              <Button onClick={handleSave} loading={saving}>Confirmar pago</Button>
-            </div>
-          </div>
+          {/* ── Segmento Cobrar ── */}
+          {tab === 'pay' && (
+            <>
+              {!hasCredit && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={payAll}
+                    onChange={e => setPayAll(e.target.checked)}
+                    className="w-4 h-4 accent-[var(--accent)]" />
+                  <span className="text-sm text-[var(--text2)]">
+                    Pagar saldo completo ({formatCurrency(customer.current_balance)})
+                  </span>
+                </label>
+              )}
+
+              <Input label="Monto *" type="number" min="0.01" step="0.01"
+                value={amount} onChange={e => { setAmount(e.target.value); setPayAll(false) }}
+                placeholder="0.00" disabled={payAll} />
+
+              <Select label="Método de pago" options={PAYMENT_OPTIONS}
+                value={method} onChange={e => setMethod(e.target.value)} />
+
+              <Input label="Descripción" value={description}
+                onChange={e => setDesc(e.target.value)}
+                placeholder="Ej: Pago parcial, Pago con cheque..." />
+
+              {amountNum > 0 && (
+                <div className="space-y-1 px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)]">
+                  <div className="flex justify-between text-xs text-[var(--text3)]">
+                    <span>Saldo anterior</span>
+                    <span className="mono">{formatCurrency(customer.current_balance)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-[var(--accent)]">
+                    <span>Pago aplicado</span>
+                    <span className="mono">− {formatCurrency(amountNum)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm font-bold pt-1 border-t border-[var(--border)]">
+                    <span className="text-[var(--text)]">
+                      {balanceAfter === 0 ? '✓ Saldo cancelado' : balanceAfter < 0 ? 'Saldo a favor' : 'Saldo restante'}
+                    </span>
+                    <span className={`mono ${balanceAfter < 0 ? 'text-[var(--accent)]' : balanceAfter === 0 ? 'text-[var(--accent)]' : 'text-[var(--warning)]'}`}>
+                      {formatCurrency(balanceAfter)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 border-t border-[var(--border)]">
+                <div className="flex justify-end gap-2">
+                  <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
+                  <Button onClick={handleSave} loading={saving}>Confirmar pago</Button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* ── Segmento Agregar deuda ── */}
+          {tab === 'debt' && canAddDebt && (
+            <>
+              {/* Toggle Porcentaje / Monto fijo */}
+              <div className="flex p-1 gap-1 bg-[var(--surface2)] rounded-[var(--radius-md)]">
+                {(['percent', 'fixed'] as const).map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setDebtMode(m)}
+                    className={`flex-1 py-1.5 text-sm font-medium rounded-[var(--radius-sm)] transition-colors ${debtMode === m
+                      ? 'bg-[var(--surface)] text-[var(--text)] shadow-sm'
+                      : 'text-[var(--text3)] hover:text-[var(--text2)]'
+                      }`}
+                  >
+                    {m === 'percent' ? 'Porcentaje' : 'Monto fijo'}
+                  </button>
+                ))}
+              </div>
+
+              {debtMode === 'percent' ? (
+                <Input label="Porcentaje sobre el saldo *" type="number" min="0.01" step="0.01"
+                  value={percent} onChange={e => setPercent(e.target.value)}
+                  placeholder="Ej: 10" hint="Se calcula sobre el saldo deudor actual" />
+              ) : (
+                <Input label="Monto a agregar *" type="number" min="0.01" step="0.01"
+                  value={debtAmount} onChange={e => setDebtAmount(e.target.value)}
+                  placeholder="0.00" />
+              )}
+
+              <Input label="Motivo" value={debtReason}
+                onChange={e => setDebtReason(e.target.value)}
+                placeholder="Ej: Recargo por mora, Interés..." />
+
+              {debtComputed > 0 && (
+                <div className="space-y-1 px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)]">
+                  <div className="flex justify-between text-xs text-[var(--text3)]">
+                    <span>Saldo actual</span>
+                    <span className="mono">{formatCurrency(currentBalance)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-[var(--danger)]">
+                    <span>{debtMode === 'percent' ? `Recargo (${percent || 0}%)` : 'Recargo'}</span>
+                    <span className="mono">+ {formatCurrency(debtComputed)}</span>
+                  </div>
+                  <div className="flex justify-between text-sm font-bold pt-1 border-t border-[var(--border)]">
+                    <span className="text-[var(--text)]">Nuevo saldo</span>
+                    <span className="mono text-[var(--danger)]">{formatCurrency(balanceAfterDebt)}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 border-t border-[var(--border)]">
+                <div className="flex justify-end gap-2">
+                  <Button variant="secondary" onClick={onClose} disabled={saving}>Cancelar</Button>
+                  <Button onClick={handleAddDebt} loading={saving} disabled={debtComputed <= 0}>
+                    Agregar deuda
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       )}
 
