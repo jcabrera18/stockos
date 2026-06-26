@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -18,7 +18,7 @@ import type { Product, Pagination as PaginationType } from '@/types'
 import type { PriceList } from '@/app/price-lists/page'
 import {
   Plus, Search, FileText, X, Minus, Trash2, ChevronRight,
-  AlertCircle, Printer, RefreshCw, Clock, ShoppingCart,
+  AlertCircle, Printer, RefreshCw, Clock, ShoppingCart, Copy,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { usePOSSync } from '@/hooks/usePOSSync'
@@ -131,14 +131,16 @@ export default function QuotesPage() {
   const [cart, setCart] = useState<CartItem[]>([])
   const [productQuery, setProductQuery] = useState('')
   const [productResults, setProductResults] = useState<Product[]>([])
+  const [productHighlight, setProductHighlight] = useState(0)
   const [searchingProducts, setSearchingProducts] = useState(false)
   const [savingQuote, setSavingQuote] = useState(false)
 
   // Cliente (opcional — se permite prospecto suelto)
   const [customerQuery, setCustomerQuery] = useState('')
-  const [customerResults, setCustomerResults] = useState<{ id: string; full_name: string; phone?: string; current_balance: number; credit_limit: number }[]>([])
+  const [customerResults, setCustomerResults] = useState<{ id: string; full_name: string; phone?: string; document?: string; current_balance: number; credit_limit: number }[]>([])
   const [searchingCustomers, setSearchingCustomers] = useState(false)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
+  const [customerHighlight, setCustomerHighlight] = useState(0)
   const customerSearchRequestRef = useRef(0)
 
   // Anulación
@@ -151,6 +153,7 @@ export default function QuotesPage() {
   const [convertCustomerQuery, setConvertCustomerQuery] = useState('')
   const [convertCustomerResults, setConvertCustomerResults] = useState<{ id: string; full_name: string; phone?: string }[]>([])
   const [convertWarehouseId, setConvertWarehouseId] = useState('')
+  const [convertPickupMode, setConvertPickupMode] = useState(false)
   const [converting, setConverting] = useState(false)
 
   const statusFilterRef = useRef(statusFilter)
@@ -182,6 +185,18 @@ export default function QuotesPage() {
     pageRef.current = newPage
     setPage(newPage)
     fetchQuotes()
+  }, [fetchQuotes])
+
+  // No hay realtime/polling: un presupuesto creado en otra PC no llega solo.
+  // Refrescamos al volver el foco a la pestaña para que aparezca sin recargar.
+  useEffect(() => {
+    const onFocus = () => { if (document.visibilityState === 'visible') fetchQuotes() }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onFocus)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onFocus)
+    }
   }, [fetchQuotes])
 
   // Cargar depósitos, listas de precio y overrides una vez
@@ -239,13 +254,13 @@ export default function QuotesPage() {
     const requestId = ++customerSearchRequestRef.current
     const timer = setTimeout(async () => {
       const local = (await searchCustomersLocal(query)).map(c => ({
-        id: c.id, full_name: c.full_name, phone: c.phone,
+        id: c.id, full_name: c.full_name, phone: c.phone, document: c.document,
         current_balance: c.current_balance, credit_limit: c.credit_limit,
       }))
       if (customerSearchRequestRef.current === requestId && local.length > 0) setCustomerResults(local)
       setSearchingCustomers(true)
       try {
-        const data = await api.get<{ id: string; full_name: string; phone?: string; current_balance: number; credit_limit: number }[]>(
+        const data = await api.get<{ id: string; full_name: string; phone?: string; document?: string; current_balance: number; credit_limit: number }[]>(
           `/api/customers/search?q=${encodeURIComponent(query)}`
         )
         if (customerSearchRequestRef.current === requestId) setCustomerResults(data)
@@ -257,6 +272,8 @@ export default function QuotesPage() {
     }, 180)
     return () => clearTimeout(timer)
   }, [customerQuery, selectedCustomerId])
+  useEffect(() => { setCustomerHighlight(0) }, [customerResults])
+  useEffect(() => { setProductHighlight(0) }, [productResults])
 
   // Búsqueda de clientes para el modal de conversión
   useEffect(() => {
@@ -294,6 +311,25 @@ export default function QuotesPage() {
     setCart(prev => [...prev, { product, quantity: 1, unit_price: price, discount: 0 }])
     setProductQuery('')
     setProductResults([])
+  }
+
+  // Navegación con teclado del dropdown de productos (↑/↓ + Enter, Esc para cerrar)
+  const handleProductKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (productResults.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setProductHighlight(h => Math.min(h + 1, productResults.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setProductHighlight(h => Math.max(h - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const p = productResults[productHighlight]
+      if (p) addToCart(p)
+    } else if (e.key === 'Escape') {
+      setProductQuery('')
+      setProductResults([])
+    }
   }
 
   const updateCartQty = (id: string, delta: number) =>
@@ -343,7 +379,7 @@ export default function QuotesPage() {
     if (cart.length === 0) { toast.error('Agregá al menos un producto'); return }
     setSavingQuote(true)
     try {
-      await api.post('/api/quotes', {
+      const created = await api.post<{ id: string }>('/api/quotes', {
         customer_id: selectedCustomerId ?? null,
         customer_name: customerName.trim(),
         customer_phone: customerPhone.trim() || null,
@@ -360,8 +396,16 @@ export default function QuotesPage() {
       })
       toast.success('Presupuesto creado')
       resetForm()
-      setNewQuoteModal(false)
+      // El presupuesto nuevo es el más reciente → siempre encabeza la página 1.
+      // Volvemos a la página 1 antes de refrescar para que aparezca al instante
+      // aunque estuvieras paginando.
+      pageRef.current = 1
+      setPage(1)
       fetchQuotes()
+      // Abrimos el detalle del presupuesto recién creado para tener Imprimir /
+      // WhatsApp a un click, sin tener que volver a buscarlo y reabrirlo.
+      if (created?.id) openDetail(created.id)
+      else setNewQuoteModal(false)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al crear el presupuesto')
     } finally { setSavingQuote(false) }
@@ -390,6 +434,7 @@ export default function QuotesPage() {
     setConvertCustomerResults([])
     const defWh = warehouses.find(w => w.is_default)
     setConvertWarehouseId(defWh?.id ?? warehouses[0]?.id ?? '')
+    setConvertPickupMode(false)
     setConvertModal(true)
   }
 
@@ -401,6 +446,7 @@ export default function QuotesPage() {
       const res = await api.post<{ order_id: string }>(`/api/quotes/${detail.id}/convert`, {
         customer_id: convertCustomerId,
         warehouse_id: convertWarehouseId || null,
+        pickup_mode: convertPickupMode,
       })
       toast.success('Presupuesto convertido en pedido')
       setConvertModal(false)
@@ -491,10 +537,78 @@ export default function QuotesPage() {
     setTimeout(() => win.print(), 300)
   }
 
+  // ─── Copiar presupuesto para WhatsApp ────────────────────
+  // Armamos el presupuesto como texto formateado (negritas estilo WhatsApp) y
+  // lo copiamos al portapapeles. El usuario lo pega en el chat que ya tiene
+  // abierto con el cliente, sin abrir pestañas nuevas. Para el PDF formal está
+  // el botón Imprimir (guardar como PDF y adjuntar).
+  const copyQuoteText = async (d: QuoteDetail) => {
+    const biz = authUser?.business
+    const num = d.id.slice(0, 8).toUpperCase()
+    const firstName = d.customer_name?.trim().split(/\s+/)[0] ?? ''
+    const lines: string[] = []
+    lines.push(`*Presupuesto N° ${num}*`)
+    if (biz?.name) lines.push(biz.name)
+    lines.push('')
+    lines.push(firstName ? `Hola ${firstName}! Te paso el presupuesto:` : 'Te paso el presupuesto:')
+    lines.push('')
+    for (const i of d.quote_items ?? []) {
+      const name = i.products?.name ?? i.product_name ?? '(producto)'
+      lines.push(`• ${i.quantity} × ${name} — ${formatCurrency(i.subtotal)}`)
+    }
+    lines.push('')
+    if (Number(d.discount) > 0) lines.push(`Descuento: −${formatCurrency(d.discount)}`)
+    lines.push(`*Total: ${formatCurrency(d.total)}*`)
+    if (d.valid_until) lines.push(`\nVálido hasta el ${formatDate(d.valid_until)}.`)
+    if (d.notes) lines.push(`\n${d.notes}`)
+
+    const text = lines.join('\n')
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success('Presupuesto copiado — pegalo en el chat del cliente')
+    } catch {
+      // Fallback para navegadores sin permiso de Clipboard API (o contexto no seguro).
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'; ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try {
+        document.execCommand('copy')
+        toast.success('Presupuesto copiado — pegalo en el chat del cliente')
+      } catch { toast.error('No se pudo copiar el presupuesto') }
+      document.body.removeChild(ta)
+    }
+  }
+
   const sidePanelOpen = detailModal || newQuoteModal
   useCollapseSidebar(sidePanelOpen)
   const trimmedCustomerQuery = customerQuery.trim()
   const showCustomerDropdown = !selectedCustomerId && trimmedCustomerQuery.length >= 2
+
+  const selectCustomer = (c: { id: string; full_name: string }) => {
+    setSelectedCustomerId(c.id)
+    setCustomerName(c.full_name)
+    setCustomerQuery('')
+    setCustomerResults([])
+  }
+  // Navegación con teclado del dropdown de clientes (↑/↓ + Enter, Esc para cerrar)
+  const handleCustomerKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (!showCustomerDropdown || customerResults.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setCustomerHighlight(h => Math.min(h + 1, customerResults.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setCustomerHighlight(h => Math.max(h - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const c = customerResults[customerHighlight]
+      if (c) selectCustomer(c)
+    } else if (e.key === 'Escape') {
+      setCustomerResults([])
+    }
+  }
 
   return (
     <AppShell>
@@ -746,6 +860,11 @@ export default function QuotesPage() {
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[var(--radius-md)] text-[var(--text2)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors">
                           <Printer size={14} /> Imprimir
                         </button>
+                        <button
+                          onClick={() => copyQuoteText(detail)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[var(--radius-md)] text-[var(--text2)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors">
+                          <Copy size={14} /> Copiar para WhatsApp
+                        </button>
                         {detail.status === 'draft' && (
                           <button
                             onClick={() => setCancelConfirm({ id: detail.id, customer_name: detail.customer_name })}
@@ -800,6 +919,7 @@ export default function QuotesPage() {
                       <input
                         value={customerName}
                         onChange={e => { setCustomerName(e.target.value); setCustomerQuery(e.target.value) }}
+                        onKeyDown={handleCustomerKeyDown}
                         placeholder="Buscar cliente o escribir nombre del prospecto..."
                         className="w-full pl-9 pr-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
                       />
@@ -807,17 +927,14 @@ export default function QuotesPage() {
                     <p className="text-[11px] text-[var(--text3)] mt-1">Si no seleccionás un cliente registrado, se cotiza como prospecto.</p>
                     {showCustomerDropdown && customerResults.length > 0 && (
                       <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-20 overflow-hidden">
-                        {customerResults.map(c => (
+                        {customerResults.map((c, idx) => (
                           <button key={c.id}
-                            onClick={() => {
-                              setSelectedCustomerId(c.id)
-                              setCustomerName(c.full_name)
-                              setCustomerQuery('')
-                              setCustomerResults([])
-                            }}
-                            className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
+                            onClick={() => selectCustomer(c)}
+                            onMouseEnter={() => setCustomerHighlight(idx)}
+                            className={`w-full flex items-center justify-between px-3 py-2.5 transition-colors text-left border-b border-[var(--border)] last:border-0 ${customerHighlight === idx ? 'bg-[var(--surface2)]' : ''}`}>
                             <div>
                               <p className="text-sm font-medium text-[var(--text)]">{c.full_name}</p>
+                              {c.document && <p className="text-xs text-[var(--text3)]">DNI {c.document}</p>}
                               {c.phone && <p className="text-xs text-[var(--text3)]">{c.phone}</p>}
                             </div>
                             {Number(c.current_balance) > 0 && (
@@ -837,8 +954,23 @@ export default function QuotesPage() {
                   <Input label="Teléfono (opcional)" value={customerPhone}
                     onChange={e => setCustomerPhone(e.target.value)} placeholder="11-1234-5678" />
                 )}
-                <Input label="Válido hasta" type="date" value={validUntil}
-                  onChange={e => setValidUntil(e.target.value)} hint="Aparece en el PDF" />
+                <div>
+                  <Input label="Válido hasta" type="date" value={validUntil}
+                    onChange={e => setValidUntil(e.target.value)} hint="Aparece en el PDF" />
+                  <div className="flex gap-1.5 mt-2">
+                    {[7, 15, 30].map(days => (
+                      <button key={days} type="button"
+                        onClick={() => {
+                          const d = new Date()
+                          d.setDate(d.getDate() + days)
+                          setValidUntil(d.toISOString().slice(0, 10))
+                        }}
+                        className="px-2.5 py-1 text-xs rounded-md border border-[var(--border)] text-[var(--text2)] hover:bg-[var(--surface2)] hover:border-[var(--brand)] transition-colors">
+                        {days} días
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               {/* Lista de precio */}
@@ -879,15 +1011,17 @@ export default function QuotesPage() {
                     <div className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
                   )}
                   <input value={productQuery} onChange={e => setProductQuery(e.target.value)}
+                    onKeyDown={handleProductKeyDown}
                     placeholder="Buscar producto por nombre o código..."
                     className="w-full pl-9 pr-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
                   />
                 </div>
                 {productResults.length > 0 && (
                   <div className="mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] overflow-hidden shadow-lg">
-                    {productResults.map(p => (
+                    {productResults.map((p, idx) => (
                       <button key={p.id} onClick={() => addToCart(p)}
-                        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
+                        onMouseEnter={() => setProductHighlight(idx)}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 transition-colors text-left border-b border-[var(--border)] last:border-0 ${productHighlight === idx ? 'bg-[var(--surface2)]' : ''}`}>
                         <div>
                           <p className="text-sm font-medium text-[var(--text)]">{p.name}</p>
                           {p.barcode && <p className="text-xs mono text-[var(--text3)]">{p.barcode}</p>}
@@ -1044,6 +1178,23 @@ export default function QuotesPage() {
               options={warehouses.map(w => ({ value: w.id, label: w.name }))}
               value={convertWarehouseId} onChange={e => setConvertWarehouseId(e.target.value)} />
           )}
+
+          {/* Modo retiro (corralón): deuda a cuenta corriente + retiros en varias veces */}
+          <div className="border border-[var(--border)] rounded-[var(--radius-md)] p-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={convertPickupMode}
+                onChange={e => setConvertPickupMode(e.target.checked)}
+                className="w-4 h-4 accent-[var(--accent)]" />
+              <span className="text-sm font-medium text-[var(--text)]">
+                Modo retiro (retira en varias veces)
+              </span>
+            </label>
+            {convertPickupMode && (
+              <p className="mt-2 text-[11px] text-[var(--text3)]">
+                La deuda se carga a la cuenta corriente del cliente al crear el pedido. Puede ir retirando la mercadería en varias veces y pagar cuando quiera (parcial o total).
+              </p>
+            )}
+          </div>
 
           <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
             <div className="flex justify-end gap-2">

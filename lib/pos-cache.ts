@@ -301,9 +301,16 @@ async function fetchAllProducts(warehouseId?: string | null, since?: string): Pr
 
 export async function syncProducts(warehouseId?: string | null): Promise<void> {
   const meta = await posDB.syncMeta.get('products')
-  const since = meta?.synced_at  // undefined en el primer sync → descarga todo
-
   const now = new Date().toISOString()
+
+  // Self-heal de cursor envenenado: si el store está VACÍO pero hay cursor, un sync
+  // previo recibió respuesta vacía (ej. SW sirviendo cache stale en una caída) y
+  // guardó el timestamp → los syncs incrementales nunca re-bajan el catálogo completo
+  // y el POS queda sin productos para siempre en ese dispositivo. Si está vacío,
+  // ignoramos el cursor y hacemos full fetch.
+  const cachedCount = await posDB.products.count()
+  const since = cachedCount > 0 ? meta?.synced_at : undefined
+
   const products = await fetchAllProducts(warehouseId, since)
 
   if (products.length === 0) {

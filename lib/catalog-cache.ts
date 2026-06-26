@@ -131,33 +131,46 @@ async function fetchAllCatalog(since?: string): Promise<StockSummary[]> {
   return [...first.data, ...rest.flatMap(r => r.data)]
 }
 
+// Throttle: evita syncs redundantes (ej. navegar a /products varias veces seguidas
+// → cada montaje dispara uno). Se puede saltear con { force: true } (ej. tras guardar).
+let lastSyncAt = 0
+const MIN_SYNC_GAP_MS = 30_000
+
 /**
- * Sincroniza el catálogo. Incremental por `updated_since` (solo trae los productos
- * modificados desde el último sync), o completo en el primer sync.
+ * Sincroniza el catálogo.
  *
- * Nota: v_stock_summary filtra is_active=true, así que un producto soft-deleted
- * desaparece del endpoint y NO vuelve en un sync incremental. Las bajas hechas
- * desde esta misma sesión se reflejan vía removeCatalogProduct(). Las bajas de
- * otros dispositivos se resuelven en el próximo full sync (cache vacío o forzado).
+ * - `full`: descarga completa con reemplazo (clear + bulkPut). Se usa al ENTRAR a la
+ *   página → trae todo fresco y **poda bajas hechas en otros dispositivos** (que el
+ *   sync incremental no puede detectar, porque un producto soft-deleted simplemente
+ *   desaparece del endpoint). También se fuerza si el store está vacío (self-heal del
+ *   cursor envenenado: un sync previo recibió vacío y guardó el timestamp).
+ * - sin `full`: incremental por `updated_since` (solo trae lo modificado) → barato,
+ *   para el refresh periódico en background.
+ * - `force`: saltea el throttle.
  */
-export async function syncCatalog(): Promise<void> {
+export async function syncCatalog(opts: { full?: boolean; force?: boolean } = {}): Promise<void> {
+  if (!opts.force && Date.now() - lastSyncAt < MIN_SYNC_GAP_MS) return
+  lastSyncAt = Date.now()
+
   const meta = await posDB.syncMeta.get('catalog_products')
   const now = new Date().toISOString()
 
-  // Self-heal de cursor envenenado: si hay cursor incremental pero el store está
-  // VACÍO, significa que un sync previo recibió una respuesta vacía (ej. el service
-  // worker sirviendo cache stale durante una caída del backend) y guardó el
-  // timestamp. A partir de ahí cada sync incremental pregunta "¿qué cambió desde
-  // entonces?" → nada → el catálogo queda vacío para siempre en ese dispositivo.
-  // Si está vacío, ignoramos el cursor y hacemos full fetch para recuperarlo.
   const cachedCount = await posDB.catalogProducts.count()
-  const since = cachedCount > 0 ? meta?.synced_at : undefined
+  const fullFetch = opts.full || cachedCount === 0
+  const since = fullFetch ? undefined : meta?.synced_at
 
   const products = await fetchAllCatalog(since)
+  const active = products.filter(p => p.is_active !== false)
 
-  if (products.length > 0) {
-    // Defensivo: si algún inactivo se colara, lo removemos en vez de guardarlo.
-    const active = products.filter(p => p.is_active !== false)
+  if (fullFetch) {
+    // Reemplazo total: clear + bulkPut → poda los productos que ya no existen.
+    await posDB.transaction('rw', posDB.catalogProducts, posDB.syncMeta, async () => {
+      await posDB.catalogProducts.clear()
+      if (active.length > 0) await posDB.catalogProducts.bulkPut(active)
+      await posDB.syncMeta.put({ key: 'catalog_products', synced_at: now })
+    })
+  } else if (products.length > 0) {
+    // Incremental: upsert de cambios + borrar los inactivos que vinieran.
     const inactiveIds = products.filter(p => p.is_active === false).map(p => p.id)
     await posDB.transaction('rw', posDB.catalogProducts, posDB.syncMeta, async () => {
       if (active.length > 0) await posDB.catalogProducts.bulkPut(active)

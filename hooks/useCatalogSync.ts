@@ -2,16 +2,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadCatalogMemory, syncCatalog, getLastCatalogSync } from '@/lib/catalog-cache'
 
-const SYNC_INTERVAL_MS = 5 * 60 * 1000  // 5 minutos
-const FOCUS_THROTTLE_MS = 2 * 60 * 1000 // mínimo entre syncs disparados por foco
+const SYNC_INTERVAL_MS = 2 * 60 * 1000  // 2 minutos (refresh incremental en background)
 
 /**
  * Maneja el ciclo de vida del cache local del catálogo (/products).
  *
- * - Al montar: construye memoria + sync (initCatalogCache)
- * - Cada 5 min y al recuperar foco: refresh incremental en background
- * - `ready` indica que el cache tiene datos para consultar localmente
- * - `lastSyncedAt` cambia en cada sync → la página re-consulta para reflejar fresh data
+ * - Al montar: pinta lo cacheado al instante + full sync (trae fresco y poda bajas).
+ * - Cada 2 min y al recuperar foco: refresh incremental en background.
+ * - El throttle de duplicados vive en `syncCatalog` (no re-sincroniza si ya lo hizo
+ *   hace <30s), así navegar a /products repetidas veces no dispara syncs redundantes.
+ * - `ready` indica que el cache tiene datos para consultar localmente.
+ * - `lastSyncedAt` cambia en cada sync → la página re-consulta para reflejar fresh data.
  *
  * Si el sync falla (sin conexión) la página sigue usando el fallback al server.
  */
@@ -21,17 +22,14 @@ export function useCatalogSync() {
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null)
   const initialized = useRef(false)
 
-  const lastSyncAtRef = useRef(0)
-
   const refreshTimestamp = useCallback(() => {
     getLastCatalogSync().then(setLastSyncedAt).catch(() => {})
   }, [])
 
-  const runSync = useCallback(async () => {
-    lastSyncAtRef.current = Date.now()
+  const runSync = useCallback(async (opts?: { full?: boolean; force?: boolean }) => {
     setSyncing(true)
     try {
-      await syncCatalog()
+      await syncCatalog(opts)
       setReady(true)
       refreshTimestamp()
     } catch {
@@ -50,19 +48,15 @@ export function useCatalogSync() {
       .then(hasData => { if (hasData) { setReady(true); refreshTimestamp() } })
       .catch(() => {})
 
-    // 2) Refrescar en background (primera carga descarga todo; luego incremental).
-    runSync()
+    // 2) Full sync al entrar: trae todo fresco y poda bajas de otros dispositivos.
+    runSync({ full: true })
   }, [refreshTimestamp, runSync])
 
   useEffect(() => {
     if (!ready) return
 
-    const interval = setInterval(runSync, SYNC_INTERVAL_MS)
-
-    const onFocus = () => {
-      if (Date.now() - lastSyncAtRef.current < FOCUS_THROTTLE_MS) return
-      runSync()
-    }
+    const interval = setInterval(() => runSync(), SYNC_INTERVAL_MS)
+    const onFocus = () => runSync() // el throttle de 30s vive en syncCatalog
     window.addEventListener('focus', onFocus)
 
     return () => {
@@ -71,7 +65,8 @@ export function useCatalogSync() {
     }
   }, [ready, runSync])
 
-  const forceSync = useCallback(() => runSync(), [runSync])
+  // force: saltea el throttle (ej. tras crear/editar un producto, para reflejarlo ya).
+  const forceSync = useCallback(() => runSync({ force: true }), [runSync])
 
   return { ready, syncing, lastSyncedAt, forceSync }
 }
