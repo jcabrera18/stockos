@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { X, AlertTriangle, Clock } from 'lucide-react'
+import { X, AlertTriangle } from 'lucide-react'
 import { useAuthContext } from '@/contexts/AuthContext'
 
 const WA_LINK = 'https://wa.me/5493438558913'
@@ -31,13 +31,8 @@ export function SubscriptionBanner() {
 
   useEffect(() => {
     if (!sub) return
-    if (status === 'active' || status === 'canceled') return
-
-    if (status === 'trialing') {
-      const days = daysUntil(sub.trial_ends_at)
-      if (days <= 3) setVisible(true)
-      return
-    }
+    // trialing y active los maneja el aviso persistente del sidebar (SidebarSubscriptionCard).
+    if (status === 'active' || status === 'canceled' || status === 'trialing') return
 
     // past_due: siempre mostrar, no se puede dismissear
     if (status === 'past_due') { setVisible(true); return }
@@ -51,27 +46,6 @@ export function SubscriptionBanner() {
   const handleClose = () => {
     dismissToday()
     setVisible(false)
-  }
-
-  // === BANNER: trial por vencer (≤ 3 días) ===
-  if (status === 'trialing') {
-    const days = daysUntil(sub.trial_ends_at)
-    return (
-      <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-3 px-4 py-2.5 bg-amber-500/90 backdrop-blur-sm text-white text-sm">
-        <div className="flex items-center gap-2">
-          <Clock size={15} className="shrink-0" />
-          <span>
-            Tu período de prueba vence en <strong>{days === 0 ? 'hoy' : `${days} día${days !== 1 ? 's' : ''}`}</strong>.{' '}
-            <a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="underline font-semibold">
-              Contactanos para continuar
-            </a>
-          </span>
-        </div>
-        <button onClick={handleClose} className="shrink-0 opacity-80 hover:opacity-100">
-          <X size={15} />
-        </button>
-      </div>
-    )
   }
 
   // === MODAL: grace o past_due ===

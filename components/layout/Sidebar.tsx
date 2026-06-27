@@ -13,6 +13,7 @@ import { Modal } from '@/components/ui/Modal'
 import { api } from '@/lib/api'
 import { useWorkstation } from '@/hooks/useWorkstation'
 import { useSidePanel } from '@/contexts/SidePanelContext'
+import { SidebarSubscriptionCard } from './SidebarSubscriptionCard'
 
 export function Sidebar() {
   const pathname = usePathname()
@@ -207,6 +208,11 @@ export function Sidebar() {
 
         {/* Footer */}
         <div className="px-2 py-3 border-t border-[var(--border)] space-y-0.5">
+          {!loading && (
+            <div className="mb-1.5">
+              <SidebarSubscriptionCard collapsed={collapsed} />
+            </div>
+          )}
           {settingsItem && !loading && renderItem(settingsItem)}
           <button
             onClick={toggle}

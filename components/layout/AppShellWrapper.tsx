@@ -6,6 +6,7 @@ import { BottomNav } from './BottomNav'
 import { ShoppingCart } from 'lucide-react'
 import { AuthProvider, useAuthContext } from '@/contexts/AuthContext'
 import { SubscriptionBanner } from './SubscriptionBanner'
+import { SidebarSubscriptionCard } from './SidebarSubscriptionCard'
 import { EmailConfirmBanner } from './EmailConfirmBanner'
 import { SidePanelProvider } from '@/contexts/SidePanelContext'
 
@@ -73,6 +74,10 @@ function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex h-screen bg-[var(--bg)] overflow-hidden">
         <Sidebar />
         <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
+          {/* Aviso de suscripción persistente en mobile (en desktop vive en el sidebar) */}
+          <div className="md:hidden sticky top-0 z-30">
+            <SidebarSubscriptionCard variant="mobile" />
+          </div>
           {children}
         </main>
         <BottomNav />
