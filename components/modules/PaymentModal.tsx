@@ -13,10 +13,20 @@ import type { CustomerSummary } from '@/app/customers/page'
 import { useAuth } from '@/hooks/useAuth'
 import { useWorkstation } from '@/hooks/useWorkstation'
 
+/** Movimiento recién registrado, para que el detalle lo refleje al instante. */
+export interface SavedMovement {
+  type: 'payment' | 'adjustment'
+  amount: number          // negativo = baja deuda (pago), positivo = sube deuda (ajuste)
+  balance_after: number
+  description: string
+  payment_method?: string
+  created_at: string
+}
+
 interface PaymentModalProps {
   open: boolean
   onClose: () => void
-  onSaved: () => void
+  onSaved: (movement?: SavedMovement) => void
   customer: CustomerSummary | null
   /** Segmento inicial: 'pay' (cobrar) o 'debt' (agregar deuda). Default: 'pay'. */
   initialTab?: 'pay' | 'debt'
@@ -109,18 +119,21 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
           : {}),
       })
 
+      const desc = description.trim() || 'Pago de cuenta corriente'
+      const balanceAfter = Number(customer.current_balance) - amountNum
+      const paidAt = new Date().toISOString()
       setReceipt({
         customerName: customer.full_name,
         customerDoc: customer.document,
         amount: amountNum,
         method,
-        description: description.trim() || 'Pago de cuenta corriente',
+        description: desc,
         balanceBefore: Number(customer.current_balance),
-        balanceAfter: Number(customer.current_balance) - amountNum,
-        paidAt: new Date().toISOString(),
+        balanceAfter,
+        paidAt,
       })
       setStep('receipt')
-      onSaved()
+      onSaved({ type: 'payment', amount: -amountNum, balance_after: balanceAfter, description: desc, payment_method: method, created_at: paidAt })
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al registrar el pago')
     } finally { setSaving(false) }
@@ -138,12 +151,13 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
 
     setSaving(true)
     try {
-      await api.post(`/api/customers/${customer.id}/adjustment`, {
+      const res = await api.post<{ success: boolean; balance_after?: number }>(`/api/customers/${customer.id}/adjustment`, {
         amount: debtNum, // positivo = suma deuda
         description: fullDesc,
       })
       toast.success(`Se agregaron ${formatCurrency(debtNum)} a la deuda`)
-      onSaved()
+      const balanceAfter = res?.balance_after ?? (Number(customer.current_balance) + debtNum)
+      onSaved({ type: 'adjustment', amount: debtNum, balance_after: balanceAfter, description: fullDesc, created_at: new Date().toISOString() })
       onClose()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al agregar la deuda')

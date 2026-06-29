@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Drawer } from '@/components/ui/Drawer'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -24,11 +24,17 @@ interface Movement {
   users?: { full_name: string }
 }
 
+import type { SavedMovement } from '@/components/modules/PaymentModal'
+
 interface CustomerDetailModalProps {
   open: boolean
   onClose: () => void
   customer: CustomerSummary | null
   onPayment: () => void
+  /** Cambia tras registrar un movimiento → fuerza re-fetch de saldo + historial. */
+  refreshKey?: number
+  /** Movimiento recién registrado: se muestra al instante mientras llega el re-fetch. */
+  seedMovement?: SavedMovement | null
 }
 
 const movementConfig = {
@@ -37,24 +43,65 @@ const movementConfig = {
   adjustment: { label: 'Ajuste', icon: SlidersHorizontal, color: 'text-[var(--warning)]' },
 }
 
-export function CustomerDetailModal({ open, onClose, customer, onPayment }: CustomerDetailModalProps) {
+// Mostramos pocos movimientos por página: clientes con mucho historial no
+// disparan un request gigante y el drawer carga rápido.
+const PAGE_SIZE = 10
+
+export function CustomerDetailModal({ open, onClose, customer, onPayment, refreshKey = 0, seedMovement = null }: CustomerDetailModalProps) {
   const { user } = useAuth()
   const [movements, setMovements] = useState<Movement[]>([])
-  const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 30, pages: 0 })
+  const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: PAGE_SIZE, pages: 0 })
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(false)
+  // Saldo propio: arranca del prop pero se actualiza con cada re-fetch y con el
+  // movimiento optimista, así no depende de que el padre re-pase el cliente.
+  const [balance, setBalance] = useState<number>(Number(customer?.current_balance ?? 0))
+
+  const customerId = customer?.id
+
+  // Trae saldo + historial juntos. No vacía la lista mientras carga para que el
+  // movimiento optimista (seed) no parpadee.
+  const refresh = useCallback(async () => {
+    if (!customerId) return
+    setLoading(true)
+    try {
+      const [movRes, cust] = await Promise.all([
+        api.get<{ data: Movement[]; pagination: PaginationType }>(`/api/customers/${customerId}/movements`, { page, limit: PAGE_SIZE }),
+        api.get<{ current_balance: number }>(`/api/customers/${customerId}`).catch(() => null),
+      ])
+      setMovements(movRes.data)
+      setPagination(movRes.pagination)
+      if (cust) setBalance(Number(cust.current_balance))
+    } catch (err) { console.error(err) }
+    finally { setLoading(false) }
+  }, [customerId, page])
 
   useEffect(() => {
-    if (!open || !customer) return
-    setLoading(true)
-    api.get<{ data: Movement[]; pagination: PaginationType }>(
-      `/api/customers/${customer.id}/movements`, { page, limit: 30 }
-    ).then(res => {
-      setMovements(res.data)
-      setPagination(res.pagination)
-    }).catch(console.error)
-      .finally(() => setLoading(false))
-  }, [open, customer, page])
+    if (!open || !customerId) return
+    refresh()
+  }, [open, customerId, page, refreshKey, refresh])
+
+  // Al cambiar de cliente, resetear el saldo mostrado al del prop.
+  useEffect(() => { setBalance(Number(customer?.current_balance ?? 0)) }, [customerId, customer?.current_balance])
+
+  // Movimiento optimista: lo prependemos apenas se registra (sin esperar el
+  // re-fetch) y actualizamos el saldo. Se aplica una sola vez por seed.
+  const appliedSeedRef = useRef<SavedMovement | null>(null)
+  useEffect(() => {
+    if (!open || !seedMovement || seedMovement === appliedSeedRef.current) return
+    appliedSeedRef.current = seedMovement
+    setMovements(prev => [{
+      id: `optimistic-${seedMovement.created_at}`,
+      type: seedMovement.type,
+      amount: seedMovement.amount,
+      balance_after: seedMovement.balance_after,
+      description: seedMovement.description,
+      payment_method: seedMovement.payment_method,
+      created_at: seedMovement.created_at,
+      users: user?.full_name ? { full_name: user.full_name } : undefined,
+    }, ...prev].slice(0, PAGE_SIZE))
+    setBalance(seedMovement.balance_after)
+  }, [open, seedMovement, user?.full_name])
 
   useEffect(() => { if (!open) { setPage(1); setMovements([]) } }, [open])
 
@@ -66,7 +113,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
       documentType: customer.document_type,
       phone: customer.phone,
       address: customer.address,
-      currentBalance: Number(customer.current_balance),
+      currentBalance: balance,
       movements,
     }, {
       name: user?.business?.name,
@@ -84,7 +131,6 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
     if (!customer) return
     const biz = user?.business
     const firstName = customer.full_name?.trim().split(/\s+/)[0] ?? ''
-    const balance = Number(customer.current_balance)
 
     const lines: string[] = []
     lines.push('*Estado de cuenta*')
@@ -157,46 +203,46 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
       <div className="space-y-4">
 
         {/* Header con saldo y datos */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="col-span-2 px-4 py-3 bg-[var(--surface2)] rounded-[var(--radius-lg)]">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="sm:col-span-2 px-4 py-3 bg-[var(--surface2)] rounded-[var(--radius-lg)] min-w-0">
             <p className="text-xs text-[var(--text3)] mb-1">Saldo deudor actual</p>
-            <p className={`text-3xl font-bold mono ${Number(customer.current_balance) > 0 ? 'text-[var(--danger)]' : 'text-[var(--accent)]'}`}>
-              {formatCurrency(customer.current_balance)}
+            <p className={`text-2xl sm:text-3xl font-bold mono break-words leading-tight ${balance > 0 ? 'text-[var(--danger)]' : 'text-[var(--accent)]'}`}>
+              {formatCurrency(balance)}
             </p>
             {customer.credit_limit > 0 && (
               <div className="mt-2">
                 <div className="flex justify-between text-xs text-[var(--text3)] mb-1">
                   <span>Crédito usado</span>
-                  <span>{Math.round(Number(customer.current_balance) / customer.credit_limit * 100)}%</span>
+                  <span>{Math.round(balance / customer.credit_limit * 100)}%</span>
                 </div>
                 <div className="h-1.5 bg-[var(--surface3)] rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all"
                     style={{
-                      width: `${Math.min(Number(customer.current_balance) / customer.credit_limit * 100, 100)}%`,
-                      background: Number(customer.current_balance) >= customer.credit_limit
-                        ? 'var(--danger)' : Number(customer.current_balance) >= customer.credit_limit * 0.8
+                      width: `${Math.min(balance / customer.credit_limit * 100, 100)}%`,
+                      background: balance >= customer.credit_limit
+                        ? 'var(--danger)' : balance >= customer.credit_limit * 0.8
                           ? 'var(--warning)' : 'var(--accent)',
                     }}
                   />
                 </div>
                 <p className="text-xs text-[var(--text3)] mt-1">
-                  Disponible: {formatCurrency(Math.max(0, customer.credit_limit - Number(customer.current_balance)))} de {formatCurrency(customer.credit_limit)}
+                  Disponible: {formatCurrency(Math.max(0, customer.credit_limit - balance))} de {formatCurrency(customer.credit_limit)}
                 </p>
               </div>
             )}
           </div>
-          <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-col">
             {customer.document && (
-              <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)]">
+              <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] min-w-0">
                 <p className="text-xs text-[var(--text3)]">{customer.document_type ?? 'Documento'}</p>
-                <p className="text-sm mono font-medium text-[var(--text)]">{customer.document}</p>
+                <p className="text-sm mono font-medium text-[var(--text)] truncate">{customer.document}</p>
               </div>
             )}
             {customer.phone && (
-              <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)]">
+              <div className="px-3 py-2 bg-[var(--surface2)] rounded-[var(--radius-md)] min-w-0">
                 <p className="text-xs text-[var(--text3)]">Teléfono</p>
-                <p className="text-sm text-[var(--text)]">{customer.phone}</p>
+                <p className="text-sm text-[var(--text)] truncate">{customer.phone}</p>
               </div>
             )}
           </div>
@@ -240,7 +286,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment }: Cust
         {/* Historial de movimientos */}
         <div className="pb-4">
           <p className="text-xs font-medium text-[var(--text3)] mb-2">Historial de movimientos</p>
-          {loading ? (
+          {loading && movements.length === 0 ? (
             <div className="flex justify-center py-8">
               <div className="w-5 h-5 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
             </div>

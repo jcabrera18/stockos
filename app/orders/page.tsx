@@ -1105,9 +1105,16 @@ function OrdersPageInner() {
     if (!deliverOrderId) return
     setDelivering(true)
     try {
+      // Nunca cobrar más que el saldo pendiente: el backend SUMA este monto a lo ya
+      // cobrado, así que clampeamos para no sobre-cobrar un pedido ya pagado total o
+      // parcialmente.
+      const pendingToCollect = detail?.id === deliverOrderId
+        ? Math.max(0, Number(detail.total) - Number(detail.paid_amount))
+        : Number(deliverAmount) || 0
+      const collected = Math.min(Number(deliverAmount) || 0, pendingToCollect)
       await api.post(`/api/orders/${deliverOrderId}/deliver`, {
         payment_method: deliverMethod,
-        paid_amount: Number(deliverAmount) || 0,
+        paid_amount: collected,
         delivery_notes: deliverNotes || null,
       })
       toast.success('Entrega confirmada — venta generada automáticamente')
@@ -1242,7 +1249,7 @@ function OrdersPageInner() {
     if (!paymentOrderId || !paymentAmount) return
     setRegisteringPayment(true)
     try {
-      await api.post(`/api/orders/${paymentOrderId}/payment`, {
+      const updatedRow = await api.post<Partial<OrderDetail>>(`/api/orders/${paymentOrderId}/payment`, {
         payment_method: paymentMethod,
         paid_amount: Number(paymentAmount),
       })
@@ -1251,10 +1258,21 @@ function OrdersPageInner() {
       const closedOrderId = paymentOrderId
       setPaymentOrderId(null)
       setPaymentAmount('')
+      // Optimista: aplicar paid_amount/payment_status devueltos al instante. Así el
+      // panel y los PDFs (que leen detail.paid_amount) reflejan el cobro sin esperar
+      // el re-fetch. El re-fetch de abajo reconcilia joins/saldos de cuenta.
+      const row = updatedRow && typeof updatedRow === 'object' && 'paid_amount' in updatedRow ? updatedRow : null
+      if (row) {
+        setOrders(prev => prev.map(o => o.id === closedOrderId
+          ? { ...o, paid_amount: row.paid_amount ?? o.paid_amount, payment_status: row.payment_status ?? o.payment_status }
+          : o))
+        setDetail(prev => prev && prev.id === closedOrderId ? { ...prev, ...row } : prev)
+      }
       fetchOrders()
       if (detail?.id === closedOrderId) {
-        const updated = await api.get<OrderDetail>(`/api/orders/${closedOrderId}`)
-        setDetail(updated)
+        api.get<OrderDetail>(`/api/orders/${closedOrderId}`)
+          .then(updated => setDetail(prev => prev && prev.id === closedOrderId ? updated : prev))
+          .catch(() => {})
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al registrar pago')
@@ -2339,31 +2357,51 @@ function OrdersPageInner() {
       {/* ── Modal confirmar entrega ── */}
       <Modal open={deliverModal} onClose={() => { setDeliverModal(false); setDeliverOrderId(null) }}
         title="Confirmar entrega" size="sm">
+        {(() => {
+          const total = Number(detail?.total ?? 0)
+          const alreadyPaid = Number(detail?.paid_amount ?? 0)
+          const pendingToCollect = Math.max(0, total - alreadyPaid)
+          const fullyPaid = alreadyPaid > 0 && pendingToCollect <= 0
+          return (
         <div className="space-y-4">
           <div className="px-3 py-2.5 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)] text-xs text-[var(--accent)]">
             Se generará una venta automáticamente al confirmar la entrega.
           </div>
-          <Select label="Método de cobro *"
-            options={PAYMENT_METHODS}
-            value={deliverMethod}
-            onChange={e => setDeliverMethod(e.target.value as PaymentMethod)} />
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label htmlFor="monto-cobrado" className="text-sm font-medium text-[var(--text2)]">
-                Monto cobrado
-              </label>
-              {detail && (
-                <button type="button"
-                  onClick={() => setDeliverAmount(String(detail.total))}
-                  className="text-xs font-medium text-[var(--accent)] hover:underline">
-                  Total: {formatCurrency(detail.total)}
-                </button>
-              )}
+          {alreadyPaid > 0 && (
+            <div className="px-3 py-2 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] text-xs text-[var(--text2)]">
+              Ya cobrado: <span className="font-semibold text-[var(--text)]">{formatCurrency(alreadyPaid)}</span>
+              {!fullyPaid && <> · Saldo a cobrar: <span className="font-semibold text-[var(--text)]">{formatCurrency(pendingToCollect)}</span></>}
             </div>
-            <Input id="monto-cobrado" type="number" min="0"
-              value={deliverAmount} placeholder="0 si no cobró en la entrega"
-              onChange={e => setDeliverAmount(e.target.value)} />
-          </div>
+          )}
+          {fullyPaid ? (
+            <div className="px-3 py-2.5 bg-[var(--success-subtle,var(--surface2))] border border-[var(--success,var(--border))] rounded-[var(--radius-md)] text-xs text-[var(--text2)]">
+              Este pedido ya está totalmente cobrado. No es necesario registrar un cobro adicional en la entrega.
+            </div>
+          ) : (
+            <>
+              <Select label="Método de cobro *"
+                options={PAYMENT_METHODS}
+                value={deliverMethod}
+                onChange={e => setDeliverMethod(e.target.value as PaymentMethod)} />
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label htmlFor="monto-cobrado" className="text-sm font-medium text-[var(--text2)]">
+                    Monto cobrado en la entrega
+                  </label>
+                  {pendingToCollect > 0 && (
+                    <button type="button"
+                      onClick={() => setDeliverAmount(String(pendingToCollect))}
+                      className="text-xs font-medium text-[var(--accent)] hover:underline">
+                      Saldo: {formatCurrency(pendingToCollect)}
+                    </button>
+                  )}
+                </div>
+                <Input id="monto-cobrado" type="number" min="0" max={pendingToCollect || undefined}
+                  value={deliverAmount} placeholder="0 si no cobró en la entrega"
+                  onChange={e => setDeliverAmount(e.target.value)} />
+              </div>
+            </>
+          )}
           <Input label="Notas de entrega" value={deliverNotes}
             onChange={e => setDeliverNotes(e.target.value)}
             placeholder="Observaciones de la entrega (opcional)" />
@@ -2378,6 +2416,8 @@ function OrdersPageInner() {
             </div>
           </div>
         </div>
+          )
+        })()}
       </Modal>
 
       {/* ── Modal registrar retiro parcial (modo retiro) ── */}

@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { TableSkeleton } from '@/components/ui/Skeleton'
-import { PaymentModal } from '@/components/modules/PaymentModal'
+import { PaymentModal, type SavedMovement } from '@/components/modules/PaymentModal'
 import { CustomerDetailModal } from '@/components/modules/CustomerDetailModal'
 import { api } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
@@ -37,6 +37,9 @@ export default function AccountsPage() {
   const [paymentCustomer, setPaymentCustomer] = useState<CustomerSummary | null>(null)
   const [detailModal, setDetailModal] = useState(false)
   const [detailCustomer, setDetailCustomer] = useState<CustomerSummary | null>(null)
+  // Señal de refresh + movimiento optimista para el drawer de cuenta.
+  const [accountRefreshKey, setAccountRefreshKey] = useState(0)
+  const [seedMovement, setSeedMovement] = useState<SavedMovement | null>(null)
 
   const searchRef = useRef(debouncedSearch)
   const filterRef = useRef(filter)
@@ -219,14 +222,20 @@ export default function AccountsPage() {
               }).catch(() => { })
           }
         }}
-        onSaved={fetchCustomers}
+        onSaved={mov => {
+          fetchCustomers()
+          if (mov) setSeedMovement(mov)
+          setAccountRefreshKey(k => k + 1)
+        }}
         customer={paymentCustomer}
       />
 
       <CustomerDetailModal
         open={detailModal}
-        onClose={() => { setDetailModal(false); setDetailCustomer(null) }}
+        onClose={() => { setDetailModal(false); setDetailCustomer(null); setSeedMovement(null) }}
         customer={detailCustomer}
+        refreshKey={accountRefreshKey}
+        seedMovement={seedMovement}
         onPayment={() => {
           setDetailModal(false)
           setPaymentCustomer(detailCustomer)
