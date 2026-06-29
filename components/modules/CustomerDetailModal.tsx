@@ -59,8 +59,27 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
 
   const customerId = customer?.id
 
-  // Trae saldo + historial juntos. No vacía la lista mientras carga para que el
-  // movimiento optimista (seed) no parpadee.
+  // Movimiento recién registrado que el server podría no reflejar aún (la lectura
+  // tras la escritura a veces llega "una atrás"). Lo mantenemos arriba hasta que
+  // el listado del server lo incluya (match por balance_after, que es autoritativo
+  // y lo calcula la RPC del backend).
+  const [pendingSeed, setPendingSeed] = useState<SavedMovement | null>(null)
+  const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const retryCountRef = useRef(0)
+
+  const seedToMovement = useCallback((s: SavedMovement): Movement => ({
+    id: `optimistic-${s.created_at}`,
+    type: s.type,
+    amount: s.amount,
+    balance_after: s.balance_after,
+    description: s.description,
+    payment_method: s.payment_method,
+    created_at: s.created_at,
+    users: user?.full_name ? { full_name: user.full_name } : undefined,
+  }), [user?.full_name])
+
+  // Trae saldo + historial juntos. Mantiene el seed prependeado si el server aún
+  // no lo devuelve, y reintenta una vez para reconciliar.
   const refresh = useCallback(async () => {
     if (!customerId) return
     setLoading(true)
@@ -69,12 +88,30 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
         api.get<{ data: Movement[]; pagination: PaginationType }>(`/api/customers/${customerId}/movements`, { page, limit: PAGE_SIZE }),
         api.get<{ current_balance: number }>(`/api/customers/${customerId}`).catch(() => null),
       ])
-      setMovements(movRes.data)
+      let data = movRes.data
+      if (pendingSeed) {
+        const inServer = data.some(m =>
+          Number(m.balance_after) === pendingSeed.balance_after && Number(m.amount) === pendingSeed.amount)
+        if (inServer) {
+          setPendingSeed(null)
+          retryCountRef.current = 0
+        } else {
+          data = [seedToMovement(pendingSeed), ...data].slice(0, PAGE_SIZE)
+          // El server todavía no lo refleja → reintentar unas pocas veces para
+          // reconciliar (tope para no quedar polleando indefinidamente).
+          if (retryCountRef.current < 4) {
+            retryCountRef.current += 1
+            if (retryRef.current) clearTimeout(retryRef.current)
+            retryRef.current = setTimeout(() => { refresh() }, 1500)
+          }
+        }
+      }
+      setMovements(data)
       setPagination(movRes.pagination)
       if (cust) setBalance(Number(cust.current_balance))
     } catch (err) { console.error(err) }
     finally { setLoading(false) }
-  }, [customerId, page])
+  }, [customerId, page, pendingSeed, seedToMovement])
 
   useEffect(() => {
     if (!open || !customerId) return
@@ -84,26 +121,30 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
   // Al cambiar de cliente, resetear el saldo mostrado al del prop.
   useEffect(() => { setBalance(Number(customer?.current_balance ?? 0)) }, [customerId, customer?.current_balance])
 
-  // Movimiento optimista: lo prependemos apenas se registra (sin esperar el
-  // re-fetch) y actualizamos el saldo. Se aplica una sola vez por seed.
+  // Movimiento optimista: lo mostramos al instante (sin esperar el re-fetch).
+  // Se aplica una sola vez por seed.
   const appliedSeedRef = useRef<SavedMovement | null>(null)
   useEffect(() => {
     if (!open || !seedMovement || seedMovement === appliedSeedRef.current) return
     appliedSeedRef.current = seedMovement
-    setMovements(prev => [{
-      id: `optimistic-${seedMovement.created_at}`,
-      type: seedMovement.type,
-      amount: seedMovement.amount,
-      balance_after: seedMovement.balance_after,
-      description: seedMovement.description,
-      payment_method: seedMovement.payment_method,
-      created_at: seedMovement.created_at,
-      users: user?.full_name ? { full_name: user.full_name } : undefined,
-    }, ...prev].slice(0, PAGE_SIZE))
+    retryCountRef.current = 0
+    setPendingSeed(seedMovement)
+    setMovements(prev => [seedToMovement(seedMovement), ...prev].slice(0, PAGE_SIZE))
     setBalance(seedMovement.balance_after)
-  }, [open, seedMovement, user?.full_name])
+  }, [open, seedMovement, seedToMovement])
 
-  useEffect(() => { if (!open) { setPage(1); setMovements([]) } }, [open])
+  useEffect(() => {
+    if (!open) {
+      setPage(1); setMovements([]); setPendingSeed(null)
+      if (retryRef.current) { clearTimeout(retryRef.current); retryRef.current = null }
+    }
+  }, [open])
+
+  // El saldo mostrado se deriva del movimiento más reciente (su balance_after es la
+  // fuente de verdad y refleja el seed aunque el server llegue atrasado). Solo vale
+  // en la página 1, donde el primer ítem es efectivamente el último movimiento; en
+  // páginas siguientes usamos el saldo traído del cliente.
+  const displayBalance = page === 1 && movements.length > 0 ? Number(movements[0].balance_after) : balance
 
   const handlePrint = () => {
     if (!customer) return
@@ -113,7 +154,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
       documentType: customer.document_type,
       phone: customer.phone,
       address: customer.address,
-      currentBalance: balance,
+      currentBalance: displayBalance,
       movements,
     }, {
       name: user?.business?.name,
@@ -138,8 +179,8 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
     lines.push('')
     lines.push(firstName ? `Hola ${firstName}! Te paso el resumen de tu cuenta:` : 'Te paso el resumen de tu cuenta:')
     lines.push('')
-    if (balance > 0) lines.push(`*Saldo adeudado: ${formatCurrency(balance)}*`)
-    else if (balance < 0) lines.push(`*Saldo a favor: ${formatCurrency(Math.abs(balance))}*`)
+    if (displayBalance > 0) lines.push(`*Saldo adeudado: ${formatCurrency(displayBalance)}*`)
+    else if (displayBalance < 0) lines.push(`*Saldo a favor: ${formatCurrency(Math.abs(displayBalance))}*`)
     else lines.push('*Cuenta al día* ✅')
 
     if (movements.length > 0) {
@@ -152,7 +193,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
       }
     }
     lines.push('')
-    lines.push(balance > 0 ? 'Quedamos a disposición para coordinar el pago. ¡Gracias!' : '¡Gracias por tu confianza!')
+    lines.push(displayBalance > 0 ? 'Quedamos a disposición para coordinar el pago. ¡Gracias!' : '¡Gracias por tu confianza!')
 
     const text = lines.join('\n')
     try {
@@ -206,28 +247,28 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="sm:col-span-2 px-4 py-3 bg-[var(--surface2)] rounded-[var(--radius-lg)] min-w-0">
             <p className="text-xs text-[var(--text3)] mb-1">Saldo deudor actual</p>
-            <p className={`text-2xl sm:text-3xl font-bold mono break-words leading-tight ${balance > 0 ? 'text-[var(--danger)]' : 'text-[var(--accent)]'}`}>
-              {formatCurrency(balance)}
+            <p className={`text-2xl sm:text-3xl font-bold mono break-words leading-tight ${displayBalance > 0 ? 'text-[var(--danger)]' : 'text-[var(--accent)]'}`}>
+              {formatCurrency(displayBalance)}
             </p>
             {customer.credit_limit > 0 && (
               <div className="mt-2">
                 <div className="flex justify-between text-xs text-[var(--text3)] mb-1">
                   <span>Crédito usado</span>
-                  <span>{Math.round(balance / customer.credit_limit * 100)}%</span>
+                  <span>{Math.round(displayBalance / customer.credit_limit * 100)}%</span>
                 </div>
                 <div className="h-1.5 bg-[var(--surface3)] rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all"
                     style={{
-                      width: `${Math.min(balance / customer.credit_limit * 100, 100)}%`,
-                      background: balance >= customer.credit_limit
-                        ? 'var(--danger)' : balance >= customer.credit_limit * 0.8
+                      width: `${Math.min(displayBalance / customer.credit_limit * 100, 100)}%`,
+                      background: displayBalance >= customer.credit_limit
+                        ? 'var(--danger)' : displayBalance >= customer.credit_limit * 0.8
                           ? 'var(--warning)' : 'var(--accent)',
                     }}
                   />
                 </div>
                 <p className="text-xs text-[var(--text3)] mt-1">
-                  Disponible: {formatCurrency(Math.max(0, customer.credit_limit - balance))} de {formatCurrency(customer.credit_limit)}
+                  Disponible: {formatCurrency(Math.max(0, customer.credit_limit - displayBalance))} de {formatCurrency(customer.credit_limit)}
                 </p>
               </div>
             )}
