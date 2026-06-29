@@ -743,7 +743,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                 guardar y cargar otro
               </span>
               <span className="flex items-center gap-1.5">
-                <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text3)]">⌘/Ctrl ↵</kbd>
+                <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text3)]">⌘/Ctrl + ↵</kbd>
                 crear y cerrar
               </span>
               <span className="flex items-center gap-1.5">
@@ -1126,7 +1126,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         )}
         <Button onClick={handleSave} loading={saving}>
           {isEdit ? 'Guardar cambios' : 'Crear producto'}
-          <kbd className="ml-2 px-1.5 py-0.5 text-[10px] font-mono rounded border border-white/30 bg-white/10 text-white/80">⌘/Ctrl ↵</kbd>
+          <kbd className="ml-2 px-1.5 py-0.5 text-[10px] font-mono rounded border border-white/30 bg-white/10 text-white/80">⌘/Ctrl + ↵</kbd>
         </Button>
       </div>
 

@@ -15,6 +15,7 @@ import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
 import { TransferModal } from '@/components/modules/TransferModal'
 import { api } from '@/lib/api'
 import { formatCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
+import { printDocument, partiesGrid } from '@/lib/printDocument'
 import { useAuth } from '@/hooks/useAuth'
 import { getPlanLimits } from '@/lib/plans'
 import { PlanLimitBanner } from '@/components/modules/PlanLimitBanner'
@@ -255,46 +256,35 @@ export default function WarehousesPage() {
   }
 
   const printRemito = (t: Transfer) => {
-    const win = window.open('', '_blank', 'width=700,height=600')
-    if (!win) return
     const date = new Date(t.approved_at ?? t.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
     const rows = t.warehouse_transfer_items.map(i =>
-      `<tr><td>${i.products.name}</td><td>${i.products.barcode ?? '—'}</td><td style="text-align:center">${i.quantity}</td><td>${i.products.unit ?? 'unidad'}</td></tr>`
+      `<tr>
+        <td>${i.products.name}${i.products.barcode ? `<div class="item-sub">${i.products.barcode}</div>` : ''}</td>
+        <td class="c">${i.quantity} ${i.products.unit ?? 'unidad'}</td>
+      </tr>`
     ).join('')
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito</title>
-    <style>
-      body{font-family:Arial,sans-serif;padding:32px;color:#111;font-size:13px}
-      h1{font-size:20px;margin:0 0 4px}
-      .sub{color:#666;font-size:12px;margin-bottom:24px}
-      .info{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px}
-      .box{border:1px solid #ddd;border-radius:6px;padding:10px}
-      .box label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px}
-      .box p{font-weight:600;margin:2px 0 0}
-      table{width:100%;border-collapse:collapse;margin-top:8px}
-      th{background:#f3f4f6;text-align:left;padding:8px;font-size:11px;text-transform:uppercase;color:#555}
-      td{padding:8px;border-bottom:1px solid #eee;font-size:13px}
-      .footer{margin-top:48px;display:grid;grid-template-columns:1fr 1fr;gap:40px}
-      .sign{border-top:1px solid #999;padding-top:8px;font-size:11px;color:#666;text-align:center}
-      @media print{button{display:none}}
-    </style></head><body>
-    <h1>Remito de Transferencia</h1>
-    <p class="sub">N° ${t.id.slice(0, 8).toUpperCase()} · ${date}</p>
-    <div class="info">
-      <div class="box"><label>Depósito origen</label><p>${t.from_warehouse?.name ?? '—'}</p></div>
-      <div class="box"><label>Depósito destino</label><p>${t.to_warehouse?.name ?? '—'}</p></div>
-    </div>
-    ${t.notes ? `<p style="margin-bottom:16px;color:#555"><strong>Notas:</strong> ${t.notes}</p>` : ''}
-    <table>
-      <thead><tr><th>Producto</th><th>Código</th><th style="text-align:center">Cant.</th><th>Unidad</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <div class="footer">
-      <div class="sign">Firma origen</div>
-      <div class="sign">Firma destino</div>
-    </div>
-    </body></html>`)
-    win.document.close()
-    setTimeout(() => win.print(), 300)
+
+    const body = `
+      ${partiesGrid([
+        { title: 'Depósito origen', name: t.from_warehouse?.name ?? '—' },
+        { title: 'Depósito destino', name: t.to_warehouse?.name ?? '—' },
+      ])}
+      ${t.notes ? `<div class="note-line">Notas: ${t.notes}</div>` : ''}
+      <table>
+        <thead><tr><th>Producto</th><th class="c" style="width:160px">Cantidad</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`
+
+    printDocument({
+      title: 'Remito de Transferencia',
+      docLabel: 'Remito de transferencia',
+      docNumber: `N° ${t.id.slice(0, 8).toUpperCase()}`,
+      docMeta: [date],
+      biz: user?.business,
+      bodyHtml: body,
+      signatures: ['Firma origen', 'Firma destino'],
+      footerNote: 'Documento no válido como factura',
+    })
   }
 
   useEffect(() => {

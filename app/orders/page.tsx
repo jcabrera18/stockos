@@ -29,6 +29,7 @@ import { usePOSSync } from '@/hooks/usePOSSync'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useCollapseSidebar } from '@/contexts/SidePanelContext'
 import { searchProductsLocal, searchCustomersLocal } from '@/lib/pos-cache'
+import { printDocument, partiesGrid, totalsBox, highlightBox, fmtARS } from '@/lib/printDocument'
 import { queueOrder, getPendingOrdersCount, syncPendingOrders } from '@/lib/orders-queue'
 import { isNetworkError } from '@/lib/sales-queue'
 import { toast } from 'sonner'
@@ -154,6 +155,10 @@ function OrdersPageInner() {
   // El form de nuevo pedido necesita el catálogo local (productos/promos/precios).
   // Solo sincronizamos cuando se abre, no en cada carga de la lista de pedidos.
   const [newOrderModal, setNewOrderModal] = useState(false)
+  const [isMac, setIsMac] = useState(true)
+  useEffect(() => {
+    setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.platform) || /Mac/.test(navigator.userAgent))
+  }, [])
   const { cacheReady, syncing: cacheSyncing, forceSync } = usePOSSync(null, newOrderModal)
 
   // Lista
@@ -295,8 +300,6 @@ function OrdersPageInner() {
 
   const printRemitoTraslado = (transport: { patente: string; conductor: string; dni: string }) => {
     localStorage.setItem('stockos_remito_transport', JSON.stringify(transport))
-    const win = window.open('', '_blank', 'width=820,height=1000')
-    if (!win) return
     const now = new Date()
     const pad = (n: number) => String(n).padStart(2, '0')
     const dateStr = now.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -326,104 +329,38 @@ function OrdersPageInner() {
 
     const productRows = pickingItems.map((item, idx) =>
       `<tr>
-        <td class="col-num">${idx + 1}</td>
-        <td>
-          <strong>${item.name}</strong>
-          ${item.barcode ? `<br><span class="col-barcode">${item.barcode}</span>` : ''}
-        </td>
-        <td class="col-clients">${item.orders.map(o => `${o.customer_name} <span class="qty-tag">×${o.quantity}</span>`).join('<br>')}</td>
-        <td class="col-qty">${item.total_qty}</td>
-        <td class="col-unit">${item.unit}</td>
+        <td style="color:#ccc;width:22px">${idx + 1}</td>
+        <td><strong>${item.name}</strong></td>
+        <td style="font-size:10px;color:#666;line-height:1.7">${item.orders.map(o => `${o.customer_name} <span class="qty-tag">×${o.quantity}</span>`).join('<br>')}</td>
+        <td class="r" style="font-size:14px;font-weight:700;color:#15803d;width:50px">${item.total_qty}</td>
+        <td style="font-size:9.5px;color:#999;width:48px">${item.unit}</td>
       </tr>`
     ).join('')
 
     const destRows = Array.from(customerRows.entries()).map(([name, info]) =>
       `<tr>
-        <td class="dest-name">${name}</td>
-        <td class="dest-addr">${info.address_line || '<span style="color:#ccc">—</span>'}</td>
-        <td class="dest-orders">${info.order_ids.join(', ')}</td>
+        <td style="font-weight:600">${name}</td>
+        <td style="font-size:10.5px;color:#666">${info.address_line || '<span style="color:#ccc">—</span>'}</td>
+        <td style="font-size:10px;color:#999;white-space:nowrap">${info.order_ids.join(', ')}</td>
       </tr>`
     ).join('')
 
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-      <title>Remito de Traslado ${docNumber}</title>
-      <style>
-        * { box-sizing: border-box; margin: 0; padding: 0 }
-        body { font-family: Arial, sans-serif; padding: 20px 24px; color: #111; font-size: 11px }
-        @page { size: A4 portrait; margin: 12mm }
-        .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111; padding-bottom: 12px; margin-bottom: 12px }
-        .biz-name { font-size: 17px; font-weight: 700; margin-bottom: 4px }
-        .biz-info { font-size: 10px; color: #444; line-height: 1.7 }
-        .doc-box { text-align: right }
-        .doc-title { font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px }
-        .doc-letra { display: inline-block; border: 2px solid #111; padding: 0 7px; font-size: 15px; font-weight: 700; margin-left: 6px; vertical-align: middle }
-        .doc-sub { font-size: 10px; color: #666; margin-top: 4px; line-height: 1.8 }
-        .section { margin-bottom: 11px }
-        .section-title { font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .7px; color: #999; padding-bottom: 3px; border-bottom: 1px solid #e0e0e0; margin-bottom: 7px }
-        .transport-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 28px }
-        .t-row { display: flex; align-items: baseline; gap: 6px; padding: 2px 0 }
-        .t-label { font-size: 9.5px; color: #888; white-space: nowrap; width: 66px; flex-shrink: 0 }
-        .t-value { font-size: 10px; font-weight: 600 }
-        table { width: 100%; border-collapse: collapse }
-        th { background: #f0f0f0; text-align: left; padding: 5px 7px; font-size: 8.5px; text-transform: uppercase; color: #555; border-bottom: 2px solid #ccc; letter-spacing: .3px }
-        td { padding: 5px 7px; border-bottom: 1px solid #eee; vertical-align: top; font-size: 10px }
-        tr:nth-child(even) td { background: #fafafa }
-        .col-num { color: #ccc; width: 20px; font-size: 10px }
-        .col-barcode { font-size: 9px; color: #bbb; font-family: monospace; display: block; margin-top: 1px }
-        .col-clients { font-size: 9px; color: #666; line-height: 1.7 }
-        .qty-tag { color: #1a56db; font-weight: 700 }
-        .col-qty { text-align: right; font-size: 14px; font-weight: 700; color: #1a56db; width: 46px }
-        .col-unit { font-size: 9px; color: #999; white-space: nowrap; width: 44px }
-        .dest-name { font-weight: 600; font-size: 10.5px }
-        .dest-addr { font-size: 9.5px; color: #666 }
-        .dest-orders { font-size: 9px; color: #999; font-family: monospace; white-space: nowrap }
-        .totals-bar { display: flex; justify-content: flex-end; gap: 20px; margin-top: 5px; padding: 5px 8px; background: #f5f5f5; border-radius: 3px; font-size: 10px }
-        .totals-bar .lbl { color: #777 }
-        .totals-bar .val { font-weight: 700; color: #111; margin-left: 4px }
-        .ref-bar { font-size: 9px; color: #aaa; margin-top: 6px; padding: 4px 8px; background: #fafafa; border: 1px solid #eee; border-radius: 3px }
-        .signatures { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-top: 28px }
-        .sign-box { border-top: 1px solid #aaa; padding-top: 6px; text-align: center; font-size: 9px; color: #666; line-height: 1.6 }
-        .footer { margin-top: 10px; font-size: 9px; color: #ccc; text-align: center; border-top: 1px solid #f0f0f0; padding-top: 6px }
-        @media print { body { padding: 0 } }
-      </style>
-    </head><body>
-
-    <div class="header">
-      <div>
-        <div class="biz-name">${biz?.name ?? ''}</div>
-        <div class="biz-info">
-          ${biz?.cuit ? `CUIT: ${biz.cuit}<br>` : ''}
-          ${biz?.address ? `${biz.address}<br>` : ''}
-          ${biz?.iva_condition ? `Cond. IVA: ${biz.iva_condition}` : ''}
-        </div>
-      </div>
-      <div class="doc-box">
-        <div class="doc-title">Remito de Traslado <span class="doc-letra">X</span></div>
-        <div class="doc-sub">
-          Pto. Venta 0001 &nbsp;·&nbsp; N° ${docNumber}<br>
-          ${dateStr} &nbsp;·&nbsp; ${timeStr}
-        </div>
-      </div>
-    </div>
-
-    <div class="section">
+    const body = `
       <div class="section-title">Datos del traslado</div>
-      <div class="transport-grid">
-        <div class="t-row"><span class="t-label">Origen:</span><span class="t-value">${biz?.address ?? '—'}</span></div>
-        <div class="t-row"><span class="t-label">Destino:</span><span class="t-value">Varios destinos según detalle</span></div>
-        <div class="t-row"><span class="t-label">Patente:</span><span class="t-value">${transport.patente || '—'}</span></div>
-        <div class="t-row"><span class="t-label">Conductor:</span><span class="t-value">${transport.conductor || '—'}</span></div>
-        <div class="t-row"></div>
-        <div class="t-row"><span class="t-label">DNI:</span><span class="t-value">${transport.dni || '—'}</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 28px">
+        <div><span style="color:#888;font-size:10px">Origen: </span><strong style="font-size:10.5px">${biz?.address ?? '—'}</strong></div>
+        <div><span style="color:#888;font-size:10px">Destino: </span><strong style="font-size:10.5px">Varios destinos según detalle</strong></div>
+        <div><span style="color:#888;font-size:10px">Patente: </span><strong style="font-size:10.5px">${transport.patente || '—'}</strong></div>
+        <div><span style="color:#888;font-size:10px">Conductor: </span><strong style="font-size:10.5px">${transport.conductor || '—'}</strong></div>
+        <div></div>
+        <div><span style="color:#888;font-size:10px">DNI: </span><strong style="font-size:10.5px">${transport.dni || '—'}</strong></div>
       </div>
-    </div>
 
-    <div class="section">
       <div class="section-title">Mercadería a transportar</div>
-      <table>
+      <table style="margin-top:0">
         <thead><tr>
-          <th>#</th><th>Descripción</th><th>Pedidos</th>
-          <th style="text-align:right">Cant.</th><th>Unidad</th>
+          <th style="width:22px">#</th><th>Descripción</th><th>Pedidos</th>
+          <th class="r" style="width:50px">Cant.</th><th>Unidad</th>
         </tr></thead>
         <tbody>${productRows}</tbody>
       </table>
@@ -431,28 +368,26 @@ function OrdersPageInner() {
         <span><span class="lbl">Productos:</span><span class="val">${pickingItems.length}</span></span>
         <span><span class="lbl">Total unidades:</span><span class="val">${totalUnits}</span></span>
       </div>
-    </div>
 
-    <div class="section">
       <div class="section-title">Destinos</div>
-      <table>
+      <table style="margin-top:0">
         <thead><tr><th>Cliente</th><th>Dirección</th><th>Pedido(s)</th></tr></thead>
         <tbody>${destRows}</tbody>
       </table>
-    </div>
 
-    <div class="ref-bar">Pedidos incluidos: ${allOrderRefs}</div>
+      <div class="meta-line">Pedidos incluidos: ${allOrderRefs}</div>`
 
-    <div class="signatures">
-      <div class="sign-box">Firma y aclaración<br>Transportista</div>
-      <div class="sign-box">Firma y aclaración<br>Receptor</div>
-      <div class="sign-box">Sello y firma<br>Empresa</div>
-    </div>
-
-    <div class="footer">Documento no válido como factura &nbsp;·&nbsp; ${biz?.name ?? ''} &nbsp;·&nbsp; StockOS</div>
-    </body></html>`)
-    win.document.close()
-    setTimeout(() => win.print(), 300)
+    printDocument({
+      title: `Remito de Traslado ${docNumber}`,
+      docLabel: 'Remito de traslado',
+      letra: 'X',
+      docNumber: `N° ${docNumber}`,
+      docMeta: ['Pto. Venta 0001', `${dateStr} · ${timeStr}`],
+      biz,
+      bodyHtml: body,
+      signatures: ['Firma y aclaración<br>Transportista', 'Firma y aclaración<br>Receptor', 'Sello y firma<br>Empresa'],
+      footerNote: 'Documento no válido como factura',
+    })
   }
 
   const printByClient = () => {
@@ -463,49 +398,29 @@ function OrdersPageInner() {
         byCustomer[o.customer_name].items.push({ product: item.name, barcode: item.barcode, unit: item.unit, qty: o.quantity })
       })
     })
-    const win = window.open('', '_blank', 'width=820,height=1000')
-    if (!win) return
     const date = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
     const sections = Object.values(byCustomer).map(customer =>
-      `<div class="customer">
-        <h2>${customer.name}</h2>
-        <table>
-          <thead><tr><th>Producto</th><th style="text-align:right">Cantidad</th></tr></thead>
+      `<div style="margin-top:18px;page-break-inside:avoid">
+        <div class="section-title" style="color:#15803d;border-bottom-color:#16a34a">${customer.name}</div>
+        <table style="margin-top:0">
+          <thead><tr><th>Producto</th><th class="r">Cantidad</th></tr></thead>
           <tbody>${customer.items.map(i =>
         `<tr>
-              <td>${i.product}${i.barcode ? `<br><span class="small">${i.barcode}</span>` : ''}</td>
-              <td class="qty">${i.qty} <span class="unit">${i.unit}</span></td>
+              <td>${i.product}</td>
+              <td class="r" style="font-size:14px;font-weight:700;color:#15803d;width:90px">${i.qty} <span style="font-size:10px;color:#888;font-weight:400">${i.unit}</span></td>
             </tr>`).join('')}
           </tbody>
         </table>
       </div>`
     ).join('')
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
-      <title>Pedidos por cliente</title>
-      <style>
-        * { box-sizing: border-box; margin: 0; padding: 0 }
-        body { font-family: Arial, sans-serif; padding: 24px 28px; color: #111; font-size: 12px }
-        @page { size: A4 portrait; margin: 15mm }
-        h1 { font-size: 20px; font-weight: 700; margin-bottom: 3px }
-        .meta { font-size: 11px; color: #666; margin-bottom: 18px }
-        .customer { margin-bottom: 22px; page-break-inside: avoid }
-        h2 { font-size: 14px; font-weight: 700; color: #1a56db; border-bottom: 2px solid #1a56db; padding-bottom: 4px; margin-bottom: 6px }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 4px }
-        th { background: #f0f0f0; text-align: left; padding: 5px 8px; font-size: 10px; text-transform: uppercase; color: #444; border-bottom: 1px solid #ccc }
-        td { padding: 5px 8px; border-bottom: 1px solid #eee; vertical-align: top }
-        .qty { text-align: right; font-size: 15px; font-weight: 700; color: #1a56db; width: 80px }
-        .unit { font-size: 10px; color: #888; font-weight: 400 }
-        .small { font-size: 10px; color: #aaa }
-        .footer { margin-top: 20px; font-size: 10px; color: #bbb; text-align: right; border-top: 1px solid #eee; padding-top: 8px }
-      </style>
-    </head><body>
-      <h1>Pedidos por cliente</h1>
-      <p class="meta">${date} &nbsp;·&nbsp; ${Object.keys(byCustomer).length} clientes &nbsp;·&nbsp; pedidos confirmados</p>
-      ${sections}
-      <div class="footer">Impreso el ${date} &nbsp;·&nbsp; StockOS</div>
-    </body></html>`)
-    win.document.close()
-    setTimeout(() => win.print(), 300)
+
+    printDocument({
+      title: 'Pedidos por cliente',
+      docLabel: 'Pedidos por cliente',
+      docMeta: [date, `${Object.keys(byCustomer).length} clientes · pedidos confirmados`],
+      biz: authUser?.business,
+      bodyHtml: sections,
+    })
   }
 
   // lines: si se pasan, el remito lista esas cantidades (ej. un retiro parcial)
@@ -515,8 +430,6 @@ function OrdersPageInner() {
     lines?: { name: string; barcode?: string; quantity: number; unit?: string }[],
     opts?: { date?: string; remitoId?: string },
   ) => {
-    const win = window.open('', '_blank', 'width=750,height=700')
-    if (!win) return
     const date = opts?.date
       ? new Date(opts.date).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
       : new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -530,86 +443,49 @@ function OrdersPageInner() {
     const rows = remitoLines.map(i =>
       `<tr>
         <td>${i.name}</td>
-        <td class="center">${i.quantity} ${i.unit ?? ''}</td>
+        <td class="c">${i.quantity} ${i.unit ?? ''}</td>
       </tr>`
     ).join('')
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito</title>
-    <style>
-      *{box-sizing:border-box;margin:0;padding:0}
-      body{font-family:Arial,sans-serif;padding:32px;color:#111;font-size:13px}
-      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:16px;border-bottom:2px solid #111}
-      .biz-name{font-size:20px;font-weight:700}
-      .biz-info{font-size:11px;color:#444;margin-top:4px;line-height:1.6}
-      .remito-box{text-align:right}
-      .remito-title{font-size:22px;font-weight:700;text-transform:uppercase;letter-spacing:1px}
-      .remito-num{font-size:12px;color:#555;margin-top:4px}
-      .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
-      .box{border:1px solid #ccc;border-radius:4px;padding:12px}
-      .box .label{font-size:9px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:700}
-      .box p{font-size:13px}
-      .box .sub{font-size:12px;color:#555;margin-top:3px}
-      table{width:100%;border-collapse:collapse;margin-bottom:24px}
-      th{background:#f0f0f0;text-align:left;padding:5px 10px;font-size:11px;text-transform:uppercase;color:#555;border:1px solid #ccc}
-      td{padding:3px 10px;border:1px solid #ddd;font-size:12px;vertical-align:top}
-      .center{text-align:center}
-      .small{font-size:11px;color:#888}
-      .footer{margin-top:48px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:32px}
-      .sign{border-top:1px solid #aaa;padding-top:8px;font-size:11px;color:#666;text-align:center}
-      .note{font-size:10px;color:#888;text-align:center;margin-top:40px}
-      @media print{body{padding:20px}}
-    </style></head><body>
-    <div class="header">
-      <div>
-        <div class="biz-name">${biz?.name ?? ''}</div>
-        <div class="biz-info">
-          ${biz?.cuit ? `CUIT: ${biz.cuit}<br>` : ''}
-          ${biz?.address ? `${biz.address}<br>` : ''}
-          ${biz?.phone ? `Tel: ${biz.phone}` : ''}
-        </div>
-      </div>
-      <div class="remito-box">
-        <div class="remito-title">Remito</div>
-        <div class="remito-num">N° ${(opts?.remitoId ?? d.id).slice(0, 8).toUpperCase()}<br>${date}</div>
-      </div>
-    </div>
 
-    <div class="grid">
-      <div class="box">
-        <div class="label">Destinatario</div>
-        <p>${d.customer_name}</p>
-        ${d.customers?.document ? `<div class="sub">DNI/CUIT: ${d.customers.document}</div>` : ''}
-        ${d.customer_address ? `<div class="sub">${d.customer_address}</div>` : ''}
-        ${(d.customer_phone || d.customers?.phone) ? `<div class="sub">Tel: ${d.customer_phone || d.customers?.phone}</div>` : ''}
-      </div>
-      <div class="box">
-        <div class="label">Detalle</div>
-        ${d.warehouse_name ? `<div class="sub">Depósito: ${d.warehouse_name}</div>` : ''}
-        ${(d.seller_name || d.users?.full_name) ? `<div class="sub">Vendedor: ${d.seller_name || d.users?.full_name}</div>` : ''}
-        <div class="sub">Pedido: ${d.id.slice(0, 8).toUpperCase()}</div>
-      </div>
-    </div>
+    const body = `
+      ${partiesGrid([
+        {
+          title: 'Destinatario',
+          name: d.customer_name,
+          rows: [
+            d.customers?.document ? `DNI/CUIT: ${d.customers.document}` : '',
+            d.customer_address ?? '',
+            (d.customer_phone || d.customers?.phone) ? `Tel: ${d.customer_phone || d.customers?.phone}` : '',
+          ],
+        },
+        {
+          title: 'Detalle',
+          rows: [
+            d.warehouse_name ? `Depósito: ${d.warehouse_name}` : '',
+            (d.seller_name || d.users?.full_name) ? `Vendedor: ${d.seller_name || d.users?.full_name}` : '',
+            `Pedido: ${d.id.slice(0, 8).toUpperCase()}`,
+          ],
+        },
+      ])}
+      <table>
+        <thead><tr><th>Producto</th><th class="c" style="width:160px">Cantidad</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      ${d.notes ? `<div class="note-line">Observaciones: ${d.notes}</div>` : ''}`
 
-    <table>
-      <thead><tr><th>Producto</th><th class="center">Cantidad</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-
-    ${d.notes ? `<p style="font-size:12px;color:#555;margin-bottom:20px"><em>Observaciones: ${d.notes}</em></p>` : ''}
-
-    <div class="footer">
-      <div class="sign">Firma y aclaración<br>Transportista</div>
-      <div class="sign">Firma y aclaración<br>Receptor</div>
-      <div class="sign">Sello y firma<br>Empresa</div>
-    </div>
-    <div class="note">Documento no válido como factura · ${biz?.name ?? ''}</div>
-    </body></html>`)
-    win.document.close()
-    setTimeout(() => win.print(), 300)
+    printDocument({
+      title: 'Remito',
+      docLabel: 'Remito',
+      docNumber: `N° ${(opts?.remitoId ?? d.id).slice(0, 8).toUpperCase()}`,
+      docMeta: [date],
+      biz,
+      bodyHtml: body,
+      signatures: ['Firma y aclaración<br>Transportista', 'Firma y aclaración<br>Receptor', 'Sello y firma<br>Empresa'],
+      footerNote: 'Documento no válido como factura',
+    })
   }
 
   const printOrder = (d: OrderDetail) => {
-    const win = window.open('', '_blank', 'width=750,height=700')
-    if (!win) return
     const date = new Date(d.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
     const pending = Math.max(0, Number(d.total) - Number(d.paid_amount))
     const paymentLabel: Record<string, string> = {
@@ -618,76 +494,58 @@ function OrdersPageInner() {
     }
     const rows = (d.order_items ?? []).map(i =>
       `<tr>
-        <td>${i.products?.name ?? i.product_name ?? '(producto eliminado)'}${i.products?.barcode ? `<br><span class="small">${i.products.barcode}</span>` : ''}</td>
-        <td class="center">${i.quantity} ${i.products?.unit ?? ''}</td>
-        <td class="right">${Number(i.unit_price).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
-        <td class="right">${Number(i.subtotal).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
+        <td>${i.products?.name ?? i.product_name ?? '(producto eliminado)'}${i.products?.barcode ? `<div class="item-sub">${i.products.barcode}</div>` : ''}</td>
+        <td class="c">${i.quantity} ${i.products?.unit ?? ''}</td>
+        <td class="r">${fmtARS(Number(i.unit_price))}</td>
+        <td class="r">${fmtARS(Number(i.subtotal))}</td>
       </tr>`
     ).join('')
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Pedido</title>
-    <style>
-      *{box-sizing:border-box;margin:0;padding:0}
-      body{font-family:Arial,sans-serif;padding:32px;color:#111;font-size:13px}
-      h1{font-size:22px;margin-bottom:2px}
-      .num{font-size:12px;color:#666;margin-bottom:24px}
-      .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
-      .box{border:1px solid #e0e0e0;border-radius:6px;padding:12px}
-      .box .label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
-      .box p{font-size:13px;font-weight:600}
-      .box .sub{font-size:12px;color:#555;font-weight:400;margin-top:2px}
-      table{width:100%;border-collapse:collapse;margin-bottom:16px}
-      th{background:#f5f5f5;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;color:#555;border-bottom:2px solid #ddd}
-      td{padding:9px 10px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top}
-      .center{text-align:center} .right{text-align:right}
-      .small{font-size:11px;color:#888}
-      tfoot td{border-top:2px solid #ddd;border-bottom:none;font-weight:600}
-      tfoot .total-row td{font-size:15px;color:#1a56db;padding-top:10px}
-      .saldo{background:#fff8e1;border:1px solid #f59e0b;border-radius:6px;padding:12px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center}
-      .saldo .amt{font-size:20px;font-weight:700;color:#b45309}
-      .footer{margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px}
-      .sign{border-top:1px solid #aaa;padding-top:8px;font-size:11px;color:#666;text-align:center}
-      @media print{button{display:none}}
-    </style></head><body>
-    <h1>Pedido de venta</h1>
-    <p class="num">N° ${d.id.slice(0, 8).toUpperCase()} · ${date}${d.warehouse_name ? ` · Depósito: ${d.warehouse_name}` : ''}</p>
 
-    <div class="grid">
-      <div class="box">
-        <div class="label">Cliente</div>
-        <p>${d.customer_name}</p>
-        ${d.customers?.document ? `<p class="sub">DNI: ${d.customers.document}</p>` : ''}
-        ${(d.customer_phone || d.customers?.phone) ? `<p class="sub">Tel: ${d.customer_phone || d.customers?.phone}</p>` : ''}
-        ${d.customer_address ? `<p class="sub">${d.customer_address}</p>` : ''}
-        ${d.customers?.current_balance !== undefined ? `<p class="sub" style="margin-top:6px;color:${Number(d.customers.current_balance) > 0 ? '#dc2626' : '#16a34a'}"><strong>Saldo en cuenta: ${Number(d.customers.current_balance).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</strong></p>` : ''}
-      </div>
-      <div class="box">
-        <div class="label">Estado del pago</div>
-        <p>${PAYMENT_STATUS_LABELS[d.payment_status as PaymentStatus] ?? d.payment_status}</p>
-        ${d.payment_method ? `<p class="sub">${paymentLabel[d.payment_method] ?? d.payment_method}</p>` : ''}
-        ${Number(d.paid_amount) > 0 ? `<p class="sub">Cobrado: ${Number(d.paid_amount).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</p>` : ''}
-      </div>
-    </div>
+    const balance = d.customers?.current_balance
+    const body = `
+      ${partiesGrid([
+        {
+          title: 'Cliente',
+          name: d.customer_name,
+          rows: [
+            d.customers?.document ? `DNI: ${d.customers.document}` : '',
+            (d.customer_phone || d.customers?.phone) ? `Tel: ${d.customer_phone || d.customers?.phone}` : '',
+            d.customer_address ?? '',
+          ],
+          rawHtml: balance !== undefined && balance !== null
+            ? `<div style="margin-top:7px;font-size:11px;font-weight:700;color:${Number(balance) > 0 ? '#dc2626' : '#16a34a'}">Saldo en cuenta: ${fmtARS(Number(balance))}</div>`
+            : undefined,
+        },
+        {
+          title: 'Estado del pago',
+          name: PAYMENT_STATUS_LABELS[d.payment_status as PaymentStatus] ?? d.payment_status,
+          rows: [
+            d.payment_method ? (paymentLabel[d.payment_method] ?? d.payment_method) : '',
+            Number(d.paid_amount) > 0 ? `Cobrado: ${fmtARS(Number(d.paid_amount))}` : '',
+          ],
+        },
+      ])}
+      <table>
+        <thead><tr><th>Producto</th><th class="c" style="width:80px">Cant.</th><th class="r" style="width:120px">Precio unit.</th><th class="r" style="width:130px">Subtotal</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      ${totalsBox([
+        ...(Number(d.discount) > 0 ? [{ label: 'Descuento', value: `− ${fmtARS(Number(d.discount))}` }] : []),
+        { label: 'Total', value: fmtARS(Number(d.total)), grand: true },
+      ])}
+      ${pending > 0 ? highlightBox({ tone: 'warn', label: 'Saldo pendiente de cobro de este pedido', amount: fmtARS(pending) }) : ''}
+      ${d.notes ? `<div class="note-line">Notas: ${d.notes}</div>` : ''}
+      ${(d.seller_name || d.users?.full_name) ? `<div class="meta-line">Vendedor: ${d.seller_name || d.users?.full_name}</div>` : ''}`
 
-    <table>
-      <thead><tr><th>Producto</th><th class="center">Cant.</th><th class="right">Precio unit.</th><th class="right">Subtotal</th></tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot>
-        ${Number(d.discount) > 0 ? `<tr><td colspan="3">Descuento</td><td class="right">− ${Number(d.discount).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td></tr>` : ''}
-        <tr class="total-row"><td colspan="3"><strong>Total</strong></td><td class="right"><strong>${Number(d.total).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</strong></td></tr>
-      </tfoot>
-    </table>
-
-    ${pending > 0 ? `<div class="saldo"><span>Saldo pendiente de cobro de este pedido</span><span class="amt">${pending.toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</span></div>` : ''}
-    ${d.notes ? `<p style="font-size:12px;color:#555;margin-bottom:20px"><em>Notas: ${d.notes}</em></p>` : ''}
-    ${(d.seller_name || d.users?.full_name) ? `<p style="font-size:11px;color:#888">Vendedor: ${d.seller_name || d.users?.full_name}</p>` : ''}
-
-    <div class="footer">
-      <div class="sign">Firma cliente</div>
-      <div class="sign">Firma vendedor</div>
-    </div>
-    </body></html>`)
-    win.document.close()
-    setTimeout(() => win.print(), 300)
+    printDocument({
+      title: 'Pedido de venta',
+      docLabel: 'Pedido de venta',
+      docNumber: `N° ${d.id.slice(0, 8).toUpperCase()}`,
+      docMeta: [date, d.warehouse_name ? `Depósito: ${d.warehouse_name}` : ''].filter(Boolean) as string[],
+      biz: authUser?.business,
+      bodyHtml: body,
+      signatures: ['Firma cliente', 'Firma vendedor'],
+    })
   }
 
   const togglePickingCheck = (productId: string) =>
@@ -1167,8 +1025,24 @@ function OrdersPageInner() {
         await saveOffline()
         return
       }
-      await api.post('/api/orders', payload)
+      const created = await api.post<OrderSummary>('/api/orders', payload)
       toast.success('Pedido creado correctamente')
+      // Optimista: si estamos en la primera página sin filtros que lo excluyan,
+      // mostramos el pedido recién creado al instante (el re-fetch reconcilia
+      // item_count/total_units y demás campos calculados por el view).
+      const noExcludingFilter = pageRef.current === 1
+        && (!statusFilterRef.current || statusFilterRef.current === 'pending')
+        && !searchRef.current && !idSearchRef.current
+      if (created?.id && noExcludingFilter) {
+        const optimistic: OrderSummary = {
+          ...created,
+          item_count: created.item_count ?? cart.length,
+          total_units: created.total_units ?? cart.reduce((s, i) => s + i.quantity, 0),
+          seller_name: created.seller_name ?? authUser?.full_name,
+          warehouse_name: created.warehouse_name ?? warehouses.find(w => w.id === warehouseId)?.name,
+        }
+        setOrders(prev => [optimistic, ...prev.filter(o => o.id !== optimistic.id)])
+      }
       resetOrderForm()
       setNewOrderModal(false)
       fetchOrders()
@@ -1197,14 +1071,27 @@ function OrdersPageInner() {
     return () => window.removeEventListener('keydown', onKey)
   }, [newOrderModal, savingOrder, cart.length])
 
+  // Estado que deja cada acción — para reflejar el cambio al instante sin esperar
+  // el re-fetch (cancel devuelve { success } y no la fila, los demás sí la traen).
+  const ACTION_RESULT_STATUS: Record<string, OrderStatus> = {
+    confirm: 'confirmed', cancel: 'cancelled',
+  }
+
   const handleAction = async (id: string, action: string) => {
     try {
-      await api.post(`/api/orders/${id}/${action}`, {})
+      const res = await api.post<Partial<OrderDetail>>(`/api/orders/${id}/${action}`, {})
       toast.success('Estado actualizado')
+      // Optimista: pintar el nuevo estado de inmediato. El re-fetch de abajo
+      // reconcilia con el server (totales del view + joins completos).
+      const row = res && typeof res === 'object' && 'status' in res ? res : null
+      const newStatus = (row?.status ?? ACTION_RESULT_STATUS[action]) as OrderStatus | undefined
+      if (newStatus) {
+        setOrders(prev => prev.map(o => o.id === id ? { ...o, status: newStatus } : o))
+        setDetail(prev => prev && prev.id === id ? { ...prev, ...(row ?? {}), status: newStatus } : prev)
+      }
       fetchOrders()
       if (detail?.id === id) {
-        const updated = await api.get<OrderDetail>(`/api/orders/${id}`)
-        setDetail(updated)
+        api.get<OrderDetail>(`/api/orders/${id}`).then(setDetail).catch(() => {})
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al actualizar'
@@ -2438,9 +2325,9 @@ function OrdersPageInner() {
                   <Button variant="secondary" className="flex-1 sm:flex-none" onClick={discardNewOrder} disabled={savingOrder}>
                     Descartar
                   </Button>
-                  <Button className="flex-1" onClick={handleCreateOrder} loading={savingOrder} disabled={cart.length === 0} title="Atajo: Ctrl+Enter">
+                  <Button className="flex-1" onClick={handleCreateOrder} loading={savingOrder} disabled={cart.length === 0} title={isMac ? 'Atajo: ⌘ + Enter' : 'Atajo: Ctrl + Enter'}>
                     Crear pedido {cart.length > 0 ? `· ${formatCurrency(cartTotal)}` : ''}
-                    <kbd className="ml-2 hidden sm:inline-block text-[10px] font-mono px-1.5 py-0.5 rounded border border-current/30 opacity-70">Ctrl+↵</kbd>
+                    <kbd className="ml-2 hidden sm:inline-block text-[10px] font-mono px-1.5 py-0.5 rounded border border-current/30 opacity-70">{isMac ? '⌘ + ↵' : 'Ctrl + ↵'}</kbd>
                   </Button>
                 </div>
               </div>

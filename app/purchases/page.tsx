@@ -13,7 +13,9 @@ import { PurchaseOrderModal } from '@/components/modules/PurchaseOrderModal'
 import { SupplierModal } from '@/components/modules/SupplierModal'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { printDocument, partiesGrid, totalsBox, fmtARS } from '@/lib/printDocument'
 import { useDebounce } from '@/hooks/useDebounce'
+import { useAuth } from '@/hooks/useAuth'
 import type { PurchaseOrder, Supplier, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import { Plus, Truck, Building2, Search, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -58,6 +60,7 @@ const orderLabel = (o: { order_number?: number; id: string }) =>
   o.order_number != null ? `#${o.order_number}` : `#${o.id.slice(0, 8).toUpperCase()}`
 
 export default function PurchasesPage() {
+  const { user: authUser } = useAuth()
   const [tab, setTab] = useState<Tab>('orders')
 
   // ── Órdenes ────────────────────────────────────────────
@@ -150,8 +153,6 @@ export default function PurchasesPage() {
 
   // ── Imprimir remito de compra ──────────────────────────
   const printRemito = (d: PurchaseOrder) => {
-    const win = window.open('', '_blank', 'width=750,height=700')
-    if (!win) return
     const supplier = (d.suppliers as { name: string } | undefined)?.name ?? 'Sin proveedor'
     const warehouse = (d as unknown as { warehouse_name?: string }).warehouse_name
     const date = new Date(d.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -159,67 +160,34 @@ export default function PurchasesPage() {
     const rows = (d.purchase_items ?? []).map(i => {
       const prod = i.products as { name: string; barcode?: string; unit?: string } | undefined
       return `<tr>
-        <td>${prod?.name ?? '—'}${prod?.barcode ? `<br><span class="small">${prod.barcode}</span>` : ''}</td>
-        <td class="center">${i.quantity}${prod?.unit ? ` ${prod.unit}` : ''}</td>
-        <td class="right">${Number(i.unit_cost).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
-        <td class="right">${Number(i.subtotal).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
+        <td>${prod?.name ?? '—'}${prod?.barcode ? `<div class="item-sub">${prod.barcode}</div>` : ''}</td>
+        <td class="c">${i.quantity}${prod?.unit ? ` ${prod.unit}` : ''}</td>
+        <td class="r">${fmtARS(Number(i.unit_cost))}</td>
+        <td class="r">${fmtARS(Number(i.subtotal))}</td>
       </tr>`
     }).join('')
 
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Remito de compra</title>
-    <style>
-      *{box-sizing:border-box;margin:0;padding:0}
-      body{font-family:Arial,sans-serif;padding:32px;color:#111;font-size:13px}
-      h1{font-size:22px;margin-bottom:2px}
-      .num{font-size:12px;color:#666;margin-bottom:24px}
-      .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
-      .box{border:1px solid #e0e0e0;border-radius:6px;padding:12px}
-      .box .label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
-      .box p{font-size:13px;font-weight:600}
-      .box .sub{font-size:12px;color:#555;font-weight:400;margin-top:2px}
-      table{width:100%;border-collapse:collapse;margin-bottom:16px}
-      th{background:#f5f5f5;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;color:#555;border-bottom:2px solid #ddd}
-      td{padding:9px 10px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top}
-      .center{text-align:center} .right{text-align:right}
-      .small{font-size:11px;color:#888}
-      tfoot td{border-top:2px solid #ddd;border-bottom:none;font-weight:600;font-size:15px;color:#1a56db}
-      .footer{margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px}
-      .sign{border-top:1px solid #aaa;padding-top:8px;font-size:11px;color:#666;text-align:center}
-      @media print{button{display:none}}
-    </style></head><body>
-    <h1>Remito de compra</h1>
-    <p class="num">N° ${d.order_number ?? d.id.slice(0, 8).toUpperCase()} · ${date}</p>
+    const body = `
+      ${partiesGrid([
+        { title: 'Proveedor', name: supplier },
+        { title: 'Depósito destino', name: warehouse ?? 'Sin depósito', rows: [`Recibido: ${receivedDate}`] },
+      ])}
+      <table>
+        <thead><tr><th>Producto</th><th class="c" style="width:90px">Cantidad</th><th class="r" style="width:120px">Precio costo</th><th class="r" style="width:130px">Subtotal</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      ${totalsBox([{ label: 'Total', value: fmtARS(Number(d.total)), grand: true }])}
+      ${d.notes ? `<div class="note-line">Notas: ${d.notes}</div>` : ''}`
 
-    <div class="grid">
-      <div class="box">
-        <div class="label">Proveedor</div>
-        <p>${supplier}</p>
-      </div>
-      <div class="box">
-        <div class="label">Depósito destino</div>
-        <p>${warehouse ?? 'Sin depósito'}</p>
-        <p class="sub">Recibido: ${receivedDate}</p>
-      </div>
-    </div>
-
-    <table>
-      <thead><tr><th>Producto</th><th class="center">Cantidad</th><th class="right">Precio costo</th><th class="right">Subtotal</th></tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot>
-        <tr><td colspan="3"><strong>Total</strong></td><td class="right"><strong>${Number(d.total).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</strong></td></tr>
-      </tfoot>
-    </table>
-
-    ${d.notes ? `<p style="font-size:12px;color:#555;margin-bottom:20px"><em>Notas: ${d.notes}</em></p>` : ''}
-
-    <div class="footer">
-      <div class="sign">Firma responsable depósito</div>
-      <div class="sign">Firma proveedor / transportista</div>
-    </div>
-
-    <script>window.onload=()=>window.print()</script>
-    </body></html>`)
-    win.document.close()
+    printDocument({
+      title: 'Remito de compra',
+      docLabel: 'Remito de compra',
+      docNumber: `N° ${d.order_number ?? d.id.slice(0, 8).toUpperCase()}`,
+      docMeta: [date],
+      biz: authUser?.business,
+      bodyHtml: body,
+      signatures: ['Firma responsable depósito', 'Firma proveedor / transportista'],
+    })
   }
 
   // ── Ver detalle orden ──────────────────────────────────
@@ -261,13 +229,19 @@ export default function PurchasesPage() {
     if (!detailOrder) return
     setReceiving(true)
     try {
-      await api.post(`/api/purchases/${detailOrder.id}/receive`, { cost_decisions: decisions })
+      const orderId = detailOrder.id
+      await api.post(`/api/purchases/${orderId}/receive`, { cost_decisions: decisions })
       toast.success('Mercadería recibida — stock actualizado')
       setCostPreviewModal(false)
       setReceiveModal(false)
+      // Optimista: pintar el nuevo estado al instante; el re-fetch reconcilia.
+      const receivedAt = new Date().toISOString()
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'received', received_at: receivedAt } : o))
+      setDetailOrder(prev => prev && prev.id === orderId ? { ...prev, status: 'received', received_at: receivedAt } : prev)
       fetchOrders()
-      const updated = await api.get<PurchaseOrder>(`/api/purchases/${detailOrder.id}`)
-      setDetailOrder(updated)
+      api.get<PurchaseOrder>(`/api/purchases/${orderId}`)
+        .then(updated => setDetailOrder(prev => prev && prev.id === orderId ? updated : prev))
+        .catch(() => {})
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al recibir')
     } finally { setReceiving(false) }
@@ -278,12 +252,17 @@ export default function PurchasesPage() {
     if (!detailOrder) return
     setCancelling(true)
     try {
-      await api.patch(`/api/purchases/${detailOrder.id}/cancel`, {})
+      const orderId = detailOrder.id
+      await api.patch(`/api/purchases/${orderId}/cancel`, {})
       toast.success('Orden cancelada')
       setCancelModal(false)
+      // Optimista: pintar el nuevo estado al instante; el re-fetch reconcilia.
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'cancelled' } : o))
+      setDetailOrder(prev => prev && prev.id === orderId ? { ...prev, status: 'cancelled' } : prev)
       fetchOrders()
-      const updated = await api.get<PurchaseOrder>(`/api/purchases/${detailOrder.id}`)
-      setDetailOrder(updated)
+      api.get<PurchaseOrder>(`/api/purchases/${orderId}`)
+        .then(updated => setDetailOrder(prev => prev && prev.id === orderId ? updated : prev))
+        .catch(() => {})
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al cancelar')
     } finally { setCancelling(false) }

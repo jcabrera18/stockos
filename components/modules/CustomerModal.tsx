@@ -83,6 +83,11 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
   const nameInputRef = useRef<HTMLInputElement>(null)
   const isEdit = !!customer
 
+  const [isMac, setIsMac] = useState(true)
+  useEffect(() => {
+    setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.platform) || /Mac/.test(navigator.userAgent))
+  }, [])
+
   const [zones, setZones] = useState<DeliveryZone[]>([])
   const [categories, setCategories] = useState<ClientCategory[]>([])
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
@@ -304,7 +309,10 @@ export function CustomerModal({ open, onClose, onSaved, customer }: CustomerModa
                 Guardar y crear otro
               </Button>
             )}
-            <Button onClick={() => void handleSave('close')} loading={saving}>{isEdit ? 'Guardar cambios' : 'Crear cliente'}</Button>
+            <Button onClick={() => void handleSave('close')} loading={saving}>
+              {isEdit ? 'Guardar cambios' : 'Crear cliente'}
+              <kbd className="ml-2 hidden sm:inline-block text-[10px] font-medium px-1.5 py-0.5 rounded border border-white/30 text-white/80">{isMac ? '⌘ + ↵' : 'Ctrl + ↵'}</kbd>
+            </Button>
           </div>
         </div>
 

@@ -88,12 +88,15 @@ export async function printFacturaA4(
     ? (PAYMENT_LABELS[invoice.sales.payment_method] ?? invoice.sales.payment_method)
     : null
 
+  // Verde StockOS para los comprobantes no fiscales (Ticket X y Remito), que son
+  // los que "salen a la calle" sin letra AFIP. A/B/C conservan el color de letra
+  // convencional (la C ya es el verde de marca).
   const typeColors: Record<string, string> = {
-    A: '#991B1B', B: '#1B3F7F', C: '#166534', R: '#374151',
+    X: '#16a34a', A: '#991B1B', B: '#1B3F7F', C: '#166534', R: '#16a34a',
     NCA: '#991B1B', NCB: '#1B3F7F', NCC: '#166534',
     NDA: '#7C2D12', NDB: '#1E3A8A', NDC: '#14532D',
   }
-  const color = typeColors[invoice.invoice_type] ?? '#374151'
+  const color = typeColors[invoice.invoice_type] ?? '#16a34a'
 
   let qrDataUrl = ''
   if (biz?.cuit && invoice.afip_cae) {

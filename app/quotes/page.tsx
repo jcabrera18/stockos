@@ -14,6 +14,7 @@ import { PageLoader } from '@/components/ui/Spinner'
 import { Pagination } from '@/components/ui/Pagination'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
+import { printDocument, partiesGrid, totalsBox, highlightBox, fmtARS } from '@/lib/printDocument'
 import type { Product, Pagination as PaginationType } from '@/types'
 import type { PriceList } from '@/app/price-lists/page'
 import {
@@ -117,6 +118,10 @@ export default function QuotesPage() {
 
   // Nuevo presupuesto
   const [newQuoteModal, setNewQuoteModal] = useState(false)
+  const [isMac, setIsMac] = useState(true)
+  useEffect(() => {
+    setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.platform) || /Mac/.test(navigator.userAgent))
+  }, [])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
   const priceOverridesRef = useRef<Map<string, Map<string, number>>>(new Map())
@@ -379,7 +384,7 @@ export default function QuotesPage() {
     if (cart.length === 0) { toast.error('Agregá al menos un producto'); return }
     setSavingQuote(true)
     try {
-      const created = await api.post<{ id: string }>('/api/quotes', {
+      const created = await api.post<QuoteSummary>('/api/quotes', {
         customer_id: selectedCustomerId ?? null,
         customer_name: customerName.trim(),
         customer_phone: customerPhone.trim() || null,
@@ -395,8 +400,20 @@ export default function QuotesPage() {
         })),
       })
       toast.success('Presupuesto creado')
+      // Optimista: el presupuesto nuevo (status 'draft') encabeza la página 1.
+      // Lo prependemos al instante si el filtro actual no lo excluye; el re-fetch
+      // reconcilia item_count/total_units y demás campos calculados por el view.
+      const noExcludingFilter = (!statusFilterRef.current || statusFilterRef.current === 'draft') && !searchRef.current
+      if (created?.id && noExcludingFilter) {
+        const optimistic: QuoteSummary = {
+          ...created,
+          item_count: created.item_count ?? cart.length,
+          total_units: created.total_units ?? cart.reduce((s, i) => s + i.quantity, 0),
+          seller_name: created.seller_name ?? authUser?.full_name,
+        }
+        setQuotes(prev => [optimistic, ...prev.filter(q => q.id !== optimistic.id)])
+      }
       resetForm()
-      // El presupuesto nuevo es el más reciente → siempre encabeza la página 1.
       // Volvemos a la página 1 antes de refrescar para que aparezca al instante
       // aunque estuvieras paginando.
       pageRef.current = 1
@@ -411,14 +428,31 @@ export default function QuotesPage() {
     } finally { setSavingQuote(false) }
   }
 
+  // Ctrl/Cmd + Enter dispara "Crear presupuesto" mientras el panel está abierto.
+  const handleCreateQuoteRef = useRef(handleCreateQuote)
+  handleCreateQuoteRef.current = handleCreateQuote
+  useEffect(() => {
+    if (!newQuoteModal) return
+    const onKeyDown = (e: globalThis.KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault()
+        if (!savingQuote && cart.length > 0) handleCreateQuoteRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [newQuoteModal, savingQuote, cart.length])
+
   const handleCancel = async (id: string) => {
     try {
       await api.post(`/api/quotes/${id}/cancel`, {})
       toast.success('Presupuesto anulado')
+      // Optimista: reflejar el estado al instante; el re-fetch reconcilia.
+      setQuotes(prev => prev.map(q => q.id === id ? { ...q, status: 'cancelled' } : q))
+      setDetail(prev => prev && prev.id === id ? { ...prev, status: 'cancelled' } : prev)
       fetchQuotes()
       if (detail?.id === id) {
-        const updated = await api.get<QuoteDetail>(`/api/quotes/${id}`)
-        setDetail(updated)
+        api.get<QuoteDetail>(`/api/quotes/${id}`).then(setDetail).catch(() => {})
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al anular')
@@ -460,81 +494,58 @@ export default function QuotesPage() {
 
   // ─── Impresión ───────────────────────────────────────────
   const printQuote = (d: QuoteDetail) => {
-    const win = window.open('', '_blank', 'width=750,height=700')
-    if (!win) return
     const date = new Date(d.created_at).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
     const biz = authUser?.business
     const rows = (d.quote_items ?? []).map(i =>
       `<tr>
-        <td>${i.products?.name ?? i.product_name ?? '(producto eliminado)'}${i.products?.barcode ? `<br><span class="small">${i.products.barcode}</span>` : ''}</td>
-        <td class="center">${i.quantity} ${i.products?.unit ?? ''}</td>
-        <td class="right">${Number(i.unit_price).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
-        <td class="right">${Number(i.subtotal).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td>
+        <td>${i.products?.name ?? i.product_name ?? '(producto eliminado)'}${i.products?.barcode ? `<div class="item-sub">${i.products.barcode}</div>` : ''}</td>
+        <td class="c">${i.quantity} ${i.products?.unit ?? ''}</td>
+        <td class="r">${fmtARS(Number(i.unit_price))}</td>
+        <td class="r">${fmtARS(Number(i.subtotal))}</td>
       </tr>`
     ).join('')
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Presupuesto</title>
-    <style>
-      *{box-sizing:border-box;margin:0;padding:0}
-      body{font-family:Arial,sans-serif;padding:32px;color:#111;font-size:13px}
-      h1{font-size:22px;margin-bottom:2px}
-      .num{font-size:12px;color:#666;margin-bottom:24px}
-      .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
-      .box{border:1px solid #e0e0e0;border-radius:6px;padding:12px}
-      .box .label{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
-      .box p{font-size:13px;font-weight:600}
-      .box .sub{font-size:12px;color:#555;font-weight:400;margin-top:2px}
-      table{width:100%;border-collapse:collapse;margin-bottom:16px}
-      th{background:#f5f5f5;text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;color:#555;border-bottom:2px solid #ddd}
-      td{padding:9px 10px;border-bottom:1px solid #eee;font-size:13px;vertical-align:top}
-      .center{text-align:center} .right{text-align:right}
-      .small{font-size:11px;color:#888}
-      tfoot td{border-top:2px solid #ddd;border-bottom:none;font-weight:600}
-      tfoot .total-row td{font-size:15px;color:#1a56db;padding-top:10px}
-      .valid{background:#fff8e1;border:1px solid #f59e0b;border-radius:6px;padding:10px 14px;margin-bottom:20px;font-size:12px;color:#b45309}
-      .footer{margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px}
-      .sign{border-top:1px solid #aaa;padding-top:8px;font-size:11px;color:#666;text-align:center}
-      @media print{button{display:none}}
-    </style></head><body>
-    <h1>Presupuesto</h1>
-    <p class="num">N° ${d.id.slice(0, 8).toUpperCase()} · ${date}</p>
 
-    <div class="grid">
-      <div class="box">
-        <div class="label">Emisor</div>
-        <p>${biz?.name ?? ''}</p>
-        ${biz?.cuit ? `<p class="sub">CUIT: ${biz.cuit}</p>` : ''}
-        ${biz?.address ? `<p class="sub">${biz.address}</p>` : ''}
-        ${biz?.phone ? `<p class="sub">Tel: ${biz.phone}</p>` : ''}
-      </div>
-      <div class="box">
-        <div class="label">Cliente</div>
-        <p>${d.customer_name}</p>
-        ${d.customers?.document ? `<p class="sub">DNI/CUIT: ${d.customers.document}</p>` : ''}
-        ${(d.customer_phone || d.customers?.phone) ? `<p class="sub">Tel: ${d.customer_phone || d.customers?.phone}</p>` : ''}
-      </div>
-    </div>
+    const body = `
+      ${partiesGrid([
+        {
+          title: 'Emisor',
+          name: biz?.name ?? '',
+          rows: [
+            biz?.cuit ? `CUIT: ${biz.cuit}` : '',
+            biz?.address ?? '',
+            biz?.phone ? `Tel: ${biz.phone}` : '',
+          ],
+        },
+        {
+          title: 'Cliente',
+          name: d.customer_name,
+          rows: [
+            d.customers?.document ? `DNI/CUIT: ${d.customers.document}` : '',
+            (d.customer_phone || d.customers?.phone) ? `Tel: ${d.customer_phone || d.customers?.phone}` : '',
+          ],
+        },
+      ])}
+      ${d.valid_until ? highlightBox({ tone: 'warn', label: `Presupuesto válido hasta el ${formatDate(d.valid_until)}. Precios sujetos a modificación luego de esa fecha.` }) : ''}
+      <table>
+        <thead><tr><th>Producto</th><th class="c" style="width:80px">Cant.</th><th class="r" style="width:120px">Precio unit.</th><th class="r" style="width:130px">Subtotal</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      ${totalsBox([
+        ...(Number(d.discount) > 0 ? [{ label: 'Descuento', value: `− ${fmtARS(Number(d.discount))}` }] : []),
+        { label: 'Total', value: fmtARS(Number(d.total)), grand: true },
+      ])}
+      ${d.notes ? `<div class="note-line">Notas: ${d.notes}</div>` : ''}`
 
-    ${d.valid_until ? `<div class="valid">Presupuesto válido hasta el <strong>${formatDate(d.valid_until)}</strong>. Precios sujetos a modificación luego de esa fecha.</div>` : ''}
-
-    <table>
-      <thead><tr><th>Producto</th><th class="center">Cant.</th><th class="right">Precio unit.</th><th class="right">Subtotal</th></tr></thead>
-      <tbody>${rows}</tbody>
-      <tfoot>
-        ${Number(d.discount) > 0 ? `<tr><td colspan="3">Descuento</td><td class="right">− ${Number(d.discount).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</td></tr>` : ''}
-        <tr class="total-row"><td colspan="3"><strong>Total</strong></td><td class="right"><strong>${Number(d.total).toLocaleString('es-AR', { style: 'currency', currency: 'ARS' })}</strong></td></tr>
-      </tfoot>
-    </table>
-
-    ${d.notes ? `<p style="font-size:12px;color:#555;margin-bottom:20px"><em>Notas: ${d.notes}</em></p>` : ''}
-
-    <div class="footer">
-      <div class="sign">Firma cliente</div>
-      <div class="sign">Firma emisor</div>
-    </div>
-    <div style="font-size:10px;color:#aaa;text-align:center;margin-top:24px">Presupuesto sin validez fiscal · ${biz?.name ?? ''} · StockOS</div>
-    </body></html>`)
-    win.document.close()
-    setTimeout(() => win.print(), 300)
+    printDocument({
+      title: 'Presupuesto',
+      docLabel: 'Presupuesto',
+      docNumber: `N° ${d.id.slice(0, 8).toUpperCase()}`,
+      docMeta: [date],
+      biz,
+      bodyHtml: body,
+      signatures: ['Firma cliente', 'Firma emisor'],
+      footerNote: 'Presupuesto sin validez fiscal',
+    })
   }
 
   // ─── Copiar presupuesto para WhatsApp ────────────────────
@@ -1117,6 +1128,7 @@ export default function QuotesPage() {
                   </Button>
                   <Button className="flex-1" onClick={handleCreateQuote} loading={savingQuote} disabled={cart.length === 0}>
                     Crear presupuesto {cart.length > 0 ? `· ${formatCurrency(cartTotal)}` : ''}
+                    <kbd className="ml-2 hidden sm:inline-block text-[10px] font-medium px-1.5 py-0.5 rounded border border-white/30 text-white/80">{isMac ? '⌘ + ↵' : 'Ctrl + ↵'}</kbd>
                   </Button>
                 </div>
               </div>

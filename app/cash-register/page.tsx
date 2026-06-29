@@ -211,7 +211,7 @@ export default function CashRegisterPage() {
 
     setSaving(true)
     try {
-      await api.post('/api/cash-register/open', {
+      const created = await api.post<CashRegister>('/api/cash-register/open', {
         branch_id: openBranchId,
         register_id: openRegisterId,
         opening_amount: Number(openingAmount),
@@ -219,6 +219,23 @@ export default function CashRegisterPage() {
       })
       toast.success('Caja abierta correctamente')
       setOpenModal(false)
+      // Optimista: la caja recién abierta aparece como card al instante. Una caja
+      // nueva no tiene ventas → todos los system_* arrancan en 0. El re-fetch reconcilia.
+      if (created?.id) {
+        const reg = registers.find(r => r.id === openRegisterId)
+        const br = branches.find(b => b.id === openBranchId)
+        const optimistic: CashRegister = {
+          ...created,
+          // Caja nueva → sin ventas ni movimientos todavía.
+          system_efectivo: 0, system_debito: 0, system_credito: 0, system_transferencia: 0,
+          system_qr: 0, system_cuenta_corriente: 0, system_cash_in: 0, system_cc_collected: 0,
+          system_cash_out: 0, system_total: 0, system_sales_count: 0,
+          branches: created.branches ?? (br ? { name: br.name } : undefined),
+          registers: created.registers ?? (reg ? { name: reg.name } : undefined),
+          opener: created.opener ?? (user?.full_name ? { full_name: user.full_name } : undefined),
+        }
+        setOpenRegisters(prev => [...prev.filter(r => r.id !== optimistic.id), optimistic])
+      }
       setOpeningAmount(''); setNotes('')
       window.dispatchEvent(new Event('caja-changed'))
       fetchData()
@@ -241,6 +258,9 @@ export default function CashRegisterPage() {
       setCloseModal(false)
       setCloseTarget(null)
       setClosingAmount(''); setNotes('')
+      // Optimista: la caja cerrada desaparece de las cards al instante; el re-fetch
+      // la trae al historial y reconcilia el resto.
+      setOpenRegisters(prev => prev.filter(r => r.id !== target.id))
       window.dispatchEvent(new Event('caja-changed'))
       fetchData()
     } catch (err: unknown) {
@@ -270,15 +290,25 @@ export default function CashRegisterPage() {
     if (!movementReason.trim()) { toast.error('Ingresá un motivo'); return }
     setSaving(true)
     try {
-      await api.post(`/api/cash-register/${movementTarget.id}/movement`, {
+      const amount = Number(movementAmount)
+      const targetId = movementTarget.id
+      const isOut = movementType === 'out'
+      await api.post(`/api/cash-register/${targetId}/movement`, {
         type: movementType,
-        amount: Number(movementAmount),
+        amount,
         reason: movementReason.trim(),
-        ...(movementType === 'out' ? { category: movementCategory } : {}),
+        ...(isOut ? { category: movementCategory } : {}),
       })
-      toast.success(movementType === 'out' ? 'Egreso registrado' : 'Ingreso registrado')
+      toast.success(isOut ? 'Egreso registrado' : 'Ingreso registrado')
       setMovementModal(false)
       setMovementTarget(null)
+      // Optimista: ajustar el efectivo esperado de la card al instante (se refleja
+      // en expectedCash); el re-fetch reconcilia totales exactos.
+      setOpenRegisters(prev => prev.map(r => r.id === targetId
+        ? (isOut
+            ? { ...r, system_cash_out: (r.system_cash_out ?? 0) + amount }
+            : { ...r, system_cash_in: (r.system_cash_in ?? 0) + amount })
+        : r))
       window.dispatchEvent(new Event('caja-changed'))
       fetchData()
     } catch (err: unknown) {
