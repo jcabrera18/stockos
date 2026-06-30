@@ -25,6 +25,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { usePOSSync } from '@/hooks/usePOSSync'
 import { useCollapseSidebar } from '@/contexts/SidePanelContext'
 import { searchProductsLocal, searchCustomersLocal } from '@/lib/pos-cache'
+import { makeOptimisticState, reconcileList, clearOptimisticState } from '@/lib/optimistic-reconcile'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────
@@ -167,24 +168,60 @@ export default function QuotesPage() {
   useEffect(() => { statusFilterRef.current = statusFilter }, [statusFilter])
   useEffect(() => { searchRef.current = search }, [search])
 
-  const fetchQuotes = useCallback(async () => {
-    setLoading(true)
+  // Estado optimista que el replica del server puede no reflejar aún (lag
+  // read-after-write). El re-fetch lo reconcilia en vez de pisarlo.
+  const optimisticRef = useRef(makeOptimisticState<QuoteSummary>())
+  const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconcileCountRef = useRef(0)
+
+  const fetchQuotes = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const params: Record<string, string | number | undefined> = { page: pageRef.current, limit: 20 }
       if (statusFilterRef.current) params.status = statusFilterRef.current
       if (searchRef.current) params.search = searchRef.current
       const res = await api.get<{ data: QuoteSummary[]; pagination: PaginationType }>('/api/quotes', params)
-      setQuotes(res.data)
+      const { data, pending } = reconcileList(res.data, optimisticRef.current)
+      setQuotes(data)
       setPagination(res.pagination)
+      if (pending && reconcileCountRef.current < 4) {
+        reconcileCountRef.current += 1
+        if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current)
+        reconcileTimerRef.current = setTimeout(() => fetchQuotes(true), 1500)
+      } else {
+        reconcileCountRef.current = 0
+      }
     } catch (err) { console.error(err) }
-    finally { setLoading(false) }
+    finally { if (!silent) setLoading(false) }
+  }, [])
+
+  // Refetch del detalle con guarda de staleness (igual que en pedidos).
+  const detailRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const refetchDetail = useCallback((id: string, expect?: Partial<QuoteDetail>, tries = 0) => {
+    api.get<QuoteDetail>(`/api/quotes/${id}`).then(updated => {
+      const stale = !!expect && Object.keys(expect).some(
+        k => (updated as unknown as Record<string, unknown>)[k] !== (expect as Record<string, unknown>)[k],
+      )
+      setDetail(prev => prev && prev.id === id ? { ...updated, ...(stale && expect ? expect : {}) } : prev)
+      if (stale && tries < 4) {
+        if (detailRetryRef.current) clearTimeout(detailRetryRef.current)
+        detailRetryRef.current = setTimeout(() => refetchDetail(id, expect, tries + 1), 1500)
+      }
+    }).catch(() => {})
   }, [])
 
   useEffect(() => {
     pageRef.current = 1
     setPage(1)
+    clearOptimisticState(optimisticRef.current)
+    reconcileCountRef.current = 0
     fetchQuotes()
   }, [statusFilter, search, fetchQuotes])
+
+  useEffect(() => () => {
+    if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current)
+    if (detailRetryRef.current) clearTimeout(detailRetryRef.current)
+  }, [])
 
   const handlePageChange = useCallback((newPage: number) => {
     pageRef.current = newPage
@@ -412,6 +449,9 @@ export default function QuotesPage() {
           seller_name: created.seller_name ?? authUser?.full_name,
         }
         setQuotes(prev => [optimistic, ...prev.filter(q => q.id !== optimistic.id)])
+        // Mantenerlo prependeado en los re-fetch hasta que el server lo liste.
+        reconcileCountRef.current = 0
+        optimisticRef.current.created = [optimistic, ...optimisticRef.current.created.filter(q => q.id !== optimistic.id)]
       }
       resetForm()
       // Volvemos a la página 1 antes de refrescar para que aparezca al instante
@@ -450,9 +490,11 @@ export default function QuotesPage() {
       // Optimista: reflejar el estado al instante; el re-fetch reconcilia.
       setQuotes(prev => prev.map(q => q.id === id ? { ...q, status: 'cancelled' } : q))
       setDetail(prev => prev && prev.id === id ? { ...prev, status: 'cancelled' } : prev)
+      reconcileCountRef.current = 0
+      optimisticRef.current.patches.set(id, { status: 'cancelled' })
       fetchQuotes()
       if (detail?.id === id) {
-        api.get<QuoteDetail>(`/api/quotes/${id}`).then(setDetail).catch(() => {})
+        refetchDetail(id, { status: 'cancelled' })
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al anular')

@@ -12,15 +12,17 @@ interface StatCardProps {
   trend?:     { value: number; label: string }
   delta?:     { value: number; label: string }  // comparativo con flecha
   accent?:    boolean
+  warning?:   boolean
   danger?:    boolean
   className?: string
 }
 
-export function StatCard({ title, value, valueTitle, valueClassName, subtitle, icon: Icon, trend, delta, accent, danger, className }: StatCardProps) {
+export function StatCard({ title, value, valueTitle, valueClassName, subtitle, icon: Icon, trend, delta, accent, warning, danger, className }: StatCardProps) {
   return (
     <div className={cn(
       'bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4',
       accent && 'border-[var(--accent)] bg-[var(--accent-subtle)]',
+      warning && 'border-[var(--warning)] bg-[var(--warning-subtle)]',
       danger && 'border-[var(--danger)] bg-[var(--danger-subtle)]',
       className
     )}>
@@ -32,7 +34,7 @@ export function StatCard({ title, value, valueTitle, valueClassName, subtitle, i
             className={cn(
               'font-semibold mono tabular-nums truncate',
               valueClassName ?? 'text-2xl',
-              danger ? 'text-[var(--danger)]' : accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'
+              danger ? 'text-[var(--danger)]' : warning ? 'text-[var(--warning)]' : accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'
             )}
           >
             {value}

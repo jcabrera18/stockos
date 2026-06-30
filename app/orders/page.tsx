@@ -20,10 +20,13 @@ import type { PriceList } from '@/app/price-lists/page'
 import {
   Plus, Search, Package, CheckCircle, Clock, Truck,
   X, Minus, Trash2, ChevronRight, DollarSign, AlertCircle,
-  ClipboardList, Printer, Receipt, FileText, RefreshCw, Copy,
+  ClipboardList, Printer, Receipt, FileText, RefreshCw, Copy, CreditCard,
 } from 'lucide-react'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
+import { CustomerDetailModal } from '@/components/modules/CustomerDetailModal'
+import { PaymentModal, type SavedMovement } from '@/components/modules/PaymentModal'
+import type { CustomerSummary } from '@/app/customers/page'
 import { useAuth } from '@/hooks/useAuth'
 import { usePOSSync } from '@/hooks/usePOSSync'
 import { useDebounce } from '@/hooks/useDebounce'
@@ -32,6 +35,7 @@ import { searchProductsLocal, searchCustomersLocal } from '@/lib/pos-cache'
 import { printDocument, partiesGrid, totalsBox, highlightBox, fmtARS } from '@/lib/printDocument'
 import { queueOrder, getPendingOrdersCount, syncPendingOrders } from '@/lib/orders-queue'
 import { isNetworkError } from '@/lib/sales-queue'
+import { makeOptimisticState, reconcileList, clearOptimisticState } from '@/lib/optimistic-reconcile'
 import { toast } from 'sonner'
 
 // ─── Tipos ────────────────────────────────────────────────
@@ -64,6 +68,7 @@ interface OrderSummary {
 }
 
 interface OrderDetail extends OrderSummary {
+  customer_id?: string | null
   warehouse_id?: string
   price_list_id?: string
   invoice_id?: string
@@ -175,6 +180,15 @@ function OrdersPageInner() {
   const [detail, setDetail] = useState<OrderDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [deliveries, setDeliveries] = useState<OrderDelivery[]>([])
+
+  // Cuenta corriente del cliente, abierta inline desde el detalle del pedido
+  // (sin cambiar de módulo ni buscarlo de nuevo).
+  const [ccCustomer, setCcCustomer] = useState<CustomerSummary | null>(null)
+  const [ccOpen, setCcOpen] = useState(false)
+  const [ccLoading, setCcLoading] = useState(false)
+  const [ccPaymentModal, setCcPaymentModal] = useState(false)
+  const [ccSeed, setCcSeed] = useState<SavedMovement | null>(null)
+  const [ccRefreshKey, setCcRefreshKey] = useState(0)
 
   // Nuevo pedido
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
@@ -567,8 +581,14 @@ function OrdersPageInner() {
   useEffect(() => { searchRef.current = debouncedSearch }, [debouncedSearch])
   useEffect(() => { idSearchRef.current = debouncedIdSearch }, [debouncedIdSearch])
 
-  const fetchOrders = useCallback(async () => {
-    setLoading(true)
+  // Estado optimista que el replica del server puede no reflejar aún (lag
+  // read-after-write). El re-fetch lo reconcilia en vez de pisarlo.
+  const optimisticRef = useRef(makeOptimisticState<OrderSummary>())
+  const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconcileCountRef = useRef(0)
+
+  const fetchOrders = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const params: Record<string, string | number | undefined> = { page: pageRef.current, limit: 10 }
       if (statusFilterRef.current) params.status = statusFilterRef.current
@@ -577,15 +597,53 @@ function OrdersPageInner() {
       if (idSearchRef.current) params.order_number = idSearchRef.current
       else if (searchRef.current) params.search = searchRef.current
       const res = await api.get<{ data: OrderSummary[]; pagination: PaginationType }>('/api/orders', params)
-      setOrders(res.data)
+      // Mantener filas optimistas (creación/cambio de estado) hasta que el server
+      // las refleje, y reintentar unas pocas veces para reconciliar.
+      const { data, pending } = reconcileList(res.data, optimisticRef.current)
+      setOrders(data)
       setPagination(res.pagination)
+      if (pending && reconcileCountRef.current < 4) {
+        reconcileCountRef.current += 1
+        if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current)
+        reconcileTimerRef.current = setTimeout(() => fetchOrders(true), 1500)
+      } else {
+        reconcileCountRef.current = 0
+      }
     } catch (err) { console.error(err) }
-    finally { setLoading(false) }
+    finally { if (!silent) setLoading(false) }
   }, [])
+
+  // Refetch del detalle con guarda de staleness: si el server todavía devuelve el
+  // estado viejo, mantenemos los campos esperados (optimistas) y reintentamos.
+  const detailRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const resolveDetailInvoice = useCallback((d: OrderDetail) => {
+    if (d.invoices) { setDetailInvoice(d.invoices); return }
+    if (d.sale_id) {
+      api.get<{ id: string; invoice_type: string; numero: number } | null>(`/api/invoices/sale/${d.sale_id}`)
+        .then(inv => { if (inv) setDetailInvoice(inv) })
+        .catch(() => {})
+    }
+  }, [])
+  const refetchDetail = useCallback((id: string, expect?: Partial<OrderDetail>, tries = 0) => {
+    api.get<OrderDetail>(`/api/orders/${id}`).then(updated => {
+      const stale = !!expect && Object.keys(expect).some(
+        k => (updated as unknown as Record<string, unknown>)[k] !== (expect as Record<string, unknown>)[k],
+      )
+      setDetail(prev => prev && prev.id === id ? { ...updated, ...(stale && expect ? expect : {}) } : prev)
+      resolveDetailInvoice(updated)
+      if (stale && tries < 4) {
+        if (detailRetryRef.current) clearTimeout(detailRetryRef.current)
+        detailRetryRef.current = setTimeout(() => refetchDetail(id, expect, tries + 1), 1500)
+      }
+    }).catch(() => {})
+  }, [resolveDetailInvoice])
 
   useEffect(() => {
     pageRef.current = 1
     setPage(1)
+    // Cambió el filtro/búsqueda: el optimismo de la vista anterior ya no aplica.
+    clearOptimisticState(optimisticRef.current)
+    reconcileCountRef.current = 0
     fetchOrders()
   }, [statusFilter, debouncedSearch, debouncedIdSearch, fetchOrders])
 
@@ -767,7 +825,15 @@ function OrdersPageInner() {
         const data = await api.get<{ id: string; full_name: string; phone?: string; document?: string; current_balance: number; credit_limit: number }[]>(
           `/api/customers/search?q=${encodeURIComponent(query)}`
         )
-        if (customerSearchRequestRef.current === requestId) setCustomerResults(data)
+        if (customerSearchRequestRef.current === requestId) {
+          // El server manda saldos al día pero puede no traer phone/document → los
+          // completamos desde el cache local para que no "parpadeen" (aparecer/desaparecer).
+          const localById = new Map(local.map(c => [c.id, c]))
+          setCustomerResults(data.map(c => {
+            const l = localById.get(c.id)
+            return { ...c, phone: c.phone ?? l?.phone, document: c.document ?? l?.document }
+          }))
+        }
       } catch {
         // Sin red → quedarse con los resultados del cache local
         if (customerSearchRequestRef.current === requestId && local.length === 0) setCustomerResults([])
@@ -806,6 +872,21 @@ function OrdersPageInner() {
       }
     } catch { toast.error('Error al cargar el pedido') }
     finally { setLoadingDetail(false) }
+  }
+
+  // Abre la cuenta corriente del cliente del pedido en un drawer inline. Trae el
+  // cliente completo (/:id) para tener saldo + datos al día para impresión/WhatsApp.
+  const openCustomerAccount = async (customerId?: string | null) => {
+    if (!customerId) { toast.error('Este pedido no tiene un cliente registrado'); return }
+    setCcOpen(true)
+    setCcLoading(true)
+    try {
+      const customer = await api.get<CustomerSummary>(`/api/customers/${customerId}`)
+      setCcCustomer(customer)
+    } catch {
+      toast.error('No se pudo cargar la cuenta del cliente')
+      setCcOpen(false)
+    } finally { setCcLoading(false) }
   }
 
   // Abrir un pedido directo desde ?open= (ej. al convertir un presupuesto)
@@ -1042,6 +1123,9 @@ function OrdersPageInner() {
           warehouse_name: created.warehouse_name ?? warehouses.find(w => w.id === warehouseId)?.name,
         }
         setOrders(prev => [optimistic, ...prev.filter(o => o.id !== optimistic.id)])
+        // Lo mantenemos prependeado en los re-fetch hasta que el server lo liste.
+        reconcileCountRef.current = 0
+        optimisticRef.current.created = [optimistic, ...optimisticRef.current.created.filter(o => o.id !== optimistic.id)]
       }
       resetOrderForm()
       setNewOrderModal(false)
@@ -1088,10 +1172,13 @@ function OrdersPageInner() {
       if (newStatus) {
         setOrders(prev => prev.map(o => o.id === id ? { ...o, status: newStatus } : o))
         setDetail(prev => prev && prev.id === id ? { ...prev, ...(row ?? {}), status: newStatus } : prev)
+        // Sostener el nuevo estado en los re-fetch hasta que el server lo refleje.
+        reconcileCountRef.current = 0
+        optimisticRef.current.patches.set(id, { status: newStatus })
       }
       fetchOrders()
       if (detail?.id === id) {
-        api.get<OrderDetail>(`/api/orders/${id}`).then(setDetail).catch(() => {})
+        refetchDetail(id, newStatus ? { status: newStatus } : undefined)
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al actualizar'
@@ -1118,19 +1205,19 @@ function OrdersPageInner() {
         delivery_notes: deliverNotes || null,
       })
       toast.success('Entrega confirmada — venta generada automáticamente')
+      const deliveredId = deliverOrderId
       setDeliverModal(false)
       setDeliverOrderId(null)
       setDeliverAmount(''); setDeliverNotes('')
+      // Optimista: la entrega completa deja el pedido 'delivered'. Lo sostenemos
+      // en la tabla y el detalle hasta que el server (replica) lo refleje.
+      setOrders(prev => prev.map(o => o.id === deliveredId ? { ...o, status: 'delivered' } : o))
+      setDetail(prev => prev && prev.id === deliveredId ? { ...prev, status: 'delivered' } : prev)
+      reconcileCountRef.current = 0
+      optimisticRef.current.patches.set(deliveredId, { status: 'delivered' })
       fetchOrders()
-      if (detail?.id === deliverOrderId) {
-        const updated = await api.get<OrderDetail>(`/api/orders/${deliverOrderId}`)
-        setDetail(updated)
-        if (updated.invoices) setDetailInvoice(updated.invoices)
-        else if (updated.sale_id) {
-          api.get<{ id: string; invoice_type: string; numero: number } | null>(`/api/invoices/sale/${updated.sale_id}`)
-            .then(inv => { if (inv) setDetailInvoice(inv) })
-            .catch(() => { })
-        }
+      if (detail?.id === deliveredId) {
+        refetchDetail(deliveredId, { status: 'delivered' })
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al confirmar entrega')
@@ -1263,21 +1350,38 @@ function OrdersPageInner() {
       // el re-fetch. El re-fetch de abajo reconcilia joins/saldos de cuenta.
       const row = updatedRow && typeof updatedRow === 'object' && 'paid_amount' in updatedRow ? updatedRow : null
       if (row) {
+        const patch = {
+          paid_amount: row.paid_amount ?? undefined,
+          payment_status: row.payment_status ?? undefined,
+        }
         setOrders(prev => prev.map(o => o.id === closedOrderId
-          ? { ...o, paid_amount: row.paid_amount ?? o.paid_amount, payment_status: row.payment_status ?? o.payment_status }
+          ? { ...o, paid_amount: patch.paid_amount ?? o.paid_amount, payment_status: patch.payment_status ?? o.payment_status }
           : o))
         setDetail(prev => prev && prev.id === closedOrderId ? { ...prev, ...row } : prev)
+        // Sostener el cobro en los re-fetch hasta que el server lo refleje.
+        reconcileCountRef.current = 0
+        const clean: Partial<OrderSummary> = {}
+        if (patch.paid_amount !== undefined) clean.paid_amount = patch.paid_amount
+        if (patch.payment_status !== undefined) clean.payment_status = patch.payment_status
+        if (Object.keys(clean).length > 0) optimisticRef.current.patches.set(closedOrderId, clean)
       }
       fetchOrders()
       if (detail?.id === closedOrderId) {
-        api.get<OrderDetail>(`/api/orders/${closedOrderId}`)
-          .then(updated => setDetail(prev => prev && prev.id === closedOrderId ? updated : prev))
-          .catch(() => {})
+        refetchDetail(closedOrderId, row ? {
+          ...(row.paid_amount !== undefined ? { paid_amount: row.paid_amount } : {}),
+          ...(row.payment_status !== undefined ? { payment_status: row.payment_status } : {}),
+        } : undefined)
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al registrar pago')
     } finally { setRegisteringPayment(false) }
   }
+
+  // Limpiar timers de reconciliación al desmontar.
+  useEffect(() => () => {
+    if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current)
+    if (detailRetryRef.current) clearTimeout(detailRetryRef.current)
+  }, [])
 
   const sidePanelOpen = detailModal || newOrderModal
   useCollapseSidebar(sidePanelOpen)
@@ -1685,18 +1789,41 @@ function OrdersPageInner() {
             {/* Info cliente + pago */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {/* Cliente */}
-              <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3.5 flex flex-col gap-1.5">
-                <p className="text-xs text-[var(--text3)]">Cliente</p>
-                <p className="text-sm font-semibold text-[var(--text)] leading-tight">{detail.customer_name}</p>
-                <div className="flex flex-col gap-0.5 text-xs text-[var(--text2)]">
-                  {detail.customers?.document && <span>DNI/CUIT: <span className="mono">{detail.customers.document}</span></span>}
-                  {(detail.customer_phone || detail.customers?.phone) && <span>Tel: {detail.customer_phone || detail.customers?.phone}</span>}
-                  {detail.customer_address && <span>{detail.customer_address}</span>}
+              <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3.5 flex justify-between gap-3">
+                {/* Datos del cliente */}
+                <div className="min-w-0 flex flex-col gap-1.5">
+                  <p className="text-xs text-[var(--text3)]">Cliente</p>
+                  <p className="text-sm font-semibold text-[var(--text)] leading-tight">{detail.customer_name}</p>
+                  <div className="flex flex-col gap-0.5 text-xs text-[var(--text2)]">
+                    {detail.customers?.document && <span>DNI/CUIT: <span className="mono">{detail.customers.document}</span></span>}
+                    {(detail.customer_phone || detail.customers?.phone) && <span>Tel: {detail.customer_phone || detail.customers?.phone}</span>}
+                    {detail.customer_address && <span>{detail.customer_address}</span>}
+                  </div>
                 </div>
-                {detail.customers?.current_balance !== undefined && detail.customers?.current_balance !== null && (
-                  <span className={`mt-auto self-start inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${Number(detail.customers.current_balance) > 0 ? 'bg-[var(--danger-subtle)] text-[var(--danger)]' : 'bg-[var(--accent-subtle)] text-[var(--accent)]'}`}>
-                    Saldo en cuenta: {formatCurrency(detail.customers.current_balance)}
-                  </span>
+                {/* Info de cuenta corriente, agrupada a la derecha */}
+                {(detail.customer_id || (detail.customers?.current_balance !== undefined && detail.customers?.current_balance !== null)) && (
+                  <div className="flex-shrink-0 flex flex-col items-end gap-1.5 text-right">
+                    {detail.customers?.current_balance !== undefined && detail.customers?.current_balance !== null && (
+                      detail.customer_id ? (
+                        <button
+                          onClick={() => openCustomerAccount(detail.customer_id)}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors hover:brightness-95 ${Number(detail.customers.current_balance) > 0 ? 'bg-[var(--danger-subtle)] text-[var(--danger)]' : 'bg-[var(--accent-subtle)] text-[var(--accent)]'}`}>
+                          Saldo en cuenta: {formatCurrency(detail.customers.current_balance)}
+                        </button>
+                      ) : (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${Number(detail.customers.current_balance) > 0 ? 'bg-[var(--danger-subtle)] text-[var(--danger)]' : 'bg-[var(--accent-subtle)] text-[var(--accent)]'}`}>
+                          Saldo en cuenta: {formatCurrency(detail.customers.current_balance)}
+                        </span>
+                      )
+                    )}
+                    {detail.customer_id && (
+                      <button
+                        onClick={() => openCustomerAccount(detail.customer_id)}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--accent)] hover:underline">
+                        <CreditCard size={12} /> Ver cuenta corriente
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
               {/* Pago */}
@@ -2062,7 +2189,11 @@ function OrdersPageInner() {
                               className={`w-full flex items-center justify-between px-3 py-2.5 transition-colors text-left border-b border-[var(--border)] last:border-0 ${customerHighlight === idx ? 'bg-[var(--surface2)]' : ''}`}>
                               <div>
                                 <p className="text-sm font-medium text-[var(--text)]">{c.full_name}</p>
-                                {(c.phone || c.document) && <p className="text-xs text-[var(--text3)]">{c.phone || `DNI ${c.document}`}</p>}
+                                {(c.phone || c.document) && (
+                                  <p className="text-xs text-[var(--text3)]">
+                                    {[c.document ? `DNI ${c.document}` : null, c.phone ? `Tel ${c.phone}` : null].filter(Boolean).join(' · ')}
+                                  </p>
+                                )}
                               </div>
                               {Number(c.current_balance) > 0 && (
                                 <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>
@@ -2889,6 +3020,43 @@ function OrdersPageInner() {
         invoiceId={convertInvoiceId}
         fallbackCustomerName={detail?.customers?.full_name}
         onSuccess={() => { if (detail) openDetail(detail.id) }}
+      />
+
+      {/* ── Cuenta corriente del cliente (inline desde el pedido) ── */}
+      <PaymentModal
+        open={ccPaymentModal}
+        onClose={() => {
+          setCcPaymentModal(false)
+          // Volver al drawer de cuenta con el saldo actualizado.
+          if (ccCustomer) {
+            api.get<CustomerSummary>(`/api/customers/${ccCustomer.id}`)
+              .then(updated => { setCcCustomer(updated); setCcOpen(true) })
+              .catch(() => {})
+          }
+        }}
+        onSaved={mov => {
+          if (mov) setCcSeed(mov)
+          setCcRefreshKey(k => k + 1)
+          // El saldo mostrado en el pedido también cambió → refrescar el detalle.
+          if (detail?.customer_id && detail.customer_id === ccCustomer?.id) {
+            api.get<OrderDetail>(`/api/orders/${detail.id}`)
+              .then(updated => setDetail(prev => prev && prev.id === updated.id ? updated : prev))
+              .catch(() => {})
+          }
+        }}
+        customer={ccPaymentModal ? ccCustomer : null}
+      />
+
+      <CustomerDetailModal
+        open={ccOpen && !ccLoading && !!ccCustomer}
+        onClose={() => { setCcOpen(false); setCcCustomer(null); setCcSeed(null) }}
+        customer={ccCustomer}
+        refreshKey={ccRefreshKey}
+        seedMovement={ccSeed}
+        onPayment={() => {
+          setCcOpen(false)
+          setCcPaymentModal(true)
+        }}
       />
 
       {/* ── Confirmación cancelación ── */}

@@ -9,6 +9,8 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { TableSkeleton } from '@/components/ui/Skeleton'
 import { PaymentModal, type SavedMovement } from '@/components/modules/PaymentModal'
 import { CustomerDetailModal } from '@/components/modules/CustomerDetailModal'
+import { CCPortfolioTop, CCPortfolioBottom, useCcPortfolioKpis } from '@/components/modules/CCPortfolioPanel'
+import { useAuth } from '@/hooks/useAuth'
 import { api } from '@/lib/api'
 import { formatCurrency } from '@/lib/utils'
 import type { PaginatedResponse, Pagination as PaginationType } from '@/types'
@@ -25,8 +27,11 @@ const creditStatusConfig = {
 type FilterTab = 'all' | 'with_balance' | 'limite_proximo' | 'limite_alcanzado'
 
 export default function AccountsPage() {
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'owner' || user?.role === 'admin'
+
   const [data, setData] = useState<CustomerSummary[]>([])
-  const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
+  const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 10, pages: 0 })
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [filter, setFilter] = useState<FilterTab>('all')
@@ -40,6 +45,9 @@ export default function AccountsPage() {
   // Señal de refresh + movimiento optimista para el drawer de cuenta.
   const [accountRefreshKey, setAccountRefreshKey] = useState(0)
   const [seedMovement, setSeedMovement] = useState<SavedMovement | null>(null)
+
+  // KPIs de cartera (solo owner/admin). Una sola llamada para las dos secciones.
+  const { kpis, loading: kpisLoading } = useCcPortfolioKpis(accountRefreshKey, isAdmin)
 
   const searchRef = useRef(debouncedSearch)
   const filterRef = useRef(filter)
@@ -58,7 +66,7 @@ export default function AccountsPage() {
       const params: Record<string, string | number | boolean | undefined> = {
         search: searchRef.current || undefined,
         page: pageRef.current,
-        limit: 20,
+        limit: 10,
       }
       if (filterRef.current === 'with_balance') params.with_balance = true
       if (filterRef.current === 'limite_proximo') params.credit_status = 'limite_proximo'
@@ -83,6 +91,15 @@ export default function AccountsPage() {
     fetchCustomers()
   }, [fetchCustomers])
 
+  // Click en un top deudor del panel → abrir su cuenta.
+  const openDebtorDetail = useCallback(async (id: string) => {
+    try {
+      const customer = await api.get<CustomerSummary>(`/api/customers/${id}`)
+      setDetailCustomer(customer)
+      setDetailModal(true)
+    } catch (err) { console.error(err) }
+  }, [])
+
   const totalDebt = data.reduce((a, c) => a + Number(c.current_balance), 0)
 
   const tabs: { key: FilterTab; label: string }[] = [
@@ -103,6 +120,9 @@ export default function AccountsPage() {
         <HelpBanner id="accounts" title="Cuentas corrientes">
           <p>Vista rápida de los saldos de tus clientes: quién debe, el estado del crédito y la antigüedad de la deuda. Registrá cobros al instante sin entrar al detalle de cada cliente.</p>
         </HelpBanner>
+
+        {isAdmin && <CCPortfolioTop kpis={kpis} loading={kpisLoading} />}
+
         <div className="flex flex-wrap items-center gap-2">
           {tabs.map(t => (
             <button key={t.key} onClick={() => setFilter(t.key)}
@@ -207,6 +227,8 @@ export default function AccountsPage() {
             <Pagination pagination={pagination} onPageChange={handlePageChange} />
           </div>
         )}
+
+        {isAdmin && <CCPortfolioBottom kpis={kpis} onSelectDebtor={openDebtorDetail} />}
       </div>
 
       <PaymentModal
