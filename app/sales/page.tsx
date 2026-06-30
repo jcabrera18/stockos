@@ -14,10 +14,14 @@ import type { Sale, PaginatedResponse, Pagination as PaginationType } from '@/ty
 import { Plus, ShoppingCart } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
+import { useAuth } from '@/hooks/useAuth'
+import { isRestrictedRole } from '@/lib/roles'
 
 type Period = 'today' | 'week' | 'month' | 'all'
 
 export default function SalesPage() {
+  const { user } = useAuth()
+  const restricted = isRestrictedRole(user?.role)
   const [data, setData] = useState<Sale[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
   const [period, setPeriod] = useState<Period>('today')
@@ -46,7 +50,9 @@ export default function SalesPage() {
   const ticketRef = useRef(debouncedTicket)
   const customerRef = useRef(customerFilter)
   const pageRef = useRef(page)
+  const restrictedRef = useRef(restricted)
 
+  useEffect(() => { restrictedRef.current = restricted }, [restricted])
   useEffect(() => { periodRef.current = period }, [period])
   useEffect(() => { paymentRef.current = paymentFilter }, [paymentFilter])
   useEffect(() => {
@@ -91,16 +97,23 @@ export default function SalesPage() {
       if (params.from) summaryParams.from = String(params.from)
       if (params.to) summaryParams.to = String(params.to)
 
+      // /api/finances/summary suma ventas de TODO el negocio y es admin-only.
+      // Para roles restringidos lo omitimos (no deben ver el total del negocio):
+      // solo se muestra el conteo de sus ventas de hoy.
       const [res, summary] = await Promise.all([
         api.get<PaginatedResponse<Sale>>('/api/sales', params),
-        api.get<{ revenue: number; by_payment: Record<string, number> }>(
-          '/api/finances/summary', summaryParams
-        ),
+        restrictedRef.current
+          ? Promise.resolve(null)
+          : api.get<{ revenue: number; by_payment: Record<string, number> }>(
+              '/api/finances/summary', summaryParams
+            ),
       ])
       setData(res.data)
       setPagination(res.pagination)
-      const pm = paymentRef.current
-      setPeriodRevenue(pm ? (summary.by_payment[pm] ?? 0) : summary.revenue)
+      if (summary) {
+        const pm = paymentRef.current
+        setPeriodRevenue(pm ? (summary.by_payment[pm] ?? 0) : summary.revenue)
+      }
     } catch (err) { console.error(err) }
     finally { setLoading(false) }
   }, [])
@@ -110,7 +123,7 @@ export default function SalesPage() {
     pageRef.current = 1
     setPage(1)
     fetchSales()
-  }, [period, paymentFilter, debouncedMin, debouncedMax, debouncedTicket, customerFilter, fetchSales])
+  }, [period, paymentFilter, debouncedMin, debouncedMax, debouncedTicket, customerFilter, restricted, fetchSales])
 
   // Cambio de página desde el componente Pagination
   const handlePageChange = useCallback((newPage: number) => {
@@ -150,7 +163,7 @@ export default function SalesPage() {
     <AppShell>
       <PageHeader
         title="Ventas"
-        description={loading ? '...' : `${pagination.total} ventas · ${formatCurrency(totalRevenue)}`}
+        description={loading ? '...' : restricted ? `${pagination.total} ventas hoy` : `${pagination.total} ventas · ${formatCurrency(totalRevenue)}`}
         action={
           <Button onClick={() => router.push('/pos')}>
             <Plus size={15} /> Nueva venta
@@ -165,8 +178,8 @@ export default function SalesPage() {
         {/* Filtros */}
         <div className="flex flex-wrap gap-2 items-center">
 
-          {/* Período */}
-          {periods.map(p => (
+          {/* Período — los roles restringidos quedan fijados a "hoy" (el backend lo fuerza) */}
+          {!restricted && periods.map(p => (
             <button key={p.key} onClick={() => setPeriod(p.key)}
               className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${period === p.key ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
                 }`}>
@@ -175,7 +188,7 @@ export default function SalesPage() {
           ))}
 
           {/* Separador */}
-          <div className="w-px h-5 bg-[var(--border)]" />
+          {!restricted && <div className="w-px h-5 bg-[var(--border)]" />}
 
           {/* Método de pago */}
           <select
@@ -270,7 +283,7 @@ export default function SalesPage() {
           {/* Total filtrado */}
           {!loading && (
             <span className="sm:ml-auto w-full sm:w-auto text-xs text-[var(--text3)]">
-              {pagination.total} ventas · {formatCurrency(totalRevenue)}
+              {restricted ? `${pagination.total} ventas hoy` : `${pagination.total} ventas · ${formatCurrency(totalRevenue)}`}
             </span>
           )}
         </div>
@@ -289,7 +302,7 @@ export default function SalesPage() {
                   <tr className="border-b border-[var(--border)]">
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Fecha</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">N° Ticket</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Vendedor</th>
+                    {!restricted && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Vendedor</th>}
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Sucursal / Caja</th>
                     <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Método</th>
                     <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Descuento</th>
@@ -309,9 +322,11 @@ export default function SalesPage() {
                       <td className="px-4 py-3 text-xs mono text-[var(--text3)] hidden sm:table-cell">
                         #{sale.id.slice(-8).toUpperCase()}
                       </td>
-                      <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
-                        {(sale.users as { full_name: string } | undefined)?.full_name ?? '—'}
-                      </td>
+                      {!restricted && (
+                        <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
+                          {(sale.users as { full_name: string } | undefined)?.full_name ?? '—'}
+                        </td>
+                      )}
                       <td className="px-4 py-3 hidden lg:table-cell">
                         <p className="text-sm text-[var(--text)]">
                           {(sale.branches as { name: string } | undefined)?.name ?? '—'}

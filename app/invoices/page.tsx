@@ -17,6 +17,7 @@ import { FileText, CheckCircle, Clock, XCircle, RefreshCw, Printer } from 'lucid
 import { toast } from 'sonner'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
+import { isRestrictedRole } from '@/lib/roles'
 import { printFacturaA4 } from '@/lib/printFactura'
 import {
   printThermal,
@@ -227,6 +228,7 @@ function InvoicesPageInner() {
 
   const router = useRouter()
   const { user } = useAuth()
+  const restricted = isRestrictedRole(user?.role)
   const pendingFacturarRef = useRef<string | null>(null)
 
   // Fetch al cambiar filtros
@@ -413,16 +415,18 @@ function InvoicesPageInner() {
             className="text-xs px-3 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] w-28 font-mono uppercase"
           />
 
-          {/* Fechas */}
-          <div className="flex items-center gap-2 ml-auto">
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-              className="text-xs px-2.5 py-1.5 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-            />
-            <span className="text-xs text-[var(--text3)]">→</span>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)}
-              className="text-xs px-2.5 py-1.5 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-            />
-          </div>
+          {/* Fechas — los roles restringidos quedan fijados a "hoy" (el backend lo fuerza) */}
+          {!restricted && (
+            <div className="flex items-center gap-2 ml-auto">
+              <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+                className="text-xs px-2.5 py-1.5 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+              />
+              <span className="text-xs text-[var(--text3)]">→</span>
+              <input type="date" value={to} onChange={e => setTo(e.target.value)}
+                className="text-xs px-2.5 py-1.5 rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+          )}
         </div>
 
         {loading ? <PageLoader /> : data.length === 0 ? (

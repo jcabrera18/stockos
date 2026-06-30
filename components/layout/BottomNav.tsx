@@ -198,15 +198,21 @@ export function BottomNav() {
                     <div className="grid grid-cols-3 gap-2">
                       {visibleItems.map(({ href, label, icon: Icon }) => {
                         const active = pathname === href || pathname.startsWith(href + '/')
+                        const pending = pendingHref === href
                         return (
                           <Link key={href} href={href} prefetch={false}
+                            onClick={() => { if (!active) setPendingHref(href) }}
                             className={cn(
                               'flex flex-col items-center gap-1.5 px-2 py-3 rounded-xl transition-all',
-                              active
+                              active || pending
                                 ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
                                 : 'bg-[var(--surface2)] text-[var(--text2)] active:scale-95'
                             )}>
-                            <Icon size={20} strokeWidth={active ? 2.5 : 1.8} />
+                            {pending ? (
+                              <span className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <Icon size={20} strokeWidth={active ? 2.5 : 1.8} />
+                            )}
                             <span className="text-[10px] font-medium text-center leading-tight">{label}</span>
                           </Link>
                         )

@@ -15,6 +15,7 @@ import { formatCurrency } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 import { useCatalogSync } from '@/hooks/useCatalogSync'
 import { queryCatalog, removeCatalogProduct } from '@/lib/catalog-cache'
+import { removeProductFromPOS } from '@/lib/pos-cache'
 import type { StockSummary, Product, Category, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import {
   Plus, Search, Package, Pencil, Trash2,
@@ -503,6 +504,9 @@ export default function ProductsPage() {
       // Reflejamos la baja en el cache local al instante (el backend hace soft-delete
       // y el producto desaparece de /api/products, así que no volvería por sync).
       await removeCatalogProduct(deleteProduct.id)
+      // Idem para el cache del POS (store `products` + `barcodes`), si no seguiría
+      // apareciendo en el POS de cobro hasta el próximo full sync.
+      await removeProductFromPOS(deleteProduct.id)
       setDeleteModal(false)
       setDeleteProduct(null)
       if (selectedId === deleteProduct.id) {

@@ -160,6 +160,9 @@ export async function resolveBarcode(
 
     const product = await posDB.products.get(entry.product_id)
     if (!product) return null
+    // Producto dado de baja que quedó en cache (ej. borrado mientras el POS seguía
+    // abierto, antes del próximo full sync): no resolverlo → "no le da bola".
+    if (product.is_active === false) return null
 
     return { product, pricing: computeLocalPrice(product, quantity) }
   } catch {
@@ -299,28 +302,42 @@ async function fetchAllProducts(warehouseId?: string | null, since?: string): Pr
   return [...first.data, ...rest.flatMap(r => r.data)]
 }
 
-export async function syncProducts(warehouseId?: string | null): Promise<void> {
+/**
+ * Sincroniza productos + barcodes a IndexedDB.
+ *
+ * - `full`: descarga completa con reemplazo (clear + bulkPut). Se usa al ENTRAR al POS
+ *   → trae todo fresco y **poda las bajas** hechas en este u otros dispositivos. El
+ *   backend hace soft-delete y el producto desaparece de /api/products, así que el sync
+ *   incremental (que solo trae lo modificado) nunca lo vería desaparecer y quedaría en
+ *   cache para siempre — apareciendo en el POS de cobro. El full clear lo resuelve.
+ * - sin `full`: incremental por `updated_since` → barato, para el refresh en background.
+ *   También se fuerza si el store está vacío (self-heal del cursor envenenado: un sync
+ *   previo recibió vacío y guardó el timestamp → el POS quedaría sin productos).
+ */
+export async function syncProducts(
+  warehouseId?: string | null,
+  opts: { full?: boolean } = {},
+): Promise<void> {
   const meta = await posDB.syncMeta.get('products')
   const now = new Date().toISOString()
 
-  // Self-heal de cursor envenenado: si el store está VACÍO pero hay cursor, un sync
-  // previo recibió respuesta vacía (ej. SW sirviendo cache stale en una caída) y
-  // guardó el timestamp → los syncs incrementales nunca re-bajan el catálogo completo
-  // y el POS queda sin productos para siempre en ese dispositivo. Si está vacío,
-  // ignoramos el cursor y hacemos full fetch.
   const cachedCount = await posDB.products.count()
-  const since = cachedCount > 0 ? meta?.synced_at : undefined
+  const fullFetch = opts.full || cachedCount === 0
+  const since = fullFetch ? undefined : meta?.synced_at
 
   const products = await fetchAllProducts(warehouseId, since)
 
-  if (products.length === 0) {
+  if (!fullFetch && products.length === 0) {
     // Sin cambios desde el último sync — solo actualizar el timestamp
     await posDB.syncMeta.put({ key: 'products', synced_at: now })
     return
   }
 
+  const active = products.filter(p => p.is_active !== false)
+  const inactiveIds = products.filter(p => p.is_active === false).map(p => p.id)
+
   const barcodeEntries: { barcode: string; product_id: string }[] = []
-  for (const p of products) {
+  for (const p of active) {
     if (p.barcode) barcodeEntries.push({ barcode: p.barcode, product_id: p.id })
     for (const bc of p.product_barcodes ?? []) {
       if (bc.barcode && bc.barcode !== p.barcode) {
@@ -330,10 +347,36 @@ export async function syncProducts(warehouseId?: string | null): Promise<void> {
   }
 
   await posDB.transaction('rw', posDB.products, posDB.barcodes, posDB.syncMeta, async () => {
-    await posDB.products.bulkPut(products)
+    if (fullFetch) {
+      // Reemplazo total → poda los productos que ya no existen.
+      await posDB.products.clear()
+      await posDB.barcodes.clear()
+    } else if (inactiveIds.length > 0) {
+      // Incremental: remover los que vinieron dados de baja + sus barcodes.
+      await posDB.products.bulkDelete(inactiveIds)
+      const stale = await posDB.barcodes.where('product_id').anyOf(inactiveIds).toArray()
+      if (stale.length > 0) await posDB.barcodes.bulkDelete(stale.map(b => b.barcode))
+    }
+    if (active.length > 0) await posDB.products.bulkPut(active)
     if (barcodeEntries.length > 0) await posDB.barcodes.bulkPut(barcodeEntries)
     await posDB.syncMeta.put({ key: 'products', synced_at: now })
   })
+}
+
+/**
+ * Remueve un producto del cache del POS al instante tras un delete (soft-delete en el
+ * backend). Sin esto, el producto seguiría en el cache hasta el próximo full sync.
+ */
+export async function removeProductFromPOS(id: string): Promise<void> {
+  try {
+    await posDB.transaction('rw', posDB.products, posDB.barcodes, async () => {
+      await posDB.products.delete(id)
+      const stale = await posDB.barcodes.where('product_id').equals(id).toArray()
+      if (stale.length > 0) await posDB.barcodes.bulkDelete(stale.map(b => b.barcode))
+    })
+  } catch {
+    // non-blocking
+  }
 }
 
 /**
@@ -458,7 +501,8 @@ export async function initPOSCache(warehouseId?: string | null): Promise<void> {
   await buildMemoryCaches()
 
   await Promise.all([
-    syncProducts(warehouseId),
+    // full: poda bajas hechas desde el último uso del POS en este dispositivo.
+    syncProducts(warehouseId, { full: true }),
     syncPromotions(),
     syncPriceLists(),
     syncCustomers().catch(() => {}),

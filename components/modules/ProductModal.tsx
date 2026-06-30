@@ -261,6 +261,9 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   }
 
   const handleSaveAndNew = async () => {
+    // No guardar el producto si hay un sub-modal de creación abierto (ej. el Enter
+    // para crear categoría/marca/proveedor no debe disparar el guardado de atrás).
+    if (categorySubModal || brandSubModal || supplierSubModal) return
     const errs = validate()
     if (Object.keys(errs).length > 0) { setErrors(errs); return }
     setSaving(true)
@@ -340,6 +343,8 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   }
 
   const handleSave = async () => {
+    // Ver nota en handleSaveAndNew: no guardar mientras se crea categoría/marca/proveedor.
+    if (categorySubModal || brandSubModal || supplierSubModal) return
     const errs = validate()
     if (Object.keys(errs).length > 0) { setErrors(errs); return }
 
@@ -440,7 +445,10 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         name: newCatName.trim(),
         parent_id: newCatParent || null,
       })
-      const updated = await api.get<Category[]>('/api/products/categories').catch(() => categories)
+      const refetched = await api.get<Category[]>('/api/products/categories').catch(() => categories)
+      // El refetch puede devolver una lista cacheada/replicada sin la categoría recién
+      // creada. La insertamos optimistamente para que el breadcrumb no quede colgado.
+      const updated = refetched.some(c => c.id === created.id) ? refetched : [...refetched, created]
       _refCache.categories = updated
       setCategories(updated)
       setForm(f => ({ ...f, category_id: created.id }))
@@ -1150,6 +1158,12 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
               label="Nombre *"
               value={newCatName}
               onChange={e => setNewCatName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (newCatName.trim() && !savingCat) handleCategoryQuickSave()
+                }
+              }}
               placeholder="Ej: Bebidas, Lácteos..."
               autoFocus
             />
@@ -1184,6 +1198,12 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
               label="Nombre *"
               value={newBrandName}
               onChange={e => setNewBrandName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  if (newBrandName.trim() && !savingBrand) handleBrandQuickSave()
+                }
+              }}
               placeholder="Ej: Arcor"
               autoFocus
             />

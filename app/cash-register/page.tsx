@@ -19,6 +19,7 @@ import { DollarSign, CheckCircle, Clock, TrendingUp, TrendingDown, Minus, Refres
 import { toast } from 'sonner'
 import { useWorkstation } from '@/hooks/useWorkstation'
 import { useAuth } from '@/hooks/useAuth'
+import { isRestrictedRole } from '@/lib/roles'
 
 interface Branch { id: string; name: string }
 interface Register { id: string; name: string; branch_id: string }
@@ -63,8 +64,6 @@ interface ClosingStats {
   avg_signed_difference: number
   ok_rate: number
 }
-
-const RESTRICTED_ROLES = ['cashier', 'stocker', 'seller']
 
 export default function CashRegisterPage() {
   const { workstation, loaded } = useWorkstation()
@@ -117,7 +116,7 @@ export default function CashRegisterPage() {
   const isMyCaja = !isRestrictedRef.current || current?.register_id === workstation?.register_id
 
   useEffect(() => {
-    isRestrictedRef.current = RESTRICTED_ROLES.includes(user?.role ?? '')
+    isRestrictedRef.current = isRestrictedRole(user?.role)
   }, [user])
 
   // Precargar sucursal y caja del workstation
@@ -130,14 +129,14 @@ export default function CashRegisterPage() {
 
   // Comercios chicos: si hay una sola sucursal/caja, seleccionarla por defecto
   useEffect(() => {
-    if (RESTRICTED_ROLES.includes(user?.role ?? '')) return
+    if (isRestrictedRole(user?.role)) return
     if (!openBranchId && branches.length === 1) {
       setOpenBranchId(branches[0].id)
     }
   }, [user, branches, openBranchId])
 
   useEffect(() => {
-    if (RESTRICTED_ROLES.includes(user?.role ?? '')) return
+    if (isRestrictedRole(user?.role)) return
     if (!openBranchId || openRegisterId) return
     const openIds = new Set(openRegisters.map(r => r.register_id))
     const candidates = registers.filter(r => r.branch_id === openBranchId && !openIds.has(r.id))
@@ -154,26 +153,31 @@ export default function CashRegisterPage() {
     if (!loaded) return
     setLoading(true)
     try {
-      const cashParams = registerIdRef.current && isRestrictedRef.current
-        ? { page: pageRef.current, limit: 20, register_id: registerIdRef.current }
-        : { page: pageRef.current, limit: 20 }
-
-      const openParams = registerIdRef.current && isRestrictedRef.current
+      const restricted = isRestrictedRef.current
+      const openParams = registerIdRef.current && restricted
         ? { register_id: registerIdRef.current }
         : {}
 
-      const [hist, br, regs, opens, stats] = await Promise.all([
-        api.get<{ data: CashRegister[]; pagination: PaginationType }>('/api/cash-register', cashParams),
+      // Roles restringidos: solo operan su caja abierta. No piden historial de
+      // cierres ni estadísticas (ocultos en la UI y acotados en el backend).
+      const [br, regs, opens, hist, stats] = await Promise.all([
         api.get<Branch[]>('/api/branches'),
         api.get<Register[]>('/api/branches/all-registers'),
         api.get<CashRegister[]>('/api/cash-register/open', openParams),
-        api.get<ClosingStats>('/api/cash-register/closing-stats', openParams),
+        restricted
+          ? Promise.resolve(null)
+          : api.get<{ data: CashRegister[]; pagination: PaginationType }>('/api/cash-register', { page: pageRef.current, limit: 20 }),
+        restricted
+          ? Promise.resolve(null)
+          : api.get<ClosingStats>('/api/cash-register/closing-stats', {}),
       ])
 
       setOpenRegisters(opens)
-      setClosingStats(stats)
-      setHistory(hist.data)
-      setPagination(hist.pagination)
+      if (stats) setClosingStats(stats)
+      if (hist) {
+        setHistory(hist.data)
+        setPagination(hist.pagination)
+      }
       setBranches(br)
       setRegisters(regs)
     } catch (err) {
@@ -404,7 +408,7 @@ export default function CashRegisterPage() {
                     valueTitle={formatCurrency(summary.total)}
                     icon={DollarSign}
                   />
-                  {(() => {
+                  {!isRestrictedRef.current && (() => {
                     const c = closingStats
                     const hasData = !!c && c.count > 0
                     const withDiff = c?.with_difference_count ?? 0
@@ -633,7 +637,8 @@ export default function CashRegisterPage() {
               </div>
             )}
 
-            {/* ── Historial ── */}
+            {/* ── Historial ── (oculto para roles restringidos: solo operan su caja) */}
+            {!isRestrictedRef.current && (
             <div>
               <h2 className="text-sm font-semibold text-[var(--text)] mb-3">Historial de cierres</h2>
               {history.filter(r => r.status === 'closed').length === 0 ? (
@@ -681,6 +686,7 @@ export default function CashRegisterPage() {
                 </div>
               )}
             </div>
+            )}
           </>
         )}
       </div>
