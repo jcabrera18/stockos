@@ -24,6 +24,7 @@ import {
   resolveBarcode,
   computeLocalPrice,
   priceForProductList,
+  setForcedPriceList,
   searchProductsLocal,
   searchCustomersLocal,
   cacheProductFromScan,
@@ -175,6 +176,15 @@ export default function POSPage() {
 
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
   const [selectedList, setSelectedList] = useState<PriceList | null>(null)
+  const priceListsRef = useRef<PriceList[]>([])
+  useEffect(() => { priceListsRef.current = priceLists }, [priceLists])
+
+  // Vuelve al modo automático: limpia la lista fijada y deja seleccionada la default.
+  const resetToAutoList = useCallback(() => {
+    setForcedPriceList(null)
+    const def = priceListsRef.current.find(l => l.is_default) ?? priceListsRef.current[0] ?? null
+    setSelectedList(def)
+  }, [])
 
   const [warehouses, setWarehouses] = useState<{ id: string; name: string; is_default: boolean }[]>([])
   const [selectedWarehouse, setSelectedWarehouse] = useState<{ id: string; name: string } | null>(null)
@@ -353,6 +363,9 @@ export default function POSPage() {
   }, [])
 
   useEffect(() => {
+    // Arrancamos en modo automático (las reglas de cantidad deciden). El cajero
+    // fija una lista tocándola en el selector.
+    setForcedPriceList(null)
     api.get<PriceList[]>('/api/price-lists').then(lists => {
       setPriceLists(lists)
       const def = lists.find(l => l.is_default)
@@ -1190,6 +1203,7 @@ export default function POSPage() {
       localStorage.removeItem(POS_CART_KEY)
       setCart([]); setSaleDiscountPct(0); setShippingEnabled(false); setSelectedCustomer(null); setCustomerQuery('')
       setApplied([])
+      resetToAutoList()
       setPaymentModalOpen(false); setStep('ticket')
 
       // 3. Sincronizar en segundo plano. Si hay red, mandamos la venta ya mismo
@@ -1286,6 +1300,7 @@ export default function POSPage() {
     localStorage.removeItem(POS_CART_KEY)
     setCart([]); setSaleDiscountPct(0); setShippingEnabled(false)
     setApplied([])
+    resetToAutoList()
     setDraft({ method: 'efectivo', amount: 0, installments: 1 })
     setSelectedApplied(null)
     setPaymentModalOpen(false)
@@ -1640,7 +1655,17 @@ export default function POSPage() {
                   <span className="text-xs text-[var(--text3)] flex-shrink-0">Lista:</span>
                   {priceLists.map(list => (
                     <button key={list.id}
-                      onClick={() => { setSelectedList(list); setCart(prev => prev.map(item => item.price_overridden ? item : ({ ...item, unit_price: priceForProductList(item.product, list), applied_list: list.name, applied_margin: list.margin_pct }))) }}
+                      onClick={() => {
+                        // Fijar la lista: pisa las reglas de cantidad para todos los ítems
+                        // (y para los que se agreguen después), hasta que se limpie el carrito.
+                        setForcedPriceList(list.id)
+                        setSelectedList(list)
+                        setCart(prev => prev.map(item =>
+                          (item.price_overridden || item.product.price_mode === 'custom')
+                            ? item
+                            : { ...item, unit_price: priceForProductList(item.product, list), applied_list: list.name, applied_margin: list.margin_pct }
+                        ))
+                      }}
                       className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedList?.id === list.id ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] border border-[var(--border)] text-[var(--text2)]'}`}>
                       {list.name} (+{list.margin_pct}%)
                     </button>
@@ -1680,7 +1705,7 @@ export default function POSPage() {
             )}
           </h2>
           {cart.length > 0 && (
-            <button onClick={() => { setCart([]); setFocusedCartIndex(-1) }}
+            <button onClick={() => { setCart([]); setFocusedCartIndex(-1); resetToAutoList() }}
               className="text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">
               Limpiar
             </button>

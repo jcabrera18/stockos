@@ -48,6 +48,17 @@ const rulesMemory = new Map<string, LocalPriceRule[]>()
 // Map: product_id → Map<price_list_id, price>
 const overridesMemory = new Map<string, Map<string, number>>()
 
+// Lista "fijada" a mano por el cajero desde el selector del POS. Cuando está
+// seteada, pisa las reglas de cantidad: todos los ítems se cotizan con esta lista
+// (respetando el override por producto) sin importar la cantidad. null = modo
+// automático (las reglas/globales del producto deciden).
+let forcedListId: string | null = null
+
+/** Fija (o limpia con null) la lista que pisa las reglas de cantidad en el POS. */
+export function setForcedPriceList(listId: string | null): void {
+  forcedListId = listId
+}
+
 async function buildMemoryCaches(): Promise<void> {
   // Price lists — ordenadas por min_quantity DESC
   const lists = await posDB.priceLists.toArray()
@@ -104,6 +115,20 @@ export function computeLocalPrice(
   const productRules = rulesMemory.get(product.id)
   const priceFor = (listId: string, marginPct: number) =>
     productOverrides?.get(listId) ?? Math.round(product.cost_price * (1 + marginPct / 100) * 100) / 100
+
+  // Lista fijada a mano por el cajero → pisa cualquier regla de cantidad.
+  if (forcedListId) {
+    const forced = priceListsMemory.find(l => l.id === forcedListId)
+    if (forced) {
+      const override = productOverrides?.get(forced.id)
+      return {
+        price: priceFor(forced.id, forced.margin_pct),
+        list_name: forced.name,
+        margin_pct: forced.margin_pct,
+        rule_source: override != null ? 'override' : 'manual',
+      }
+    }
+  }
 
   if (productRules && productRules.length > 0) {
     // Reglas propias → solo ellas definen los tramos (globales ignoradas).

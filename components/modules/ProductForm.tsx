@@ -151,6 +151,10 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
   const [displayStock, setDisplayStock] = useState<number>(0)
   // Timer de reconciliación del stock tras un ajuste (ver reconcileStock).
   const stockReconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Reglas "se levanta desde" recién guardadas, para reconciliar contra el lag de
+  // la réplica al recargar el producto tras guardar (ver loadPriceRules).
+  const expectedRulesRef = useRef<{ productId: string; rules: Record<string, string> } | null>(null)
+  const rulesReconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [confirmClose, setConfirmClose] = useState(false)
   const baselineRef = useRef('')
   const { workstation } = useWorkstation()
@@ -251,6 +255,46 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
       .catch(() => { /* mantener el valor optimista */ })
   }, [])
 
+  // Carga las reglas "se levanta desde" del producto reconciliando contra el lag
+  // de la réplica. Tras guardar dejamos en expectedRulesRef lo recién persistido:
+  // mientras el GET siga devolviendo lo viejo (stale) mantenemos el valor esperado
+  // en el input y reintentamos en silencio, en vez de revertir y "traer" el nuevo
+  // con delay. Mismo patrón que orders/quotes/CC.
+  const loadPriceRules = useCallback((
+    productId: string,
+    baseForm: FormState,
+    baseBarcodes: string[],
+    baseOv: Record<string, string>,
+    attempt = 0,
+  ) => {
+    api.get<{ price_list_id: string; min_quantity: number }[]>(`/api/products/${productId}/price-rules`)
+      .then(rules => {
+        const qtyMap: Record<string, string> = {}
+        for (const r of rules) qtyMap[r.price_list_id] = String(r.min_quantity)
+        const expected = expectedRulesRef.current?.productId === productId
+          ? expectedRulesRef.current.rules
+          : null
+        const matches = expected
+          ? Object.keys(expected).length === Object.keys(qtyMap).length &&
+            Object.keys(expected).every(k => qtyMap[k] === expected[k])
+          : true
+        if (expected && !matches && attempt < 4) {
+          // La réplica todavía no refleja lo guardado → mantenemos lo esperado.
+          setRuleQtys(expected)
+          baselineRef.current = serializeFormState(baseForm, baseBarcodes, baseOv, {}, {}, expected)
+          rulesReconcileTimer.current = setTimeout(
+            () => loadPriceRules(productId, baseForm, baseBarcodes, baseOv, attempt + 1),
+            1000,
+          )
+          return
+        }
+        expectedRulesRef.current = null
+        setRuleQtys(qtyMap)
+        baselineRef.current = serializeFormState(baseForm, baseBarcodes, baseOv, {}, {}, qtyMap)
+      })
+      .catch(() => {})
+  }, [])
+
   const handleCostHistoryToggle = async () => {
     if (costHistoryOpen) { setCostHistoryOpen(false); return }
     setCostHistoryOpen(true)
@@ -321,25 +365,24 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
       // producto: arrancan limpios en cada apertura.
       setOverrideModes({})
       setOverridePctValues({})
-      setRuleQtys({})
+      // Si venimos de guardar ESTE producto, sembramos las reglas recién guardadas
+      // para no mostrar el input vacío ni revertirlo mientras la réplica sincroniza.
+      const seededRules = expectedRulesRef.current?.productId === product.id
+        ? expectedRulesRef.current.rules
+        : {}
+      setRuleQtys(seededRules)
       // Snapshot base para detectar cambios sin guardar (ver `snapshot`/`isDirty`).
-      baselineRef.current = serializeFormState(loadedForm, loadedBarcodes, ovMap, {}, {}, {})
+      baselineRef.current = serializeFormState(loadedForm, loadedBarcodes, ovMap, {}, {}, seededRules)
 
-      // Las reglas de cantidad por lista viven en otra tabla → fetch aparte.
-      // Al volver, actualizamos ruleQtys y recomputamos el baseline para que la
-      // carga no dispare "cambios sin guardar".
-      let cancelled = false
-      api.get<{ price_list_id: string; min_quantity: number }[]>(`/api/products/${product.id}/price-rules`)
-        .then(rules => {
-          if (cancelled) return
-          const qtyMap: Record<string, string> = {}
-          for (const r of rules) qtyMap[r.price_list_id] = String(r.min_quantity)
-          setRuleQtys(qtyMap)
-          baselineRef.current = serializeFormState(loadedForm, loadedBarcodes, ovMap, {}, {}, qtyMap)
-        })
-        .catch(() => {})
-      return () => { cancelled = true }
+      // Las reglas de cantidad por lista viven en otra tabla → fetch aparte, con
+      // reconciliación contra el lag de la réplica (ver loadPriceRules).
+      if (rulesReconcileTimer.current) { clearTimeout(rulesReconcileTimer.current); rulesReconcileTimer.current = null }
+      loadPriceRules(product.id, loadedForm, loadedBarcodes, ovMap)
+      return () => {
+        if (rulesReconcileTimer.current) { clearTimeout(rulesReconcileTimer.current); rulesReconcileTimer.current = null }
+      }
     } else {
+      expectedRulesRef.current = null
       setForm(emptyForm)
       setBarcodes([])
       setOverridePrices({})
@@ -348,7 +391,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
       setRuleQtys({})
       setErrors({})
     }
-  }, [product])
+  }, [product, loadPriceRules])
 
   const addBarcode = async (overrideVal?: string) => {
     const val = (overrideVal ?? newBarcode).replace(/\D/g, '')
@@ -476,6 +519,12 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         await api.patch(`/api/products/${product!.id}`, payload)
         await api.put(`/api/products/${product!.id}/price-overrides`, overridePayload)
         await api.put(`/api/products/${product!.id}/price-rules`, rulesPayload)
+        // Registramos las reglas recién guardadas para que la recarga las mantenga
+        // mientras la réplica sincroniza (evita el revert + delay del input).
+        expectedRulesRef.current = {
+          productId: product!.id,
+          rules: Object.fromEntries(rulesPayload.map(r => [r.price_list_id, String(r.min_quantity)])),
+        }
         toast.success('Producto actualizado')
         onSaved()
         // Mantenemos el panel abierto y recargamos los datos frescos del producto
