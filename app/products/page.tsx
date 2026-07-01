@@ -19,12 +19,11 @@ import { removeProductFromPOS } from '@/lib/pos-cache'
 import type { StockSummary, Product, Category, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import {
   Plus, Search, Package, Pencil, Trash2,
-  Tag, Filter, X, ChevronUp, ChevronDown, ArrowUpDown, MoreVertical, Loader2, RefreshCw,
+  Filter, X, ChevronUp, ChevronDown, ArrowUpDown, MoreVertical, Loader2, RefreshCw,
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { CategoryTreePicker } from '@/components/ui/CategoryTreePicker'
 import { toast } from 'sonner'
-import { ProductPriceRulesModal } from '@/components/modules/ProductPriceRulesModal'
 
 interface Supplier { id: string; name: string }
 
@@ -76,9 +75,8 @@ function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortFi
   return sortDir === 'asc' ? <ChevronUp size={11} className="text-[var(--accent)]" /> : <ChevronDown size={11} className="text-[var(--accent)]" />
 }
 
-function RowActionsMenu({ onEdit, onPriceRules, onDelete }: {
+function RowActionsMenu({ onEdit, onDelete }: {
   onEdit: () => void
-  onPriceRules: () => void
   onDelete: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -144,7 +142,6 @@ function RowActionsMenu({ onEdit, onPriceRules, onDelete }: {
           className="z-50 min-w-[180px] py-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius)] shadow-lg"
         >
           {item('Editar', Pencil, onEdit)}
-          {item('Reglas de precio', Tag, onPriceRules)}
           {item('Eliminar', Trash2, onDelete, true)}
         </div>,
         document.body
@@ -179,8 +176,6 @@ export default function ProductsPage() {
   const [deleteModal, setDeleteModal] = useState(false)
   const [deleteProduct, setDeleteProduct] = useState<StockSummary | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const [priceRulesModal, setPriceRulesModal] = useState(false)
-  const [priceRulesProduct, setPriceRulesProduct] = useState<Product | null>(null)
 
   const [allCategories, setAllCategories] = useState<Category[]>([])
 
@@ -202,6 +197,7 @@ export default function ProductsPage() {
   const limitRef = useRef(10)
   const sortByRef = useRef(sortBy)
   const sortDirRef = useRef(sortDir)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const brandRef = useRef(brandFilter)
   const supplierRef = useRef(supplierFilter)
   const categoryRef = useRef(categoryFilter)
@@ -389,7 +385,7 @@ export default function ProductsPage() {
     pageRef.current = newPage
     setPage(newPage)
     fetchProducts()
-    document.querySelector('main')?.scrollTo({ top: 0, behavior: 'smooth' })
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
   }, [fetchProducts])
 
   const handleLimitChange = useCallback((newLimit: number) => {
@@ -682,7 +678,7 @@ export default function ProductsPage() {
       </div>
 
       {/* Tabla — scrollable */}
-      <div className={cn('relative overflow-y-auto', panelOpen ? 'px-3 pb-4' : 'px-5 pb-5')}>
+      <div ref={scrollRef} className={cn('relative overflow-y-auto', panelOpen ? 'px-3 pb-4' : 'px-5 pb-5')}>
         {/* Barra fina de "actualizando" en búsquedas/filtros (no en la primera carga) */}
         {searching && !loading && (
           <div className="indeterminate-bar absolute top-0 left-0 z-10 h-0.5 w-full overflow-hidden bg-[var(--accent)]/15" />
@@ -778,11 +774,6 @@ export default function ProductsPage() {
                         <td className="px-4 py-3">
                           <RowActionsMenu
                             onEdit={() => handleEdit(product)}
-                            onPriceRules={async () => {
-                              const p = await api.get<Product>(`/api/products/${product.id}`)
-                              setPriceRulesProduct(p)
-                              setPriceRulesModal(true)
-                            }}
                             onDelete={() => { setDeleteProduct(product); setDeleteModal(true) }}
                           />
                         </td>
@@ -849,11 +840,6 @@ export default function ProductsPage() {
         danger
       />
 
-      <ProductPriceRulesModal
-        open={priceRulesModal}
-        onClose={() => { setPriceRulesModal(false); setPriceRulesProduct(null) }}
-        product={priceRulesProduct}
-      />
     </AppShell>
   )
 }

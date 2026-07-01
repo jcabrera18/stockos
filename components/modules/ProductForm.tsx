@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
@@ -93,8 +93,9 @@ function serializeFormState(
   overridePrices: Record<string, string>,
   overrideModes: Record<string, 'pesos' | 'pct'>,
   overridePctValues: Record<string, string>,
+  ruleQtys: Record<string, string>,
 ) {
-  return JSON.stringify({ form, barcodes, overridePrices, overrideModes, overridePctValues })
+  return JSON.stringify({ form, barcodes, overridePrices, overrideModes, overridePctValues, ruleQtys })
 }
 
 const PRICE_MODES = [
@@ -131,6 +132,9 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
   const [overridePrices, setOverridePrices] = useState<Record<string, string>>({})
   const [overrideModes, setOverrideModes] = useState<Record<string, 'pesos' | 'pct'>>({})
   const [overridePctValues, setOverridePctValues] = useState<Record<string, string>>({})
+  // Cantidad desde la cual se "levanta" cada lista para ESTE producto (regla del
+  // producto). Indexado por price_list_id. Vacío = hereda el min_quantity global.
+  const [ruleQtys, setRuleQtys] = useState<Record<string, string>>({})
   const [supplierSubModal, setSupplierSubModal] = useState(false)
   const [brandSubModal, setBrandSubModal] = useState(false)
   const [newBrandName, setNewBrandName] = useState('')
@@ -145,6 +149,8 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
   const [expressMode, setExpressMode] = useState(true)
   const [adjustStockModal, setAdjustStockModal] = useState(false)
   const [displayStock, setDisplayStock] = useState<number>(0)
+  // Timer de reconciliación del stock tras un ajuste (ver reconcileStock).
+  const stockReconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [confirmClose, setConfirmClose] = useState(false)
   const baselineRef = useRef('')
   const { workstation } = useWorkstation()
@@ -153,7 +159,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
 
   // Detección de cambios sin guardar (solo en edición). El snapshot base se
   // captura al cargar el producto (ver el useEffect que pobla el form).
-  const snapshot = serializeFormState(form, barcodes, overridePrices, overrideModes, overridePctValues)
+  const snapshot = serializeFormState(form, barcodes, overridePrices, overrideModes, overridePctValues, ruleQtys)
   const isDirty = isEdit && snapshot !== baselineRef.current
 
   // Cierra el panel, pero si hay cambios sin guardar pide confirmación primero.
@@ -167,6 +173,10 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
   const costWithVat = Math.round(costNet * (1 + vatRate / 100) * 100) / 100
 
   const currentPriceMode = form.price_mode === 'custom' ? 'libre' : form.use_fixed_sell_price ? 'fixed' : 'list'
+
+  // Si el producto tiene al menos una regla "desde X" propia, esas reglas definen
+  // TODOS los tramos por cantidad y las cantidades globales de las listas se ignoran.
+  const hasAnyRule = Object.values(ruleQtys).some(v => v.trim() !== '' && Number(v) >= 1)
 
   const setPriceMode = (mode: 'list' | 'fixed' | 'libre') => {
     if (mode === 'libre') setForm(f => ({ ...f, price_mode: 'custom', use_fixed_sell_price: false }))
@@ -186,30 +196,16 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         return
       }
       if (e.key !== 'Enter') return
-      const { handleSave, handleSaveAndNew, isEdit, saving, expressMode } = saveActionsRef.current
+      const { handleSave, saving, anySubModalOpen } = saveActionsRef.current
       if (saving) return
-      // Ctrl/Cmd/Alt+Enter → Crear/Guardar producto (sin abrir otro)
-      if (e.metaKey || e.ctrlKey || e.altKey) {
-        e.preventDefault()
-        handleSave()
-        return
-      }
-      // Enter pelado: se ignora si el foco está en el input de código (el scanner
-      // usa Enter para sumar el código) o en un select/textarea.
-      const ae = document.activeElement
-      if (ae === newBarcodeRef.current) return
-      const tag = ae?.tagName
-      if (tag === 'SELECT' || tag === 'TEXTAREA') return
-      // En edición → Enter guarda los cambios.
-      if (isEdit) {
-        e.preventDefault()
-        handleSave()
-        return
-      }
-      // Al crear → Enter guarda y agrega otro (solo modo express).
-      if (!expressMode) return
+      // Si hay un sub-modal abierto (nueva categoría/marca/proveedor), el Enter
+      // es de ese modal: no debe disparar el guardado del producto de atrás.
+      if (anySubModalOpen) return
+      // El guardado del producto es SIEMPRE con Ctrl/Cmd+Enter. El Enter pelado
+      // nunca guarda (lo usan campos puntuales para navegar o sumar códigos).
+      if (!(e.metaKey || e.ctrlKey)) return
       e.preventDefault()
-      handleSaveAndNew()
+      handleSave()
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
@@ -222,7 +218,38 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
     setDuplicateWarning(null)
     setNewBarcode('')
     setDisplayStock(stockCurrent ?? product?.stock_current ?? 0)
+    // Al cambiar de producto (o desmontar), cancelamos cualquier reconciliación
+    // de stock en vuelo para que no pise el stock del producto nuevo.
+    return () => {
+      if (stockReconcileTimer.current) {
+        clearTimeout(stockReconcileTimer.current)
+        stockReconcileTimer.current = null
+      }
+    }
   }, [product, stockCurrent])
+
+  // Tras un ajuste de stock, el refetch inmediato puede pegarle a la réplica con
+  // lag (read-after-write) y devolver el stock viejo, pisando en el input el valor
+  // recién ajustado. Aplicamos el valor esperado de forma optimista y reconciliamos:
+  // mientras el server siga devolviendo el valor previo (stale) reintentamos en
+  // silencio; en cuanto devuelve algo distinto lo aceptamos (esperado o una
+  // reconciliación por venta concurrente). Mismo patrón que orders/quotes/CC.
+  const reconcileStock = useCallback((productId: string, before: number, expected: number, attempt = 0) => {
+    setDisplayStock(expected)
+    api.get<Product>(`/api/products/${productId}`)
+      .then(updated => {
+        const server = updated.stock_current ?? 0
+        if (server !== before || attempt >= 4) {
+          setDisplayStock(server)
+          return
+        }
+        stockReconcileTimer.current = setTimeout(
+          () => reconcileStock(productId, before, expected, attempt + 1),
+          1500,
+        )
+      })
+      .catch(() => { /* mantener el valor optimista */ })
+  }, [])
 
   const handleCostHistoryToggle = async () => {
     if (costHistoryOpen) { setCostHistoryOpen(false); return }
@@ -237,11 +264,15 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
   }
 
   useEffect(() => {
+    // Pintar las listas cacheadas al instante; igual se revalidan abajo.
+    if (_refCache.priceLists) setPriceLists(_refCache.priceLists)
     const load = async () => {
       const [cats, sups, lists, brnds] = await Promise.all([
         _refCache.categories ?? api.get<Category[]>('/api/products/categories'),
         _refCache.suppliers ?? api.get<Supplier[]>('/api/purchases/suppliers'),
-        _refCache.priceLists ?? api.get<PriceList[]>('/api/price-lists'),
+        // Siempre fresco: el min_quantity de una lista (o su paso a manual)
+        // puede haber cambiado y el form debe reflejarlo.
+        api.get<PriceList[]>('/api/price-lists'),
         _refCache.brands ?? api.get<{ id: string; name: string }[]>('/api/brands'),
       ])
       _refCache.categories = cats; setCategories(cats)
@@ -290,14 +321,31 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
       // producto: arrancan limpios en cada apertura.
       setOverrideModes({})
       setOverridePctValues({})
+      setRuleQtys({})
       // Snapshot base para detectar cambios sin guardar (ver `snapshot`/`isDirty`).
-      baselineRef.current = serializeFormState(loadedForm, loadedBarcodes, ovMap, {}, {})
+      baselineRef.current = serializeFormState(loadedForm, loadedBarcodes, ovMap, {}, {}, {})
+
+      // Las reglas de cantidad por lista viven en otra tabla → fetch aparte.
+      // Al volver, actualizamos ruleQtys y recomputamos el baseline para que la
+      // carga no dispare "cambios sin guardar".
+      let cancelled = false
+      api.get<{ price_list_id: string; min_quantity: number }[]>(`/api/products/${product.id}/price-rules`)
+        .then(rules => {
+          if (cancelled) return
+          const qtyMap: Record<string, string> = {}
+          for (const r of rules) qtyMap[r.price_list_id] = String(r.min_quantity)
+          setRuleQtys(qtyMap)
+          baselineRef.current = serializeFormState(loadedForm, loadedBarcodes, ovMap, {}, {}, qtyMap)
+        })
+        .catch(() => {})
+      return () => { cancelled = true }
     } else {
       setForm(emptyForm)
       setBarcodes([])
       setOverridePrices({})
       setOverrideModes({})
       setOverridePctValues({})
+      setRuleQtys({})
       setErrors({})
     }
   }, [product])
@@ -353,6 +401,16 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
     setErrors(er => ({ ...er, [field]: '' }))
   }
 
+  // Al enfocar un input numérico, si el valor es "0" lo limpiamos para que el
+  // usuario (mouse o Tab) pueda escribir directo sin borrar el 0. Al salir, si
+  // quedó vacío, restauramos el valor por defecto.
+  const numFocus = (field: string) => (e: React.FocusEvent<HTMLInputElement>) => {
+    if (e.target.value === '0') setForm(f => ({ ...f, [field]: '' }))
+  }
+  const numBlur = (field: string, fallback = '0') => (e: React.FocusEvent<HTMLInputElement>) => {
+    if (e.target.value.trim() === '') setForm(f => ({ ...f, [field]: fallback }))
+  }
+
   const validate = () => {
     const errs: Record<string, string> = {}
     if (!form.name.trim()) errs.name = 'El nombre es obligatorio'
@@ -400,6 +458,12 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
       .filter(([, v]) => v !== '' && Number(v) > 0)
       .map(([price_list_id, price]) => ({ price_list_id, price: Number(price) }))
 
+  // Reglas de cantidad por lista de este producto. Vacío = hereda la global.
+  const buildRules = () =>
+    Object.entries(ruleQtys)
+      .filter(([, v]) => v !== '' && Number(v) >= 1)
+      .map(([price_list_id, min_quantity]) => ({ price_list_id, min_quantity: Number(min_quantity) }))
+
   const handleSave = async () => {
     const errs = validate()
     if (Object.keys(errs).length > 0) { setErrors(errs); return }
@@ -407,9 +471,11 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
     try {
       const payload = buildPayload()
       const overridePayload = buildOverrides()
+      const rulesPayload = buildRules()
       if (isEdit) {
         await api.patch(`/api/products/${product!.id}`, payload)
         await api.put(`/api/products/${product!.id}/price-overrides`, overridePayload)
+        await api.put(`/api/products/${product!.id}/price-rules`, rulesPayload)
         toast.success('Producto actualizado')
         onSaved()
         // Mantenemos el panel abierto y recargamos los datos frescos del producto
@@ -418,6 +484,9 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         const created = await api.post<{ id: string }>('/api/products', payload)
         if (overridePayload.length > 0) {
           await api.put(`/api/products/${created.id}/price-overrides`, overridePayload)
+        }
+        if (rulesPayload.length > 0) {
+          await api.put(`/api/products/${created.id}/price-rules`, rulesPayload)
         }
         toast.success('Producto creado')
         onSaved()
@@ -437,8 +506,12 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
     try {
       const created = await api.post<{ id: string }>('/api/products', buildPayload())
       const overridePayload = buildOverrides()
+      const rulesPayload = buildRules()
       if (overridePayload.length > 0) {
         await api.put(`/api/products/${created.id}/price-overrides`, overridePayload)
+      }
+      if (rulesPayload.length > 0) {
+        await api.put(`/api/products/${created.id}/price-rules`, rulesPayload)
       }
       toast.success('Producto creado')
       onSaved()
@@ -449,6 +522,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
       setOverridePrices({})
       setOverrideModes({})
       setOverridePctValues({})
+      setRuleQtys({})
       setDuplicateWarning(null)
       setTimeout(() => newBarcodeRef.current?.focus(), 50)
     } catch (err: unknown) {
@@ -460,8 +534,9 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
 
   // Mantiene los handlers de guardado siempre frescos para el listener de
   // teclado (que se suscribe una sola vez al montar y si no quedaría stale).
-  const saveActionsRef = useRef({ handleSave, handleSaveAndNew, isEdit, saving, expressMode })
-  saveActionsRef.current = { handleSave, handleSaveAndNew, isEdit, saving, expressMode }
+  const anySubModalOpen = categorySubModal || brandSubModal || supplierSubModal
+  const saveActionsRef = useRef({ handleSave, handleSaveAndNew, isEdit, saving, expressMode, anySubModalOpen })
+  saveActionsRef.current = { handleSave, handleSaveAndNew, isEdit, saving, expressMode, anySubModalOpen }
 
   const handleSupplierSaved = async () => {
     const prevIds = new Set(suppliers.map(s => s.id))
@@ -478,8 +553,9 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
     try {
       const created = await api.post<{ id: string; name: string }>('/api/brands', { name: newBrandName.trim() })
       const updated = await api.get<{ id: string; name: string }[]>('/api/brands').catch(() => brands)
-      _refCache.brands = updated
-      setBrands(updated)
+      const merged = updated.some(b => b.id === created.id) ? updated : [...updated, created]
+      _refCache.brands = merged
+      setBrands(merged)
       setForm(f => ({ ...f, brand_id: created.id }))
       setNewBrandName('')
       setBrandSubModal(false)
@@ -499,9 +575,14 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         name: newCatName.trim(),
         parent_id: newCatParent || null,
       })
+      // Aseguramos que la categoría recién creada exista en la lista local: el GET
+      // puede pegarle a una réplica con lag y no traerla todavía, dejando el
+      // breadcrumb sin poder resolver el id (chip vacío). La sembramos sí o sí.
+      const seed: Category = { ...created, parent_id: created.parent_id ?? (newCatParent || undefined) }
       const updated = await api.get<Category[]>('/api/products/categories').catch(() => categories)
-      _refCache.categories = updated
-      setCategories(updated)
+      const merged = updated.some(c => c.id === seed.id) ? updated : [...updated, seed]
+      _refCache.categories = merged
+      setCategories(merged)
       setForm(f => ({ ...f, category_id: created.id }))
       setNewCatName('')
       setNewCatParent('')
@@ -739,12 +820,8 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
             {/* Ayuda de atajos para carga rápida */}
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs text-[var(--text3)]">
               <span className="flex items-center gap-1.5">
-                <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text3)]">↵</kbd>
-                guardar y cargar otro
-              </span>
-              <span className="flex items-center gap-1.5">
                 <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text3)]">⌘/Ctrl + ↵</kbd>
-                crear y cerrar
+                crear producto
               </span>
               <span className="flex items-center gap-1.5">
                 <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text3)]">Tab</kbd>
@@ -908,9 +985,10 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                     const pctVal = overridePctValues[list.id] ?? ''
                     return (
                       <div key={list.id} className={cn(
-                        'flex items-center gap-2 rounded-[var(--radius-md)] px-2.5 py-1.5 text-sm transition-colors',
+                        'rounded-[var(--radius-md)] px-2.5 py-1.5 text-sm transition-colors',
                         isOverridden ? 'bg-[var(--accent)]/8 ring-1 ring-[var(--accent)]/25' : 'bg-[var(--surface)]/75'
                       )}>
+                       <div className="flex items-center gap-2">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
                             <p className="text-[var(--text2)] truncate text-xs">{list.name}</p>
@@ -1014,6 +1092,53 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                             </button>
                           )}
                         </div>
+                       </div>
+
+                       {/* Regla de cantidad por lista (solo listas con cantidad).
+                           Si el producto NO tiene ninguna regla → vacío hereda la global.
+                           Si tiene al menos una regla → las globales se ignoran y las
+                           listas sin "desde" no se auto-aplican (ver hasAnyRule). */}
+                       {list.min_quantity != null && (
+                         <div className="flex items-center gap-1.5 mt-1.5 pt-1.5 border-t border-[var(--border)]/50">
+                           <span className="text-[10px] text-[var(--text3)]">Se levanta desde</span>
+                           <input
+                             type="number"
+                             min="1"
+                             step="1"
+                             value={ruleQtys[list.id] ?? ''}
+                             onChange={e => {
+                               const v = e.target.value
+                               setRuleQtys(prev => { const next = { ...prev }; if (v === '') delete next[list.id]; else next[list.id] = v; return next })
+                             }}
+                             placeholder={String(list.min_quantity)}
+                             className={cn(
+                               'w-14 px-1.5 py-0.5 text-[11px] font-medium text-center rounded-[var(--radius-sm)] bg-[var(--surface)] border transition-colors focus:outline-none mono',
+                               (ruleQtys[list.id] ?? '') !== '' ? 'border-[var(--accent)]/40 text-[var(--accent)] focus:border-[var(--accent)]' : 'border-[var(--border)] text-[var(--text2)] focus:border-[var(--accent)]'
+                             )}
+                           />
+                           <span className="text-[10px] text-[var(--text3)]">unidades</span>
+                           {(ruleQtys[list.id] ?? '') === '' ? (
+                             hasAnyRule ? (
+                               <span className="text-[9px] text-[var(--text3)] ml-auto" title="Como el producto ya tiene reglas propias, esta lista sin cantidad no se auto-aplica. Ponele un 'desde' para que arme un tramo.">no auto-aplica</span>
+                             ) : (
+                               <span className="text-[9px] text-[var(--text3)] ml-auto">global: {list.min_quantity} u.</span>
+                             )
+                           ) : (
+                             <button
+                               type="button"
+                               onClick={() => setRuleQtys(prev => { const n = { ...prev }; delete n[list.id]; return n })}
+                               title={Object.entries(ruleQtys).some(([id, v]) => id !== list.id && v.trim() !== '' && Number(v) >= 1)
+                                 ? 'Quitar esta regla (esta lista dejará de auto-aplicarse mientras haya otras reglas)'
+                                 : 'Quitar la regla y volver a la cantidad global de la lista'}
+                               className="ml-auto text-[9px] text-[var(--accent)] hover:opacity-80 transition-opacity"
+                             >
+                               {Object.entries(ruleQtys).some(([id, v]) => id !== list.id && v.trim() !== '' && Number(v) >= 1)
+                                 ? 'quitar regla'
+                                 : `usar global (${list.min_quantity} u.)`}
+                             </button>
+                           )}
+                         </div>
+                       )}
                       </div>
                     )
                   })}
@@ -1041,10 +1166,10 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                     </div>
                   </div>
                 ) : (
-                  <Input label="Inicial" type="number" min="0" step="1" value={form.initial_stock} onChange={set('initial_stock')} placeholder="0" />
+                  <Input label="Inicial" type="number" min="0" step="1" value={form.initial_stock} onChange={set('initial_stock')} onFocus={numFocus('initial_stock')} onBlur={numBlur('initial_stock')} placeholder="0" />
                 )}
-                <Input label="Mínimo" type="number" min="0" step="1" value={form.stock_min} onChange={set('stock_min')} placeholder="0" error={errors.stock_min} hint="Alerta" />
-                <Input label="Máximo" type="number" min="0" step="1" value={form.stock_max} onChange={set('stock_max')} placeholder="9999" error={errors.stock_max} />
+                <Input label="Mínimo" type="number" min="0" step="1" value={form.stock_min} onChange={set('stock_min')} onFocus={numFocus('stock_min')} onBlur={numBlur('stock_min')} placeholder="0" error={errors.stock_min} hint="Alerta" />
+                <Input label="Máximo" type="number" min="0" step="1" value={form.stock_max} onChange={set('stock_max')} onFocus={numFocus('stock_max')} onBlur={numBlur('stock_max', '9999')} placeholder="9999" error={errors.stock_max} />
               </div>
 
               <div className="pt-2"><SectionLabel>Descripción (opcional)</SectionLabel></div>
@@ -1121,7 +1246,6 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         {!isEdit && (
           <Button variant="secondary" onClick={handleSaveAndNew} loading={saving}>
             Guardar y agregar otro
-            <kbd className="ml-2 px-1.5 py-0.5 text-[10px] font-mono rounded border border-[var(--border)] bg-[var(--surface2)] text-[var(--text3)]">↵</kbd>
           </Button>
         )}
         <Button onClick={handleSave} loading={saving}>
@@ -1134,14 +1258,14 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
       <AdjustStockModal
         open={adjustStockModal}
         onClose={() => setAdjustStockModal(false)}
-        onSaved={async () => {
+        onSaved={(delta) => {
           setAdjustStockModal(false)
           onSaved()
-          if (product) {
-            try {
-              const updated = await api.get<Product>(`/api/products/${product.id}`)
-              setDisplayStock(updated.stock_current ?? 0)
-            } catch { /* mantener valor anterior */ }
+          // El ajuste modifica el stock del producto por `delta` (el total varía en
+          // la misma magnitud que el depósito). Reconciliamos contra el lag de la
+          // réplica en vez de pisar el input con el valor viejo del refetch.
+          if (product && typeof delta === 'number') {
+            reconcileStock(product.id, displayStock, displayStock + delta)
           }
         }}
         product={product}
@@ -1162,7 +1286,20 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
           <div className="w-full max-w-sm bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl p-5 space-y-4">
             <h3 className="text-base font-semibold text-[var(--text)]">Nueva categoría</h3>
-            <Input label="Nombre *" value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Ej: Bebidas, Lácteos..." autoFocus />
+            <Input
+              label="Nombre *"
+              value={newCatName}
+              onChange={e => setNewCatName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (newCatName.trim() && !savingCat) handleCategoryQuickSave()
+                }
+              }}
+              placeholder="Ej: Bebidas, Lácteos..."
+              autoFocus
+            />
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium text-[var(--text2)]">Categoría padre</label>
               <CategoryTreePicker
@@ -1187,7 +1324,20 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
           <div className="w-full max-w-sm bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl p-5 space-y-4">
             <h3 className="text-base font-semibold text-[var(--text)]">Nueva marca</h3>
-            <Input label="Nombre *" value={newBrandName} onChange={e => setNewBrandName(e.target.value)} placeholder="Ej: Arcor" autoFocus />
+            <Input
+              label="Nombre *"
+              value={newBrandName}
+              onChange={e => setNewBrandName(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  if (newBrandName.trim() && !savingBrand) handleBrandQuickSave()
+                }
+              }}
+              placeholder="Ej: Arcor"
+              autoFocus
+            />
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="secondary" onClick={() => setBrandSubModal(false)} disabled={savingBrand}>Cancelar</Button>
               <Button onClick={handleBrandQuickSave} loading={savingBrand} disabled={!newBrandName.trim()}>Crear marca</Button>

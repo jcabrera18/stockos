@@ -23,6 +23,7 @@ import { usePOSSync } from '@/hooks/usePOSSync'
 import {
   resolveBarcode,
   computeLocalPrice,
+  priceForProductList,
   searchProductsLocal,
   searchCustomersLocal,
   cacheProductFromScan,
@@ -1639,7 +1640,7 @@ export default function POSPage() {
                   <span className="text-xs text-[var(--text3)] flex-shrink-0">Lista:</span>
                   {priceLists.map(list => (
                     <button key={list.id}
-                      onClick={() => { setSelectedList(list); setCart(prev => prev.map(item => ({ ...item, unit_price: Math.round(item.product.cost_price * (1 + list.margin_pct / 100) * 100) / 100, applied_list: list.name, applied_margin: list.margin_pct }))) }}
+                      onClick={() => { setSelectedList(list); setCart(prev => prev.map(item => item.price_overridden ? item : ({ ...item, unit_price: priceForProductList(item.product, list), applied_list: list.name, applied_margin: list.margin_pct }))) }}
                       className={`px-3 py-1 text-xs rounded-full font-medium flex-shrink-0 transition-colors ${selectedList?.id === list.id ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] border border-[var(--border)] text-[var(--text2)]'}`}>
                       {list.name} (+{list.margin_pct}%)
                     </button>

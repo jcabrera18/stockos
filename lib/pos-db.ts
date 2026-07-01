@@ -17,7 +17,7 @@ export interface LocalPriceList {
   id: string
   name: string
   margin_pct: number
-  min_quantity: number
+  min_quantity: number | null   // null = lista manual (no se auto-aplica por cantidad)
   is_default: boolean
 }
 

@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { Select } from '@/components/ui/Select'
@@ -197,6 +197,15 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
       _refCache.brands     = brnds; setBrands(brnds)
       if (!product && lists.length === 0) {
         setForm(f => ({ ...f, use_fixed_sell_price: true }))
+      }
+      // Al editar, refrescamos categorías sin cache (en segundo plano) para recuperar
+      // la cadena completa del breadcrumb: la lista cacheada puede venir sin la
+      // categoría del producto (recién creada, replica lag, otro dispositivo). El
+      // modal ya abrió con lo que había + el seed; esto reconcilia con el server.
+      if (product?.category_id && !cats.some(c => c.id === product.category_id)) {
+        api.get<Category[]>('/api/products/categories')
+          .then(fresh => { _refCache.categories = fresh; setCategories(fresh) })
+          .catch(() => {})
       }
     }
     load().catch(() => {})
@@ -463,9 +472,25 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
     }
   }
 
-  const categoryMap = new Map(categories.map(c => [c.id, c]))
+  // Garantiza que la categoría seleccionada siempre sea resoluble por el breadcrumb,
+  // aunque la lista cargada venga sin ella (replica lag, recién creada en otro lado o
+  // un deploy previo). La sembramos con el nombre que trae el propio producto para que
+  // el chip no quede vacío ni el breadcrumb colgado.
+  const categoriesForPicker = useMemo(() => {
+    const id = form.category_id
+    if (!id || categories.some(c => c.id === id)) return categories
+    const productCategoryName = (product as (Product & { category_name?: string }) | null)?.category_name
+    const seedName =
+      product?.categories?.id === id ? product.categories.name :
+      product?.category_id === id ? (productCategoryName ?? null) : null
+    if (!seedName) return categories
+    const seed: Category = { id, name: seedName, parent_id: undefined, business_id: '', created_at: '' }
+    return [...categories, seed]
+  }, [categories, form.category_id, product])
+
+  const categoryMap = new Map(categoriesForPicker.map(c => [c.id, c]))
   const childrenMap = new Map<string | null, Category[]>()
-  categories.forEach(c => {
+  categoriesForPicker.forEach(c => {
     const key = c.parent_id ?? null
     if (!childrenMap.has(key)) childrenMap.set(key, [])
     childrenMap.get(key)!.push(c)

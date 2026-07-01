@@ -49,7 +49,7 @@ export function CategoryTreePicker({
                       : 'bg-[var(--surface2)] border-[var(--border)] text-[var(--text2)] hover:border-[var(--accent)] hover:text-[var(--accent)]'
                   )}
                 >
-                  {cat?.name}
+                  {cat?.name ?? 'Categoría'}
                 </button>
               </span>
             )

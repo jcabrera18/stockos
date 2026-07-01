@@ -23,7 +23,7 @@ export interface PriceList {
   name: string
   description?: string
   margin_pct: number
-  min_quantity: number
+  min_quantity: number | null
   is_default: boolean
   is_active: boolean
   created_at: string
@@ -35,7 +35,7 @@ const PRESET_LISTS = [
   { name: 'Especial / VIP', description: 'Precio preferencial para clientes VIP', margin_pct: 30, is_default: false },
 ]
 
-const emptyForm = { name: '', description: '', margin_pct: '', min_quantity: '1', is_default: false }
+const emptyForm = { name: '', description: '', margin_pct: '', min_quantity: '', is_default: false }
 
 export default function PriceListsPage() {
   const [lists, setLists] = useState<PriceList[]>([])
@@ -90,7 +90,7 @@ export default function PriceListsPage() {
       description: list.description ?? '',
       margin_pct: String(list.margin_pct),
       is_default: list.is_default,
-      min_quantity: String(list.min_quantity ?? 1),
+      min_quantity: list.min_quantity == null ? '' : String(list.min_quantity),
     })
     setErrors({})
     setModal(true)
@@ -106,7 +106,8 @@ export default function PriceListsPage() {
         description: form.description.trim() || null,
         margin_pct: Number(form.margin_pct),
         is_default: form.is_default,
-        min_quantity: Number(form.min_quantity) || 1,
+        // Vacío = lista manual (no se auto-aplica por cantidad)
+        min_quantity: form.min_quantity.trim() === '' ? null : Number(form.min_quantity),
       }
       if (editList) {
         await api.patch(`/api/price-lists/${editList.id}`, payload)
@@ -251,7 +252,11 @@ export default function PriceListsPage() {
 
                 {/* Debajo del margen grande, antes del ejemplo */}
                 <p className="text-xs text-[var(--text3)] -mt-2 mb-2">
-                  Desde <span className="font-semibold text-[var(--text)]">{list.min_quantity}</span> {list.min_quantity === 1 ? 'unidad' : 'unidades'}
+                  {list.min_quantity == null ? (
+                    <span className="font-semibold text-[var(--text)]">Selección manual</span>
+                  ) : (
+                    <>Desde <span className="font-semibold text-[var(--text)]">{list.min_quantity}</span> {list.min_quantity === 1 ? 'unidad' : 'unidades'}</>
+                  )}
                 </p>
 
                 {/* Ejemplo */}
@@ -309,13 +314,14 @@ export default function PriceListsPage() {
               hint="Puede ser negativo para hacer descuentos"
             />
             <Input
-              label="Cantidad mínima"
+              label="Cantidad mínima (opcional)"
               type="number"
               min="1"
               step="1"
               value={form.min_quantity}
               onChange={e => setForm(f => ({ ...f, min_quantity: e.target.value }))}
-              hint="Aplica esta lista cuando se venden X o más unidades del mismo producto"
+              placeholder="Dejar vacío = selección manual"
+              hint="Con cantidad: se aplica sola al vender X o más unidades. Vacía: es una lista manual, solo se elige a mano en el POS o en un pedido."
             />
             {/* Preview en tiempo real */}
             {form.margin_pct !== '' && !isNaN(Number(form.margin_pct)) && (

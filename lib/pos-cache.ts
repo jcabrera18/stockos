@@ -78,28 +78,6 @@ async function buildMemoryCaches(): Promise<void> {
   }
 }
 
-// ── Auto-selección de lista por cantidad ──────────────────────────────────────
-
-/**
- * Replica la lógica del server: de todas las listas activas,
- * selecciona la que tiene el mayor min_quantity aplicable a la cantidad dada.
- *
- * Ejemplo con qty=6:
- *   Lista A min_qty=1 → elegible
- *   Lista B min_qty=3 → elegible
- *   Lista C min_qty=5 → elegible ← ganadora (más específica)
- */
-function selectBestPriceList(quantity: number): LocalPriceList | null {
-  if (priceListsMemory.length === 0) return null
-
-  // priceListsMemory ya está ordenado DESC por min_quantity
-  const applicable = priceListsMemory.find(l => (l.min_quantity ?? 1) <= quantity)
-  if (applicable) return applicable
-
-  // Fallback: lista default o la primera disponible
-  return priceListsMemory.find(l => l.is_default) ?? priceListsMemory[0] ?? null
-}
-
 // ── Precio local ──────────────────────────────────────────────────────────────
 
 /**
@@ -107,9 +85,12 @@ function selectBestPriceList(quantity: number): LocalPriceList | null {
  *
  * Replica get_price_for_product() del server:
  *   1. Si el producto tiene precio fijo → sell_price
- *   2. Auto-selecciona mejor lista según quantity (min_quantity más específico)
- *   3. Si hay price_rule específica del producto para esa lista → la aplica
- *   4. Fallback a sell_price
+ *   2. Si el producto tiene reglas propias ("desde X"): SOLO esas reglas arman los
+ *      tramos — las cantidades globales de las listas se ignoran. Gana la regla con
+ *      el mayor "desde" aplicable a la cantidad.
+ *      Si NO tiene reglas propias: se usan las cantidades globales de las listas.
+ *   3. Si la lista ganadora tiene override de precio para el producto → lo aplica.
+ *   4. Fallback (nada aplica a esa cantidad): lista default o sell_price.
  */
 export function computeLocalPrice(
   product: Product,
@@ -120,28 +101,72 @@ export function computeLocalPrice(
   }
 
   const productOverrides = overridesMemory.get(product.id)
-
-  // Primero: reglas específicas del producto (independiente de la lista global)
-  // Ordenadas DESC por min_quantity → el find retorna la más específica aplicable
   const productRules = rulesMemory.get(product.id)
-  if (productRules) {
+  const priceFor = (listId: string, marginPct: number) =>
+    productOverrides?.get(listId) ?? Math.round(product.cost_price * (1 + marginPct / 100) * 100) / 100
+
+  if (productRules && productRules.length > 0) {
+    // Reglas propias → solo ellas definen los tramos (globales ignoradas).
+    // productRules ya viene ordenado DESC por min_quantity → el primero aplicable manda.
     const rule = productRules.find(r => r.min_quantity <= quantity)
     if (rule) {
       const override = productOverrides?.get(rule.price_list_id)
-      const price = override ?? Math.round(product.cost_price * (1 + rule.margin_pct / 100) * 100) / 100
-      return { price, list_name: rule.list_name, margin_pct: rule.margin_pct, rule_source: override != null ? 'override' : 'rule' }
+      return {
+        price: priceFor(rule.price_list_id, rule.margin_pct),
+        list_name: rule.list_name,
+        margin_pct: rule.margin_pct,
+        rule_source: override != null ? 'override' : 'rule',
+      }
+    }
+    // Ninguna regla aplica a esta cantidad → cae al default abajo.
+  } else {
+    // Sin reglas propias → selección por cantidad global de las listas.
+    let best: LocalPriceList | null = null
+    let bestQty = -1
+    for (const list of priceListsMemory) {
+      const eff = list.min_quantity
+      if (eff == null) continue      // lista manual → nunca se auto-aplica
+      if (eff > quantity) continue
+      if (eff > bestQty) { bestQty = eff; best = list }
+    }
+    if (best) {
+      const override = productOverrides?.get(best.id)
+      return {
+        price: priceFor(best.id, best.margin_pct),
+        list_name: best.name,
+        margin_pct: best.margin_pct,
+        rule_source: override != null ? 'override' : 'list',
+      }
     }
   }
 
-  // Sin regla de producto → selección global por cantidad
-  const list = selectBestPriceList(quantity)
-  if (list) {
-    const override = productOverrides?.get(list.id)
-    const price = override ?? Math.round(product.cost_price * (1 + list.margin_pct / 100) * 100) / 100
-    return { price, list_name: list.name, margin_pct: list.margin_pct, rule_source: override != null ? 'override' : 'list' }
+  // Fallback: lista default (aunque sea manual) → precio base de la lista.
+  const def = priceListsMemory.find(l => l.is_default)
+  if (def) {
+    const override = productOverrides?.get(def.id)
+    return {
+      price: priceFor(def.id, def.margin_pct),
+      list_name: def.name,
+      margin_pct: def.margin_pct,
+      rule_source: override != null ? 'override' : 'default',
+    }
   }
 
   return { price: product.sell_price, list_name: 'Precio base', margin_pct: 0, rule_source: 'base' }
+}
+
+/**
+ * Precio de un producto para una lista PUNTUAL (selección manual en el POS/pedido).
+ * Respeta el override por producto para esa lista; si no hay, aplica el margen.
+ * No mira cantidades ni reglas — la lista la eligió el usuario a mano.
+ */
+export function priceForProductList(
+  product: Product,
+  list: { id: string; margin_pct: number },
+): number {
+  if (product.use_fixed_sell_price) return product.sell_price
+  const override = overridesMemory.get(product.id)?.get(list.id)
+  return override ?? Math.round(product.cost_price * (1 + list.margin_pct / 100) * 100) / 100
 }
 
 // ── Scan local ────────────────────────────────────────────────────────────────

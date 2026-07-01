@@ -266,13 +266,14 @@ function buildLabelHtml(
   const tiers = (!p.use_fixed_sell_price && showTiers) ? otherLists : []
   const compact = tiers.length === 0
   // En compacto el "1 UNIDAD" es redundante; solo se muestra si la lista es por cantidad
-  const showQty = !compact || mainList.min_quantity > 1
+  const mainQty = mainList.min_quantity ?? 1
+  const showQty = !compact || mainQty > 1
 
   const tiersHtml = tiers.length > 0
     ? `<div class="ltiers">${tiers.map(l => {
         const tierPrice = getListPrice(p, l)
         const { pct } = calcSaving(mainPrice, tierPrice)
-        return `<div class="ltier-row"><span class="ltier-qty">${l.min_quantity}x</span><span class="ltier-price">${formatPrice(tierPrice)}</span>${pct > 0 ? `<span class="ltier-off">-${pct}%</span>` : ''}</div>`
+        return `<div class="ltier-row"><span class="ltier-qty">${l.min_quantity ?? 1}x</span><span class="ltier-price">${formatPrice(tierPrice)}</span>${pct > 0 ? `<span class="ltier-off">-${pct}%</span>` : ''}</div>`
       }).join('')}</div>`
     : ''
 
@@ -281,9 +282,9 @@ function buildLabelHtml(
   // (la etiqueta ya trae el nombre para buscar el producto).
   const barcodeHtml = barcode?.svg ? `<div class="lbarcode">${barcode.svg}</div>` : ''
 
-  const qtyHtml = showQty ? `<p class="lqty">${qtyLabel(mainList.min_quantity)}</p>` : ''
+  const qtyHtml = showQty ? `<p class="lqty">${qtyLabel(mainQty)}</p>` : ''
 
-  return `<div class="label${compact ? ' compact' : ''}"><p class="lname">${escapeHtml(p.name)}</p><div class="lmain"><div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr, colContentMm)}pt">${mainPriceStr}</p>${mainList.min_quantity > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div></div>${tiersHtml}${barcodeHtml}</div>`
+  return `<div class="label${compact ? ' compact' : ''}"><p class="lname">${escapeHtml(p.name)}</p><div class="lmain"><div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr, colContentMm)}pt">${mainPriceStr}</p>${mainQty > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div></div>${tiersHtml}${barcodeHtml}</div>`
 }
 
 const selectClass =
@@ -415,8 +416,9 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   // Si no hay listas (comercio con precio fijo), usamos la lista sintética
   const mainList = priceLists.find(l => l.id === mainListId) ?? (hasLists ? undefined : FALLBACK_LIST)
   const otherLists = [...priceLists]
-    .filter(l => l.id !== mainListId)
-    .sort((a, b) => a.min_quantity - b.min_quantity)
+    // Las listas manuales (min_quantity == null) no son tiers por cantidad: se excluyen
+    .filter(l => l.id !== mainListId && l.min_quantity != null)
+    .sort((a, b) => (a.min_quantity ?? 1) - (b.min_quantity ?? 1))
 
   const selectedProducts = allProducts.filter(p => selected.has(p.id))
   const labelItems: ProductRow[] = selectedProducts.flatMap(p => Array(copies).fill(p))
@@ -535,7 +537,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
                 <select value={mainListId} onChange={e => setMainListId(e.target.value)} className={selectClass}>
                   {priceLists.map(l => (
                     <option key={l.id} value={l.id}>
-                      {l.name} — {l.margin_pct > 0 ? '+' : ''}{l.margin_pct}% · desde {l.min_quantity} {l.min_quantity === 1 ? 'unidad' : 'unidades'}
+                      {l.name} — {l.margin_pct > 0 ? '+' : ''}{l.margin_pct}%{l.min_quantity == null ? ' · selección manual' : ` · desde ${l.min_quantity} ${l.min_quantity === 1 ? 'unidad' : 'unidades'}`}
                     </option>
                   ))}
                 </select>

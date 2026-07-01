@@ -15,7 +15,9 @@ interface Warehouse {
 interface AdjustStockModalProps {
   open: boolean
   onClose: () => void
-  onSaved: () => void
+  // `delta` es el cambio aplicado al stock (+entrada / −salida). Permite al padre
+  // reconciliar de forma optimista contra el lag de la réplica al refetchear.
+  onSaved: (delta?: number) => void
   product: Product | null
   warehouseId?: string
   stockCurrent?: number
@@ -96,7 +98,7 @@ export function AdjustStockModal({ open, onClose, onSaved, product, warehouseId,
       ])
       toast.success(`Stock ${type === 'add' ? 'agregado' : 'descontado'} correctamente`)
       reset()
-      onSaved()
+      onSaved(delta)
       onClose()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al ajustar')
