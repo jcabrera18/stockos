@@ -96,7 +96,7 @@ const STATUS_VARIANTS: Record<QuoteStatus, 'default' | 'success' | 'warning' | '
 }
 
 const formatDate = (iso?: string | null) =>
-  iso ? new Date(iso + 'T00:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : null
+  iso ? new Date(iso.slice(0, 10) + 'T00:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : null
 
 // ─── Componente principal ─────────────────────────────────
 export default function QuotesPage() {

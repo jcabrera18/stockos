@@ -11,7 +11,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { Pagination } from '@/components/ui/Pagination'
 import { api } from '@/lib/api'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatDateOnly } from '@/lib/utils'
 import type { Pagination as PaginationType } from '@/types'
 import { FileText, CheckCircle, Clock, XCircle, RefreshCw, Printer } from 'lucide-react'
 import { toast } from 'sonner'
@@ -19,6 +19,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { isRestrictedRole } from '@/lib/roles'
 import { printFacturaA4 } from '@/lib/printFactura'
+import { allowedInvoiceTypes } from '@/lib/invoiceRules'
 import {
   printThermal,
   buildInvoiceTicketHtml,
@@ -38,7 +39,10 @@ interface InvoiceItem {
 
 interface Invoice {
   id: string
-  invoice_type: 'X' | 'A' | 'B' | 'C' | 'R'
+  invoice_type: 'X' | 'A' | 'B' | 'C' | 'R' | 'NCA' | 'NCB' | 'NCC' | 'NDA' | 'NDB' | 'NDC'
+  // Tipo fiscal deseado mientras el comprobante sigue siendo Ticket X esperando
+  // autorización de ARCA (se convierte a Factura recién con el CAE).
+  target_invoice_type?: 'A' | 'B' | 'C' | null
   numero: number
   fecha: string
   sale_id?: string
@@ -188,9 +192,19 @@ function InvoicesPageInner() {
           unit_price: i.unit_price,
         }))
       }
-      await api.post('/api/invoices/note', payload)
+      const note = await api.post<Invoice>('/api/invoices/note', payload)
       toast.success(`Nota de ${noteType === 'NC' ? 'Crédito' : 'Débito'} creada`)
       setNoteModal(false)
+
+      // Autorizar la NC/ND en ARCA: es un comprobante fiscal y necesita su
+      // propio CAE (NO se convierte a factura). Igual que la conversión X→Factura.
+      toast.loading('Autorizando en ARCA...', { id: 'afip-auth' })
+      try {
+        const authorized = await api.post<Invoice>(`/api/invoices/${note.id}/authorize`, {})
+        toast.success(`Nota autorizada — CAE: ${authorized.afip_cae}`, { id: 'afip-auth' })
+      } catch (afipErr: unknown) {
+        toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar la nota en ARCA', { id: 'afip-auth' })
+      }
       fetchInvoices()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al crear la nota')
@@ -274,18 +288,14 @@ function InvoicesPageInner() {
   }, [data])
 
   const ivaCondition = user?.business?.iva_condition ?? ''
-  // MO: solo C · RI: A y B · EX: B y C · cualquier otro: todos
-  const allowedConvertTypes: ('A' | 'B' | 'C')[] =
-    ivaCondition === 'MO' ? ['C'] :
-    ivaCondition === 'RI' ? ['A', 'B'] :
-    ivaCondition === 'EX' ? ['B', 'C'] :
-    ['A', 'B', 'C']
+  const allowedConvertTypes = allowedInvoiceTypes(ivaCondition)
 
   const openConvert = (invoice: Invoice) => {
     const customer = invoice.customers as { full_name: string; document?: string } | undefined
     setConvertTarget(invoice)
-    // Al reintentar, pre-llenar con el tipo actual si está permitido
-    const currentType = invoice.invoice_type as 'A' | 'B' | 'C'
+    // Al reintentar, pre-llenar con el tipo deseado. Mientras espera ARCA el
+    // comprobante sigue siendo Ticket X, así que el tipo vive en target_invoice_type.
+    const currentType = (invoice.target_invoice_type ?? invoice.invoice_type) as 'A' | 'B' | 'C'
     const defaultType = allowedConvertTypes.includes(currentType) ? currentType : allowedConvertTypes[0]
     setConvertType(defaultType)
     setReceptorName(invoice.receptor_name ?? customer?.full_name ?? '')
@@ -336,9 +346,29 @@ function InvoicesPageInner() {
   }
 
   // ── Ticket térmico (módulo compartido) ────────────────────────────────────
+  // Autorización directa en ARCA (sin conversión a factura). Para NC/ND que
+  // ya son comprobantes fiscales y sólo necesitan su CAE.
+  const handleAuthorizeNote = async (invoice: Invoice) => {
+    toast.loading('Autorizando en ARCA...', { id: 'afip-auth' })
+    try {
+      const authorized = await api.post<Invoice>(`/api/invoices/${invoice.id}/authorize`, {})
+      toast.success(`Nota autorizada — CAE: ${authorized.afip_cae}`, { id: 'afip-auth' })
+      setSelectedInvoice({ ...authorized, invoice_items: authorized.invoice_items ?? invoice.invoice_items })
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al autorizar en ARCA', { id: 'afip-auth' })
+    } finally {
+      fetchInvoices()
+    }
+  }
+
   const handlePrintTicket = async (invoice: Invoice) => {
     const biz: TicketBusiness = user?.business ?? {}
-    const typeLabel = TYPE_LABELS[invoice.invoice_type] ?? invoice.invoice_type
+    // Un comprobante fiscal sin CAE no fue autorizado por ARCA: se imprime (y se
+    // titula) como Ticket X, no como la factura que todavía no es.
+    const CAE_REQUIRED = ['A', 'B', 'C', 'NCA', 'NCB', 'NCC', 'NDA', 'NDB', 'NDC']
+    const printedType = CAE_REQUIRED.includes(invoice.invoice_type) && !invoice.afip_cae
+      ? 'X' : invoice.invoice_type
+    const typeLabel = TYPE_LABELS[printedType] ?? printedType
     const numero = String(invoice.numero).padStart(8, '0')
     const ptoVenta = String(biz.afip_punto_venta ?? 1).padStart(5, '0')
 
@@ -373,6 +403,7 @@ function InvoicesPageInner() {
   // ── Factura A4 moderna ───────────────────────────────────────────────────
   const handlePrintFactura = (invoice: Invoice) => {
     printFacturaA4(invoice, user?.business ?? undefined)
+      .catch(err => toast.error(err instanceof Error ? err.message : 'No se pudo imprimir la factura'))
   }
 
   return (
@@ -477,7 +508,7 @@ function InvoicesPageInner() {
                       })()}
                     </td>
                     <td className="px-4 py-3 text-xs text-[var(--text2)] hidden md:table-cell">
-                      {inv.fecha}
+                      {formatDateOnly(inv.fecha)}
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell">
                       <p className="text-sm text-[var(--text)]">
@@ -539,7 +570,7 @@ function InvoicesPageInner() {
               </div>
               <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3">
                 <p className="text-xs text-[var(--text3)] mb-1">Fecha</p>
-                <p className="text-sm text-[var(--text)]">{selectedInvoice.fecha}</p>
+                <p className="text-sm text-[var(--text)]">{formatDateOnly(selectedInvoice.fecha)}</p>
               </div>
               {selectedInvoice.sale_id && (
                 <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3">
@@ -654,23 +685,34 @@ function InvoicesPageInner() {
               </div>
             </div>
 
-            {/* Botón autorizar/reintentar en ARCA si está pendiente o falló */}
+            {/* NC/ND pendiente o rechazada: autorizar DIRECTO en ARCA. Es un
+                comprobante fiscal propio (con su CAE), NO se convierte a factura. */}
             {(selectedInvoice.afip_status === 'pending' || selectedInvoice.afip_status === 'rejected') &&
-              selectedInvoice.invoice_type !== 'X' && (
+              ['NCA', 'NCB', 'NCC', 'NDA', 'NDB', 'NDC'].includes(selectedInvoice.invoice_type) && (
+              <Button onClick={() => handleAuthorizeNote(selectedInvoice)} className="w-full">
+                {selectedInvoice.afip_status === 'rejected' ? 'Reintentar autorización en ARCA' : 'Autorizar Nota en ARCA'}
+              </Button>
+            )}
+
+            {/* Factura staged (Ticket X con tipo deseado) o registro fiscal viejo
+                A/B/C, pendiente o rechazado → flujo de conversión + autorización. */}
+            {(selectedInvoice.afip_status === 'pending' || selectedInvoice.afip_status === 'rejected') &&
+              (!!selectedInvoice.target_invoice_type || ['A', 'B', 'C'].includes(selectedInvoice.invoice_type)) && (
               <Button onClick={() => { setDetailModal(false); openConvert(selectedInvoice) }} className="w-full">
                 {selectedInvoice.afip_status === 'rejected' ? 'Reintentar autorización en ARCA' : 'Autorizar en ARCA'}
               </Button>
             )}
 
-            {/* Botón facturar si es X */}
-            {selectedInvoice.invoice_type === 'X' && (
+            {/* Facturar: Ticket X "fresco", sin tipo fiscal deseado todavía. */}
+            {selectedInvoice.invoice_type === 'X' && !selectedInvoice.target_invoice_type && (
               <Button onClick={() => { setDetailModal(false); openConvert(selectedInvoice) }} className="w-full">
                 Convertir a Factura A / B / C
               </Button>
             )}
 
-            {/* NC / ND si es A, B o C */}
-            {['A', 'B', 'C'].includes(selectedInvoice.invoice_type) && (
+            {/* NC / ND: sólo sobre una Factura A/B/C YA autorizada (con CAE). */}
+            {selectedInvoice.afip_status === 'authorized' &&
+              ['A', 'B', 'C'].includes(selectedInvoice.invoice_type) && (
               <div className="flex gap-2">
                 <Button variant="secondary" className="flex-1"
                   onClick={() => {

@@ -10,10 +10,12 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { Pagination } from '@/components/ui/Pagination'
 import { api } from '@/lib/api'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatDateTime, formatDateOnly } from '@/lib/utils'
 import type { Pagination as PaginationType } from '@/types'
 import { FileText, CheckCircle, Clock, XCircle, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
+import { useAuth } from '@/hooks/useAuth'
+import { allowedInvoiceTypes, IVA_CONDITION_LABELS } from '@/lib/invoiceRules'
 
 interface InvoiceItem {
   id:          string
@@ -83,6 +85,11 @@ const PAYMENT_LABELS: Record<string, string> = {
 type TypeFilter = '' | 'X' | 'A' | 'B' | 'C' | 'R'
 
 export default function InvoicesPage() {
+  const { user } = useAuth()
+  // El comercio solo puede emitir los tipos que su condición IVA habilita
+  // (un monotributista solo Factura C).
+  const ivaCondition = user?.business?.iva_condition ?? ''
+  const allowedConvertTypes = allowedInvoiceTypes(ivaCondition)
   const [data, setData]             = useState<Invoice[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 20, pages: 0 })
   const [loading, setLoading]       = useState(true)
@@ -138,7 +145,7 @@ export default function InvoicesPage() {
 
   const openConvert = (invoice: Invoice) => {
     setConvertTarget(invoice)
-    setConvertType('B')
+    setConvertType(allowedConvertTypes.includes('B') ? 'B' : allowedConvertTypes[0])
     setReceptorCuit('')
     setReceptorName('')
     setReceptorAddress('')
@@ -148,6 +155,10 @@ export default function InvoicesPage() {
 
   const handleConvert = async () => {
     if (!convertTarget) return
+    if (!allowedConvertTypes.includes(convertType)) {
+      toast.error(`Tu condición IVA no permite emitir Factura ${convertType}`)
+      return
+    }
     if (convertType === 'A' && !receptorCuit) {
       toast.error('El CUIT del receptor es obligatorio para Factura A')
       return
@@ -251,7 +262,7 @@ export default function InvoicesPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-xs text-[var(--text2)] hidden md:table-cell">
-                      {inv.fecha}
+                      {formatDateOnly(inv.fecha)}
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell">
                       <p className="text-sm text-[var(--text)]">
@@ -313,7 +324,7 @@ export default function InvoicesPage() {
               </div>
               <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3">
                 <p className="text-xs text-[var(--text3)] mb-1">Fecha</p>
-                <p className="text-sm text-[var(--text)]">{selectedInvoice.fecha}</p>
+                <p className="text-sm text-[var(--text)]">{formatDateOnly(selectedInvoice.fecha)}</p>
               </div>
               <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3">
                 <p className="text-xs text-[var(--text3)] mb-1">Método de pago</p>
@@ -434,8 +445,8 @@ export default function InvoicesPage() {
           {/* Tipo de factura */}
           <div>
             <label className="text-sm font-medium text-[var(--text2)] block mb-2">Tipo de factura *</label>
-            <div className="grid grid-cols-3 gap-2">
-              {(['A', 'B', 'C'] as const).map(t => (
+            <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${allowedConvertTypes.length}, minmax(0, 1fr))` }}>
+              {allowedConvertTypes.map(t => (
                 <button key={t} onClick={() => setConvertType(t)}
                   className={`py-2.5 text-sm font-semibold rounded-[var(--radius-md)] border transition-all ${
                     convertType === t
@@ -446,11 +457,17 @@ export default function InvoicesPage() {
                 </button>
               ))}
             </div>
-            <p className="text-xs text-[var(--text3)] mt-1.5">
-              {convertType === 'A' && 'Para empresas o responsables inscriptos en IVA'}
-              {convertType === 'B' && 'Para consumidores finales con datos del comprador'}
-              {convertType === 'C' && 'Para monotributistas'}
-            </p>
+            {allowedConvertTypes.length === 1 ? (
+              <p className="text-xs text-[var(--text3)] mt-1.5">
+                Tu condición IVA ({IVA_CONDITION_LABELS[ivaCondition] ?? ivaCondition}) solo permite emitir Factura {allowedConvertTypes[0]}.
+              </p>
+            ) : (
+              <p className="text-xs text-[var(--text3)] mt-1.5">
+                {convertType === 'A' && 'Para empresas o responsables inscriptos en IVA'}
+                {convertType === 'B' && 'Para consumidores finales con datos del comprador'}
+                {convertType === 'C' && 'Para monotributistas'}
+              </p>
+            )}
           </div>
 
           {/* Condición IVA */}

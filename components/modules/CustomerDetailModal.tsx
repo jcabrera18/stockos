@@ -10,8 +10,10 @@ import { printThermal, buildAccountReceiptHtml } from '@/lib/printTicket'
 import { toast } from 'sonner'
 import type { CustomerSummary } from '@/app/customers/page'
 import type { Pagination as PaginationType } from '@/types'
-import { CreditCard, TrendingUp, TrendingDown, SlidersHorizontal, MapPin, Calendar, Printer, MessageCircle } from 'lucide-react'
+import { CreditCard, TrendingUp, TrendingDown, SlidersHorizontal, MapPin, Calendar, Printer, MessageCircle, FileText, FilePlus } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { printFacturaA4, type PrintInvoiceData } from '@/lib/printFactura'
+import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
 
 interface Movement {
   id: string
@@ -22,6 +24,8 @@ interface Movement {
   payment_method?: string
   created_at: string
   users?: { full_name: string }
+  /** Factura emitida por este cobro (si se facturó). */
+  invoice?: { id: string; invoice_type: string; numero: number; afip_status: string; afip_cae?: string | null } | null
 }
 
 import type { SavedMovement } from '@/components/modules/PaymentModal'
@@ -53,6 +57,12 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: PAGE_SIZE, pages: 0 })
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(false)
+  const [printingInvoiceId, setPrintingInvoiceId] = useState<string | null>(null)
+  // Facturar un cobro implica autorizar en AFIP → solo owner/admin.
+  const canInvoice = user?.role === 'owner' || user?.role === 'admin'
+  const [invoicingMovId, setInvoicingMovId] = useState<string | null>(null)
+  const [convertInvoiceId, setConvertInvoiceId] = useState<string | null>(null)
+  const [showConvert, setShowConvert] = useState(false)
   // Saldo propio: arranca del prop pero se actualiza con cada re-fetch y con el
   // movimiento optimista, así no depende de que el padre re-pase el cliente.
   const [balance, setBalance] = useState<number>(Number(customer?.current_balance ?? 0))
@@ -214,6 +224,52 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
     }
   }
 
+  // Imprime/descarga la factura vinculada a un movimiento de cobro. Trae el
+  // comprobante completo (con items) y reusa el render A4 con QR de AFIP.
+  const handlePrintInvoice = async (invoiceId: string) => {
+    setPrintingInvoiceId(invoiceId)
+    try {
+      const inv = await api.get<PrintInvoiceData>(`/api/invoices/${invoiceId}`)
+      await printFacturaA4(inv, user?.business ?? undefined, customer?.full_name)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo abrir la factura')
+    } finally {
+      setPrintingInvoiceId(null)
+    }
+  }
+
+  // Facturar un cobro que se registró sin comprobante: crea el Ticket X por el
+  // monto pagado y abre la conversión → AFIP. El movimiento guarda amount negativo.
+  const handleInvoiceMovement = async (mov: Movement) => {
+    if (!customerId) return
+    setInvoicingMovId(mov.id)
+    try {
+      const invoice = await api.post<{ id: string }>('/api/invoices/from-payment', {
+        customer_id: customerId,
+        amount: Math.abs(Number(mov.amount)),
+        account_movement_id: mov.id,
+      })
+      setConvertInvoiceId(invoice.id)
+      setShowConvert(true)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo generar el comprobante')
+    } finally {
+      setInvoicingMovId(null)
+    }
+  }
+
+  // Abre el flujo de facturación de un cobro. Si ya existe un comprobante (Ticket X
+  // creado o factura rechazada por AFIP) reabre la conversión sobre ESE comprobante
+  // para reintentar, sin generar uno nuevo. Si no existe, crea el Ticket X.
+  const openInvoiceFlow = (mov: Movement) => {
+    if (mov.invoice) {
+      setConvertInvoiceId(mov.invoice.id)
+      setShowConvert(true)
+    } else {
+      handleInvoiceMovement(mov)
+    }
+  }
+
   if (!customer) return null
 
   return (
@@ -316,7 +372,7 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
                 <div>
                   <p className="text-xs text-[var(--text3)]">Nacimiento</p>
                   <p className="text-sm text-[var(--text)]">
-                    {new Date(customer.birthdate + 'T00:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}
+                    {new Date(String(customer.birthdate).slice(0, 10) + 'T00:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}
                   </p>
                 </div>
               </div>
@@ -339,6 +395,11 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
                 {movements.map(mov => {
                   const cfg = movementConfig[mov.type]
                   const Icon = cfg.icon
+                  const inv = mov.invoice
+                  // Solo una factura AUTORIZADA por AFIP (con CAE) es imprimible.
+                  const isAuthorized = !!inv && inv.afip_status === 'authorized' && !!inv.afip_cae
+                  // Cobros facturables/reintenables (owner/admin, ya reconciliados).
+                  const canInvoiceThis = mov.type === 'payment' && canInvoice && !mov.id.startsWith('optimistic-')
                   return (
                     <div key={mov.id} className="flex items-center gap-3 px-3 py-2.5">
                       <div className="w-7 h-7 rounded-full bg-[var(--surface3)] flex items-center justify-center flex-shrink-0">
@@ -352,6 +413,30 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
                           {mov.users && ` · ${mov.users.full_name}`}
                         </p>
                       </div>
+                      {isAuthorized ? (
+                        <button
+                          type="button"
+                          onClick={() => handlePrintInvoice(inv!.id)}
+                          disabled={printingInvoiceId === inv!.id}
+                          title={`Imprimir / descargar Factura ${inv!.invoice_type}`}
+                          className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors disabled:opacity-50"
+                        >
+                          <FileText size={14} />
+                        </button>
+                      ) : canInvoiceThis ? (
+                        <button
+                          type="button"
+                          onClick={() => openInvoiceFlow(mov)}
+                          disabled={invoicingMovId === mov.id}
+                          title={inv ? 'AFIP no autorizó el comprobante — reintentar' : 'Facturar este cobro'}
+                          className={`flex items-center gap-1 px-2 h-7 rounded-full flex-shrink-0 transition-colors disabled:opacity-50 ${inv
+                            ? 'text-[var(--warning)] hover:bg-[var(--warning-subtle,var(--surface3))]'
+                            : 'text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)]'}`}
+                        >
+                          <FilePlus size={14} />
+                          <span className="text-xs font-medium">{inv ? 'Reintentar' : 'Facturar'}</span>
+                        </button>
+                      ) : null}
                       <div className="text-right flex-shrink-0">
                         <p className={`text-sm font-bold mono ${Number(mov.amount) > 0 ? 'text-[var(--danger)]' : 'text-[var(--accent)]'}`}>
                           {Number(mov.amount) > 0 ? '+' : ''}{formatCurrency(mov.amount)}
@@ -370,6 +455,18 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
         </div>
 
       </div>
+
+      {/* Facturar un cobro desde el historial: Ticket X → conversión A/B/C → AFIP.
+          zIndex por encima del Drawer (50/51). Al terminar, refresca el historial
+          para que el movimiento pase a mostrar el ícono de imprimir. */}
+      <ConvertInvoiceModal
+        open={showConvert}
+        invoiceId={convertInvoiceId}
+        fallbackCustomerName={customer?.full_name}
+        zIndex={70}
+        onClose={() => { setShowConvert(false); refresh() }}
+        onSuccess={() => { setShowConvert(false); refresh() }}
+      />
     </Drawer>
   )
 }

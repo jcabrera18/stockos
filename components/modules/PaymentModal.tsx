@@ -8,10 +8,11 @@ import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { printThermal } from '@/lib/printTicket'
 import { toast } from 'sonner'
-import { CheckCircle, Printer } from 'lucide-react'
+import { CheckCircle, Printer, FileText } from 'lucide-react'
 import type { CustomerSummary } from '@/app/customers/page'
 import { useAuth } from '@/hooks/useAuth'
 import { useWorkstation } from '@/hooks/useWorkstation'
+import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
 
 /** Movimiento recién registrado, para que el detalle lo refleje al instante. */
 export interface SavedMovement {
@@ -62,6 +63,8 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
   const { workstation } = useWorkstation()
   // Solo owner/admin puede agregar deuda (coincide con el backend: /adjustment es adminOnly)
   const canAddDebt = user?.role === 'owner' || user?.role === 'admin'
+  // Facturar el cobro implica autorizar en AFIP, que es solo owner/admin.
+  const canInvoice = user?.role === 'owner' || user?.role === 'admin'
 
   const [tab, setTab] = useState<'pay' | 'debt'>(initialTab)
   const [step, setStep] = useState<'form' | 'receipt'>('form')
@@ -83,6 +86,12 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
   const receiptRef = useRef<HTMLDivElement>(null)
   const printRef = useRef<HTMLDivElement>(null)
 
+  // ── Facturar el cobro ──
+  const [invoicing, setInvoicing] = useState(false)
+  const [convertInvoiceId, setConvertInvoiceId] = useState<string | null>(null)
+  const [showConvert, setShowConvert] = useState(false)
+  const [savedMovementId, setSavedMovementId] = useState<string | null>(null)
+
   useEffect(() => {
     if (open) {
       setTab(canAddDebt ? initialTab : 'pay')
@@ -96,6 +105,10 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
       setDebtAmount('')
       setDebtReason('Recargo por mora')
       setReceipt(null)
+      setInvoicing(false)
+      setConvertInvoiceId(null)
+      setShowConvert(false)
+      setSavedMovementId(null)
     }
   }, [open, initialTab, canAddDebt])
 
@@ -110,7 +123,7 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
 
     setSaving(true)
     try {
-      await api.post(`/api/customers/${customer.id}/payment`, {
+      const res = await api.post<{ account_movement_id?: string | null }>(`/api/customers/${customer.id}/payment`, {
         amount: amountNum,
         payment_method: method,
         description: description.trim() || 'Pago de cuenta corriente',
@@ -118,6 +131,7 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
           ? { register_id: workstation.register_id }
           : {}),
       })
+      setSavedMovementId(res?.account_movement_id ?? null)
 
       const desc = description.trim() || 'Pago de cuenta corriente'
       const balanceAfter = Number(customer.current_balance) - amountNum
@@ -168,6 +182,28 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
     const content = printRef.current
     if (!content) return
     printThermal('Recibo de pago', content.innerHTML)
+  }
+
+  // Crea un Ticket X por el monto entregado y abre la conversión → AFIP.
+  const handleInvoice = async () => {
+    if (!customer || !receipt) return
+    // Si ya se creó el Ticket X en un intento previo, reabrir la conversión en
+    // vez de generar otro comprobante huérfano.
+    if (convertInvoiceId) { setShowConvert(true); return }
+    setInvoicing(true)
+    try {
+      const invoice = await api.post<{ id: string }>('/api/invoices/from-payment', {
+        customer_id: customer.id,
+        amount: receipt.amount,
+        account_movement_id: savedMovementId,
+      })
+      setConvertInvoiceId(invoice.id)
+      setShowConvert(true)
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al generar el comprobante')
+    } finally {
+      setInvoicing(false)
+    }
   }
 
   if (!customer) return null
@@ -506,16 +542,32 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
             </div>
           </div>
 
-          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
-            <div className="flex justify-end gap-2">
+          <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)] space-y-2">
+            <div className="flex gap-2">
               <Button variant="secondary" className="flex-1" onClick={handlePrint}>
-                <Printer size={14} /> Imprimir recibo
+                <Printer size={14} /> Imprimir
               </Button>
-              <Button className="flex-1" onClick={onClose}>Cerrar</Button>
+              {canInvoice && (
+                <Button variant="secondary" className="flex-1" onClick={handleInvoice} loading={invoicing}>
+                  <FileText size={14} /> Facturar
+                </Button>
+              )}
             </div>
+            <Button className="w-full" onClick={onClose}>Cerrar</Button>
           </div>
         </div>
       )}
+
+      {/* Facturar el cobro: Ticket X → conversión A/B/C → AFIP. Montado encima
+          del recibo con zIndex mayor. */}
+      <ConvertInvoiceModal
+        open={showConvert}
+        invoiceId={convertInvoiceId}
+        fallbackCustomerName={customer.full_name}
+        zIndex={60}
+        onClose={() => setShowConvert(false)}
+        onSuccess={() => { setShowConvert(false); onSaved(); onClose() }}
+      />
     </Modal>
   )
 }

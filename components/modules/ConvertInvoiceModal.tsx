@@ -8,6 +8,7 @@ import { formatCurrency } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
 import { toast } from 'sonner'
 import { printFacturaA4 } from '@/lib/printFactura'
+import { allowedInvoiceTypes, IVA_CONDITION_LABELS, type InvoiceLetter } from '@/lib/invoiceRules'
 
 interface InvoiceSummary {
   id: string
@@ -34,12 +35,18 @@ interface ConvertInvoiceModalProps {
   invoiceId: string | null
   fallbackCustomerName?: string
   onSuccess?: () => void
+  /** Para montarlo encima de otro modal (ej: recibo de pago). */
+  zIndex?: number
 }
 
-export function ConvertInvoiceModal({ open, onClose, invoiceId, fallbackCustomerName, onSuccess }: ConvertInvoiceModalProps) {
+export function ConvertInvoiceModal({ open, onClose, invoiceId, fallbackCustomerName, onSuccess, zIndex }: ConvertInvoiceModalProps) {
   const { user } = useAuth()
+  // Tipos que el comercio puede emitir según su propia condición IVA
+  // (un monotributista solo puede Factura C).
+  const ivaCondition = user?.business?.iva_condition ?? ''
+  const allowedTypes = allowedInvoiceTypes(ivaCondition)
   const [invoice, setInvoice] = useState<InvoiceSummary | null>(null)
-  const [convertType, setConvertType] = useState<'A' | 'B' | 'C'>('B')
+  const [convertType, setConvertType] = useState<InvoiceLetter>(allowedTypes[0])
   const [receptorName, setReceptorName] = useState('')
   const [receptorCuit, setReceptorCuit] = useState('')
   const [receptorAddress, setReceptorAddress] = useState('')
@@ -52,7 +59,10 @@ export function ConvertInvoiceModal({ open, onClose, invoiceId, fallbackCustomer
     api.get<InvoiceSummary>(`/api/invoices/${invoiceId}`)
       .then(inv => {
         setInvoice(inv)
-        setConvertType('B')
+        // Sugerir tipo según condición IVA del receptor (RI→A, Monotributo→C, resto→B),
+        // pero clampeado a lo que el comercio puede emitir.
+        const suggested: InvoiceLetter = inv.receptor_iva_condition === 'RI' ? 'A' : inv.receptor_iva_condition === 'M' ? 'C' : 'B'
+        setConvertType(allowedTypes.includes(suggested) ? suggested : allowedTypes[0])
         setReceptorName(inv.receptor_name ?? fallbackCustomerName ?? '')
         setReceptorCuit(inv.receptor_cuit ?? '')
         setReceptorAddress(inv.receptor_address ?? '')
@@ -97,7 +107,7 @@ export function ConvertInvoiceModal({ open, onClose, invoiceId, fallbackCustomer
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Convertir a factura" size="sm">
+    <Modal open={open} onClose={onClose} title="Convertir a factura" size="sm" zIndex={zIndex}>
       <div className="space-y-4">
 
         {invoice ? (
@@ -110,11 +120,11 @@ export function ConvertInvoiceModal({ open, onClose, invoiceId, fallbackCustomer
           </div>
         )}
 
-        {/* Tipo de factura */}
+        {/* Tipo de factura — limitado a lo que el comercio puede emitir */}
         <div>
           <label className="text-sm font-medium text-[var(--text2)] block mb-2">Tipo de factura *</label>
-          <div className="grid grid-cols-3 gap-2">
-            {(['A', 'B', 'C'] as const).map(t => (
+          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${allowedTypes.length}, minmax(0, 1fr))` }}>
+            {allowedTypes.map(t => (
               <button key={t} onClick={() => setConvertType(t)}
                 className={`py-2.5 text-sm font-semibold rounded-[var(--radius-md)] border transition-all ${convertType === t
                   ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
@@ -124,11 +134,17 @@ export function ConvertInvoiceModal({ open, onClose, invoiceId, fallbackCustomer
               </button>
             ))}
           </div>
-          <p className="text-xs text-[var(--text3)] mt-1.5">
-            {convertType === 'A' && 'Para empresas o responsables inscriptos en IVA'}
-            {convertType === 'B' && 'Para consumidores finales con datos del comprador'}
-            {convertType === 'C' && 'Para monotributistas'}
-          </p>
+          {allowedTypes.length === 1 ? (
+            <p className="text-xs text-[var(--text3)] mt-1.5">
+              Tu condición IVA ({IVA_CONDITION_LABELS[ivaCondition] ?? ivaCondition}) solo permite emitir Factura {allowedTypes[0]}.
+            </p>
+          ) : (
+            <p className="text-xs text-[var(--text3)] mt-1.5">
+              {convertType === 'A' && 'Para empresas o responsables inscriptos en IVA'}
+              {convertType === 'B' && 'Para consumidores finales con datos del comprador'}
+              {convertType === 'C' && 'Para monotributistas'}
+            </p>
+          )}
         </div>
 
         {/* Condición IVA */}

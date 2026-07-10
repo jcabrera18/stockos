@@ -68,11 +68,22 @@ function buildAfipQrUrl(invoice: PrintInvoiceData, cuit: string, ptoVta: number)
   return `https://www.afip.gob.ar/fe/qr/?p=${btoa(JSON.stringify(payload))}`
 }
 
+// Comprobantes fiscales que SOLO son válidos con CAE de AFIP. Un Ticket X (no
+// fiscal) o un Remito no lo requieren.
+const CAE_REQUIRED_TYPES = new Set(['A', 'B', 'C', 'NCA', 'NCB', 'NCC', 'NDA', 'NDB', 'NDC'])
+
 export async function printFacturaA4(
   invoice: PrintInvoiceData,
   biz: PrintBizData | undefined,
   fallbackCustomerName?: string,
 ) {
+  // Guarda crítica: nunca imprimir un comprobante fiscal sin CAE. Si AFIP no
+  // autorizó (rechazo, caída del servicio, etc.), la factura no existe legalmente
+  // y no debe generarse un PDF que aparente ser válido.
+  if (CAE_REQUIRED_TYPES.has(invoice.invoice_type) && !invoice.afip_cae) {
+    throw new Error('El comprobante no fue autorizado por AFIP (sin CAE): no se puede imprimir como factura válida.')
+  }
+
   const fmt = (n: number) =>
     new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' }).format(n)
   const typeLabel = TYPE_LABELS[invoice.invoice_type] ?? invoice.invoice_type

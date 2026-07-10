@@ -243,6 +243,7 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
   const handleDownloadInvoice = () => {
     if (!invoice) return
     printFacturaA4(invoice, user?.business ?? undefined, customer?.full_name)
+      .catch(err => toast.error(err instanceof Error ? err.message : 'No se pudo descargar la factura'))
   }
 
   const handleAuthorize = async () => {
@@ -299,7 +300,7 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
 
   return (
     <>
-      <Modal open={open} onClose={onClose} title="Detalle de venta" size="md">
+      <Modal open={open && !convertModal} onClose={onClose} title="Detalle de venta" size="md">
         {loading ? (
           <div className="flex justify-center py-10">
             <div className="w-6 h-6 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />

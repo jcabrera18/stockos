@@ -20,6 +20,22 @@ export function formatDate(date: string | Date): string {
   }).format(new Date(date))
 }
 
+// Formatea una fecha "pura" (sin hora) evitando corrimientos por timezone.
+// Acepta 'YYYY-MM-DD' o un ISO completo ('2026-07-07T00:00:00.000Z') y toma
+// solo la parte de fecha, interpretándola como local (no UTC). Devuelve ''
+// para valores nulos/inválidos en vez de "Invalid Date".
+export function formatDateOnly(date?: string | Date | null): string {
+  if (!date) return ''
+  const s = typeof date === 'string' ? date.slice(0, 10) : date.toISOString().slice(0, 10)
+  const d = new Date(s + 'T00:00:00')
+  if (isNaN(d.getTime())) return ''
+  return new Intl.DateTimeFormat('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(d)
+}
+
 export function formatDateTime(date: string | Date): string {
   return new Intl.DateTimeFormat('es-AR', {
     day: '2-digit',

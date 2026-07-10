@@ -14,7 +14,7 @@ import { getRoleLabel } from '@/lib/utils'
 import { getPlanLimits, canUpgradePlan, WHATSAPP_LINK, upgradeWhatsappLink } from '@/lib/plans'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
-import { Shield, Truck, Building2, Receipt, CreditCard, MessageCircle, Printer } from 'lucide-react'
+import { Shield, Truck, Building2, Receipt, CreditCard, MessageCircle, Printer, Upload } from 'lucide-react'
 import { Toggle } from '@/components/ui/Toggle'
 import { usePrintSettings } from '@/hooks/usePrintSettings'
 import { PrintSettingsFields } from '@/components/modules/PrintSettingsModal'
@@ -90,6 +90,8 @@ export default function SettingsPage() {
   const [afipEnv, setAfipEnv]               = useState('homo')
   const [afipCert, setAfipCert]             = useState('')
   const [afipKey, setAfipKey]               = useState('')
+  const [afipCertName, setAfipCertName]     = useState('')
+  const [afipKeyName, setAfipKeyName]       = useState('')
   const [monoLimit, setMonoLimit]           = useState('')
   const [savingAfip, setSavingAfip]         = useState(false)
 
@@ -223,6 +225,31 @@ export default function SettingsPage() {
     }
   }
 
+  // Carga el .crt/.key como TEXTO (no como base64/binario) para conservar los
+  // saltos de línea del PEM tal cual. Pegar el contenido a mano solía romperlos
+  // y openssl no podía firmar el TRA de ARCA ("Could not find signer certificate").
+  const readPemFile = (
+    file: File | undefined,
+    setContent: (v: string) => void,
+    setName: (v: string) => void,
+    expected: RegExp,
+    label: string,
+  ) => {
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = String(reader.result ?? '')
+      if (!expected.test(text)) {
+        toast.error(`El archivo no parece un ${label} válido (falta el encabezado -----BEGIN...).`)
+        return
+      }
+      setContent(text)
+      setName(file.name)
+    }
+    reader.onerror = () => toast.error('No se pudo leer el archivo')
+    reader.readAsText(file)
+  }
+
   const handleSaveAfip = async () => {
     setSavingAfip(true)
     try {
@@ -240,6 +267,8 @@ export default function SettingsPage() {
       await refreshUser()
       setAfipCert('')
       setAfipKey('')
+      setAfipCertName('')
+      setAfipKeyName('')
     } catch {
       toast.error('Error al guardar')
     } finally {
@@ -517,30 +546,40 @@ export default function SettingsPage() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <p className="text-xs text-[var(--text3)] mb-1">Certificado digital (.crt)</p>
+                      <p className="text-xs text-[var(--text3)] mb-1">Certificado digital (.crt / .pem)</p>
                       <p className="text-xs text-[var(--text3)] mb-2">
-                        Pegá el contenido del archivo .crt descargado de ARCA.
+                        Subí el archivo .crt descargado de ARCA.
                       </p>
-                      <textarea
-                        value={afipCert}
-                        onChange={e => setAfipCert(e.target.value)}
-                        placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
-                        rows={6}
-                        className="w-full text-xs font-mono bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] p-2 text-[var(--text)] placeholder-[var(--text3)] resize-none focus:outline-none focus:border-[var(--accent)]"
-                      />
+                      <label className="flex flex-col items-center justify-center gap-1 w-full h-[92px] text-xs text-[var(--text3)] bg-[var(--surface2)] border border-dashed border-[var(--border)] rounded-[var(--radius-md)] cursor-pointer hover:border-[var(--accent)] transition-colors">
+                        <Upload size={18} className={afipCertName ? 'text-[var(--accent)]' : ''} />
+                        <span className={afipCertName ? 'text-[var(--accent)] font-medium' : ''}>
+                          {afipCertName || 'Elegir archivo .crt'}
+                        </span>
+                        <input
+                          type="file"
+                          accept=".crt,.pem,.cer,application/x-x509-ca-cert,application/pkix-cert"
+                          className="hidden"
+                          onChange={e => readPemFile(e.target.files?.[0], setAfipCert, setAfipCertName, /-----BEGIN CERTIFICATE-----/, 'certificado')}
+                        />
+                      </label>
                     </div>
                     <div>
                       <p className="text-xs text-[var(--text3)] mb-1">Clave privada (.key)</p>
                       <p className="text-xs text-[var(--text3)] mb-2">
-                        Pegá el contenido del archivo .key generado con OpenSSL.
+                        Subí el archivo .key generado con OpenSSL.
                       </p>
-                      <textarea
-                        value={afipKey}
-                        onChange={e => setAfipKey(e.target.value)}
-                        placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
-                        rows={6}
-                        className="w-full text-xs font-mono bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] p-2 text-[var(--text)] placeholder-[var(--text3)] resize-none focus:outline-none focus:border-[var(--accent)]"
-                      />
+                      <label className="flex flex-col items-center justify-center gap-1 w-full h-[92px] text-xs text-[var(--text3)] bg-[var(--surface2)] border border-dashed border-[var(--border)] rounded-[var(--radius-md)] cursor-pointer hover:border-[var(--accent)] transition-colors">
+                        <Upload size={18} className={afipKeyName ? 'text-[var(--accent)]' : ''} />
+                        <span className={afipKeyName ? 'text-[var(--accent)] font-medium' : ''}>
+                          {afipKeyName || 'Elegir archivo .key'}
+                        </span>
+                        <input
+                          type="file"
+                          accept=".key,.pem"
+                          className="hidden"
+                          onChange={e => readPemFile(e.target.files?.[0], setAfipKey, setAfipKeyName, /-----BEGIN (RSA |EC |ENCRYPTED )?PRIVATE KEY-----/, 'clave privada')}
+                        />
+                      </label>
                     </div>
                   </div>
 

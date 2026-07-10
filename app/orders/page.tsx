@@ -629,7 +629,10 @@ function OrdersPageInner() {
       const stale = !!expect && Object.keys(expect).some(
         k => (updated as unknown as Record<string, unknown>)[k] !== (expect as Record<string, unknown>)[k],
       )
-      setDetail(prev => prev && prev.id === id ? { ...updated, ...(stale && expect ? expect : {}) } : prev)
+      // Si el replica todavía devuelve el pedido viejo, conservamos el detalle
+      // actual completo: mergear `updated` pisaría campos optimistas anidados que
+      // `expect` no puede expresar (ej. quantity_delivered dentro de order_items).
+      setDetail(prev => prev && prev.id === id ? (stale ? prev : updated) : prev)
       resolveDetailInvoice(updated)
       if (stale && tries < 4) {
         if (detailRetryRef.current) clearTimeout(detailRetryRef.current)
@@ -870,8 +873,10 @@ function OrdersPageInner() {
           .then(inv => { if (inv) setDetailInvoice(inv) })
           .catch(() => { })
       }
+      return d
     } catch { toast.error('Error al cargar el pedido') }
     finally { setLoadingDetail(false) }
+    return null
   }
 
   // Abre la cuenta corriente del cliente del pedido en un drawer inline. Trae el
@@ -889,11 +894,26 @@ function OrdersPageInner() {
     } finally { setCcLoading(false) }
   }
 
-  // Abrir un pedido directo desde ?open= (ej. al convertir un presupuesto)
+  // Abrir un pedido directo desde ?open= (ej. al convertir un presupuesto).
+  // El pedido recién se creó en el server, pero el replica que lee la lista puede
+  // ir "una atrás" (lag read-after-write), así que el fetchOrders inicial no lo
+  // incluye y no aparece en la tabla. Lo inyectamos optimista desde el detalle y
+  // lo mantenemos fijado hasta que el server lo liste.
   useEffect(() => {
     const openId = searchParams.get('open')
     if (openId) {
-      openDetail(openId)
+      openDetail(openId).then(d => {
+        if (!d) return
+        const noExcludingFilter = pageRef.current === 1
+          && (!statusFilterRef.current || statusFilterRef.current === d.status)
+          && !searchRef.current && !idSearchRef.current
+        if (!noExcludingFilter) return
+        const optimistic: OrderSummary = { ...d }
+        setOrders(prev => [optimistic, ...prev.filter(o => o.id !== optimistic.id)])
+        reconcileCountRef.current = 0
+        optimisticRef.current.created = [optimistic, ...optimisticRef.current.created.filter(o => o.id !== optimistic.id)]
+        fetchOrders(true)
+      })
       router.replace('/orders')
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -1299,7 +1319,7 @@ function OrdersPageInner() {
     const orderId = withdrawOrderId
     setWithdrawing(true)
     try {
-      await api.post(`/api/orders/${orderId}/deliveries`, {
+      const res = await api.post<{ status?: OrderStatus }>(`/api/orders/${orderId}/deliveries`, {
         items,
         notes: withdrawNotes || null,
       })
@@ -1311,21 +1331,30 @@ function OrdersPageInner() {
       // que acabamos de retirar para que la info refleje el retiro al instante, sin
       // depender de que el refetch (que puede tardar varios segundos) llegue antes
       // de que el usuario reabra el modal y reintente sobre datos viejos.
+      // El backend devuelve el status resultante ('delivered' si se retiró todo,
+      // 'partially_delivered' si no): lo pintamos también en tabla y detalle.
       const deltas = new Map(items.map(i => [i.order_item_id, i.quantity]))
+      const newStatus = res?.status
       setDetail(prev => prev && prev.id === orderId ? {
         ...prev,
+        ...(newStatus ? { status: newStatus } : {}),
         order_items: prev.order_items.map(oi =>
           deltas.has(oi.id)
             ? { ...oi, quantity_delivered: (oi.quantity_delivered ?? 0) + deltas.get(oi.id)! }
             : oi
         ),
       } : prev)
+      if (newStatus) {
+        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o))
+        // Sostener el nuevo estado en los re-fetch hasta que el server lo refleje.
+        reconcileCountRef.current = 0
+        optimisticRef.current.patches.set(orderId, { status: newStatus })
+      }
       fetchOrders()
       // El remito de cada retiro se imprime a demanda desde el historial.
-      // Refetch de confirmación: reconcilia el estado real (status del pedido, etc.).
-      api.get<OrderDetail>(`/api/orders/${orderId}`)
-        .then(updated => setDetail(prev => prev && prev.id === orderId ? updated : prev))
-        .catch(() => {})
+      // Refetch de confirmación con guarda de staleness: si el replica todavía
+      // devuelve el pedido viejo, no pisamos el optimismo y reintentamos.
+      refetchDetail(orderId, newStatus ? { status: newStatus } : undefined)
       fetchDeliveries(orderId)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al registrar el retiro')

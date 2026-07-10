@@ -189,12 +189,22 @@ export function buildSaleTicketHtml(sale: TicketSaleData, biz: TicketBusiness): 
     ${footer}`)
 }
 
+// Comprobantes fiscales (A/B/C + NC/ND) que SOLO existen legalmente con CAE de
+// ARCA. Un Ticket X o un Remito no lo requieren.
+const CAE_REQUIRED_TYPES = new Set(['A', 'B', 'C', 'NCA', 'NCB', 'NCC', 'NDA', 'NDB', 'NDC'])
+
 // ── Ticket de factura / comprobante (canónico) ───────────────────────────
 export function buildInvoiceTicketHtml(inv: TicketInvoiceData, biz: TicketBusiness): string {
-  const typeLabel = INVOICE_TYPE_LABELS[inv.invoice_type] ?? `Comprobante ${inv.invoice_type}`
+  // Si ARCA no lo autorizó (sin CAE), un comprobante fiscal NO es una factura
+  // legal: se imprime como Ticket X (no fiscal) para no emitir un papel que
+  // aparente ser una "Factura C" válida cuando en realidad no lo es. Recién es
+  // factura cuando ARCA devuelve el CAE.
+  const isUnauthorizedFiscal = CAE_REQUIRED_TYPES.has(inv.invoice_type) && !inv.cae
+  const effectiveType = isUnauthorizedFiscal ? 'X' : inv.invoice_type
+  const typeLabel = INVOICE_TYPE_LABELS[effectiveType] ?? `Comprobante ${effectiveType}`
   const ptoVenta = String(biz.afip_punto_venta ?? 1).padStart(5, '0')
   const numero = String(inv.numero ?? 0).padStart(8, '0')
-  const isA = inv.invoice_type === 'A'
+  const isA = effectiveType === 'A'
 
   const rcell = (label: string, value: string) =>
     `<div><div style="font-size:11px;font-weight:700;color:#000;text-transform:uppercase;letter-spacing:0.04em;">${esc(label)}</div><div style="font-size:13px;font-weight:500;color:#000;line-height:1.25;">${esc(value)}</div></div>`
