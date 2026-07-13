@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { HelpBanner } from '@/components/ui/HelpBanner'
@@ -11,11 +11,11 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { api } from '@/lib/api'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatCompactCurrency } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
 import { getPlanLimits } from '@/lib/plans'
 import { PlanLimitBanner } from '@/components/modules/PlanLimitBanner'
-import { Building2, Plus, Pencil, Trash2, Star, CreditCard, TrendingUp } from 'lucide-react'
+import { Building2, Plus, Pencil, Trash2, Star, CreditCard, TrendingUp, AlertTriangle, Warehouse as WarehouseIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface Register {
@@ -28,6 +28,7 @@ interface Register {
 interface Warehouse {
   id: string
   name: string
+  is_primary?: boolean
 }
 
 interface Branch {
@@ -39,6 +40,8 @@ interface Branch {
   is_active: boolean
   warehouse_id?: string
   warehouse?: Warehouse
+  warehouses?: Warehouse[]
+  has_primary_warehouse?: boolean
   registers: Register[]
 }
 
@@ -49,7 +52,11 @@ interface BranchStats {
   register_count: number
   sales_today: number
   revenue_today: number
+  units_today: number
+  avg_ticket_today: number
   revenue_month: number
+  revenue_prev_month: number
+  inventory_cost: number
   open_registers: number
 }
 
@@ -66,7 +73,11 @@ export default function BranchesPage() {
   // Modal sucursal
   const [branchModal, setBranchModal] = useState(false)
   const [editBranch, setEditBranch] = useState<Branch | null>(null)
-  const [branchForm, setBranchForm] = useState({ name: '', address: '', phone: '', is_main: false, warehouse_id: '' })
+  const [branchForm, setBranchForm] = useState({
+    name: '', address: '', phone: '', is_main: false,
+    warehouseMode: 'new' as 'new' | 'existing',
+    warehouse_id: '', new_warehouse_name: '',
+  })
   const [savingBranch, setSavingBranch] = useState(false)
 
   // Modal eliminar sucursal
@@ -113,6 +124,11 @@ export default function BranchesPage() {
   if (atBranchLimit)   limitParts.push(`${planLimits.maxBranches} sucursal${planLimits.maxBranches === 1 ? '' : 'es'}`)
   if (atRegisterLimit) limitParts.push(`${planLimits.maxRegisters} caja${planLimits.maxRegisters === 1 ? '' : 's'}`)
 
+  const statsByBranch = useMemo(
+    () => Object.fromEntries(stats.map(s => [s.branch_id, s])) as Record<string, BranchStats>,
+    [stats],
+  )
+
   // ── Sucursales ────────────────────────────────────────────
   const openCreateBranch = () => {
     if (atBranchLimit) {
@@ -120,32 +136,49 @@ export default function BranchesPage() {
       return
     }
     setEditBranch(null)
-    setBranchForm({ name: '', address: '', phone: '', is_main: false, warehouse_id: '' })
+    setBranchForm({ name: '', address: '', phone: '', is_main: false, warehouseMode: 'new', warehouse_id: '', new_warehouse_name: '' })
     setBranchModal(true)
   }
 
   const openEditBranch = (b: Branch) => {
     setEditBranch(b)
-    setBranchForm({ name: b.name, address: b.address ?? '', phone: b.phone ?? '', is_main: b.is_main, warehouse_id: b.warehouse_id ?? '' })
+    setBranchForm({
+      name: b.name, address: b.address ?? '', phone: b.phone ?? '', is_main: b.is_main,
+      warehouseMode: 'existing', warehouse_id: b.warehouse_id ?? '', new_warehouse_name: '',
+    })
     setBranchModal(true)
   }
 
   const handleSaveBranch = async () => {
     if (!branchForm.name.trim()) { toast.error('El nombre es obligatorio'); return }
-    if (!branchForm.warehouse_id) { toast.error('Seleccioná un depósito'); return }
+
+    // Al editar, el depósito de venta se elige de los existentes
+    if (editBranch && !branchForm.warehouse_id) { toast.error('Seleccioná el depósito de venta'); return }
+    // Al crear con depósito existente, hay que elegir uno
+    if (!editBranch && branchForm.warehouseMode === 'existing' && !branchForm.warehouse_id) {
+      toast.error('Seleccioná un depósito'); return
+    }
+
     setSavingBranch(true)
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         name: branchForm.name.trim(),
         address: branchForm.address.trim() || null,
         phone: branchForm.phone.trim() || null,
         is_main: branchForm.is_main,
-        warehouse_id: branchForm.warehouse_id,
       }
+
       if (editBranch) {
+        payload.warehouse_id = branchForm.warehouse_id
         await api.patch(`/api/branches/${editBranch.id}`, payload)
         toast.success('Sucursal actualizada')
       } else {
+        if (branchForm.warehouseMode === 'existing') {
+          payload.warehouse_id = branchForm.warehouse_id
+        } else if (branchForm.new_warehouse_name.trim()) {
+          payload.new_warehouse_name = branchForm.new_warehouse_name.trim()
+        }
+        // Sin nombre → el backend crea "Depósito {sucursal}" automáticamente
         await api.post('/api/branches', payload)
         toast.success('Sucursal creada')
       }
@@ -285,9 +318,9 @@ export default function BranchesPage() {
                           {branch.address && (
                             <span className="text-xs text-[var(--text3)]">· {branch.address}</span>
                           )}
-                          {branch.warehouse && (
-                            <span className="text-xs text-[var(--text3)] bg-[var(--surface2)] px-1.5 py-0.5 rounded">
-                              {branch.warehouse.name}
+                          {branch.has_primary_warehouse === false && (
+                            <span className="inline-flex items-center gap-1 text-xs text-[var(--danger)] bg-[var(--danger-subtle)] px-1.5 py-0.5 rounded font-medium">
+                              <AlertTriangle size={11} /> Sin depósito de venta
                             </span>
                           )}
                         </div>
@@ -309,6 +342,38 @@ export default function BranchesPage() {
                           )}
                         </div>
                       </div>
+
+                      {/* Mini-resumen: ventas de hoy + valor de inventario */}
+                      {statsByBranch[branch.id] && (
+                        <div className="flex flex-wrap gap-x-5 gap-y-1 px-4 py-2.5 border-b border-[var(--border)]">
+                          <div>
+                            <span className="text-xs text-[var(--text3)]">Ventas hoy · </span>
+                            <span className="text-sm font-semibold mono text-[var(--accent)]">{formatCurrency(statsByBranch[branch.id].revenue_today)}</span>
+                          </div>
+                          <div>
+                            <span className="text-xs text-[var(--text3)]">Inventario · </span>
+                            <span className="text-sm font-semibold mono text-[var(--text)]" title={formatCurrency(statsByBranch[branch.id].inventory_cost)}>
+                              {formatCompactCurrency(statsByBranch[branch.id].inventory_cost)}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Depósitos de la sucursal */}
+                      {(branch.warehouses?.length ?? 0) > 0 && (
+                        <div className="flex flex-wrap items-center gap-1.5 px-4 py-2 border-b border-[var(--border)] bg-[var(--surface2)]/40">
+                          <WarehouseIcon size={12} className="text-[var(--text3)]" />
+                          {branch.warehouses!.map(w => (
+                            <span key={w.id}
+                              className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded ${w.is_primary
+                                ? 'bg-[var(--accent-subtle)] text-[var(--accent)] font-medium'
+                                : 'bg-[var(--surface2)] text-[var(--text3)]'
+                                }`}>
+                              {w.name}{w.is_primary && ' · venta'}
+                            </span>
+                          ))}
+                        </div>
+                      )}
 
                       {/* Cajas */}
                       {branch.registers.length === 0 ? (
@@ -356,41 +421,59 @@ export default function BranchesPage() {
               ) : (
                 <div className="space-y-3">
                   {/* Total consolidado */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 sm:col-span-1">
-                      <p className="text-xs text-[var(--text3)] mb-1">Total hoy (todas las sucursales)</p>
-                      <p className="text-2xl font-bold mono text-[var(--accent)]">
-                        {formatCurrency(stats.reduce((a, s) => a + Number(s.revenue_today), 0))}
-                      </p>
-                    </div>
-                    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4">
-                      <p className="text-xs text-[var(--text3)] mb-1">Total del mes</p>
-                      <p className="text-2xl font-bold mono text-[var(--text)]">
-                        {formatCurrency(stats.reduce((a, s) => a + Number(s.revenue_month), 0))}
-                      </p>
-                    </div>
-                    <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4">
-                      <p className="text-xs text-[var(--text3)] mb-1">Cajas abiertas ahora</p>
-                      <p className="text-2xl font-bold mono text-[var(--text)]">
-                        {stats.reduce((a, s) => a + Number(s.open_registers), 0)}
-                      </p>
-                    </div>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    {(() => {
+                      const totalToday     = stats.reduce((a, s) => a + Number(s.revenue_today), 0)
+                      const totalMonth     = stats.reduce((a, s) => a + Number(s.revenue_month), 0)
+                      const totalInventory = stats.reduce((a, s) => a + Number(s.inventory_cost ?? 0), 0)
+                      const totalOpen      = stats.reduce((a, s) => a + Number(s.open_registers), 0)
+                      return (
+                        <>
+                          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 min-w-0">
+                            <p className="text-xs text-[var(--text3)] mb-1">Total hoy (todas)</p>
+                            <p className="text-2xl font-bold mono text-[var(--accent)] truncate" title={formatCurrency(totalToday)}>
+                              {formatCompactCurrency(totalToday)}
+                            </p>
+                          </div>
+                          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 min-w-0">
+                            <p className="text-xs text-[var(--text3)] mb-1">Total del mes</p>
+                            <p className="text-2xl font-bold mono text-[var(--text)] truncate" title={formatCurrency(totalMonth)}>
+                              {formatCompactCurrency(totalMonth)}
+                            </p>
+                          </div>
+                          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 min-w-0">
+                            <p className="text-xs text-[var(--text3)] mb-1">Inventario (a costo)</p>
+                            <p className="text-2xl font-bold mono text-[var(--text)] truncate" title={formatCurrency(totalInventory)}>
+                              {formatCompactCurrency(totalInventory)}
+                            </p>
+                          </div>
+                          <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 min-w-0">
+                            <p className="text-xs text-[var(--text3)] mb-1">Cajas abiertas ahora</p>
+                            <p className="text-2xl font-bold mono text-[var(--text)]">{totalOpen}</p>
+                          </div>
+                        </>
+                      )
+                    })()}
                   </div>
 
                   {/* Por sucursal */}
-                  <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
-                    <table className="w-full text-sm">
+                  <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-x-auto">
+                    <table className="w-full text-sm min-w-[640px]">
                       <thead>
                         <tr className="border-b border-[var(--border)]">
                           <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Sucursal</th>
                           <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Ventas hoy</th>
-                          <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Mes</th>
-                          <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Cajas</th>
+                          <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Ticket prom.</th>
+                          <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Mes</th>
+                          <th className="text-right px-4 py-3 text-xs font-medium text-[var(--text3)]">Inventario</th>
                           <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Abiertas</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--border)]">
-                        {stats.map(s => (
+                        {stats.map(s => {
+                          const prev = Number(s.revenue_prev_month ?? 0)
+                          const delta = prev > 0 ? ((Number(s.revenue_month) - prev) / prev) * 100 : null
+                          return (
                           <tr key={s.branch_id} className="hover:bg-[var(--surface2)] transition-colors">
                             <td className="px-4 py-3">
                               <p className="font-medium text-[var(--text)]">{s.branch_name}</p>
@@ -398,12 +481,21 @@ export default function BranchesPage() {
                             </td>
                             <td className="px-4 py-3 text-right mono font-semibold text-[var(--accent)]">
                               {formatCurrency(s.revenue_today)}
+                              <span className="block text-xs text-[var(--text3)] font-normal">{s.units_today ?? 0} u.</span>
                             </td>
-                            <td className="px-4 py-3 text-right mono text-[var(--text2)] hidden sm:table-cell">
+                            <td className="px-4 py-3 text-right mono text-[var(--text2)]">
+                              {formatCurrency(s.avg_ticket_today ?? 0)}
+                            </td>
+                            <td className="px-4 py-3 text-right mono text-[var(--text2)]">
                               {formatCurrency(s.revenue_month)}
+                              {delta !== null && (
+                                <span className={`block text-xs font-medium ${delta >= 0 ? 'text-[var(--accent)]' : 'text-[var(--danger)]'}`}>
+                                  {delta >= 0 ? '▲' : '▼'} {Math.abs(delta).toFixed(0)}% vs mes ant.
+                                </span>
+                              )}
                             </td>
-                            <td className="px-4 py-3 text-center text-[var(--text2)]">
-                              {s.register_count}
+                            <td className="px-4 py-3 text-right mono text-[var(--text2)]">
+                              {formatCurrency(s.inventory_cost ?? 0)}
                             </td>
                             <td className="px-4 py-3 text-center">
                               {Number(s.open_registers) > 0 ? (
@@ -413,7 +505,8 @@ export default function BranchesPage() {
                               )}
                             </td>
                           </tr>
-                        ))}
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -431,18 +524,56 @@ export default function BranchesPage() {
           <Input label="Nombre *" value={branchForm.name}
             onChange={e => setBranchForm(f => ({ ...f, name: e.target.value }))}
             placeholder="Ej: Sucursal Centro, Local Norte..." />
-          <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-[var(--text2)]">Depósito *</label>
-            <select
-              value={branchForm.warehouse_id}
-              onChange={e => setBranchForm(f => ({ ...f, warehouse_id: e.target.value }))}
-              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors"
-            >
-              <option value="">Seleccionar depósito...</option>
-              {warehouses.map(w => (
-                <option key={w.id} value={w.id}>{w.name}</option>
-              ))}
-            </select>
+
+          {/* Depósito de venta */}
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium text-[var(--text2)]">Depósito de venta *</label>
+
+            {editBranch ? (
+              // Al editar: designar el depósito de venta entre los existentes
+              <select
+                value={branchForm.warehouse_id}
+                onChange={e => setBranchForm(f => ({ ...f, warehouse_id: e.target.value }))}
+                className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+              >
+                <option value="">Seleccionar depósito...</option>
+                {warehouses.map(w => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </select>
+            ) : (
+              <>
+                {/* Al crear: nuevo (default) o existente */}
+                <div className="flex gap-2">
+                  {([['new', 'Crear uno nuevo'], ['existing', 'Usar existente']] as ['new' | 'existing', string][]).map(([mode, label]) => (
+                    <button key={mode} type="button"
+                      onClick={() => setBranchForm(f => ({ ...f, warehouseMode: mode }))}
+                      className={`flex-1 px-3 py-2 text-xs rounded-[var(--radius-md)] border font-medium transition-colors ${branchForm.warehouseMode === mode
+                        ? 'bg-[var(--accent)] border-[var(--accent)] text-white'
+                        : 'bg-[var(--surface)] border-[var(--border)] text-[var(--text2)] hover:bg-[var(--surface2)]'
+                        }`}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {branchForm.warehouseMode === 'new' ? (
+                  <Input value={branchForm.new_warehouse_name}
+                    onChange={e => setBranchForm(f => ({ ...f, new_warehouse_name: e.target.value }))}
+                    placeholder={branchForm.name.trim() ? `Depósito ${branchForm.name.trim()}` : 'Depósito de la sucursal'} />
+                ) : (
+                  <select
+                    value={branchForm.warehouse_id}
+                    onChange={e => setBranchForm(f => ({ ...f, warehouse_id: e.target.value }))}
+                    className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+                  >
+                    <option value="">Seleccionar depósito...</option>
+                    {warehouses.map(w => (
+                      <option key={w.id} value={w.id}>{w.name}</option>
+                    ))}
+                  </select>
+                )}
+              </>
+            )}
             <p className="text-xs text-[var(--text3)]">Las ventas de esta sucursal descontarán stock de este depósito.</p>
           </div>
           <Input label="Dirección" value={branchForm.address}

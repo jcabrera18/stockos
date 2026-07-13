@@ -12,9 +12,9 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { Pagination } from '@/components/ui/Pagination'
 import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
-import { TransferModal } from '@/components/modules/TransferModal'
+import { TransferModal, type TransferPrefill } from '@/components/modules/TransferModal'
 import { api } from '@/lib/api'
-import { formatCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
+import { formatCurrency, formatCompactCurrency, getStockStatusLabel, getStockStatusColor } from '@/lib/utils'
 import { printDocument, partiesGrid } from '@/lib/printDocument'
 import { useAuth } from '@/hooks/useAuth'
 import { getPlanLimits } from '@/lib/plans'
@@ -23,7 +23,7 @@ import type { PaginatedResponse, Pagination as PaginationType, Category } from '
 import {
   Plus, Warehouse, Pencil, Trash2, Star, Search, ArrowLeftRight,
   CheckCircle, Printer, Filter, X, ChevronUp, ChevronDown, ArrowUpDown,
-  SlidersHorizontal,
+  SlidersHorizontal, Building2, TrendingDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -34,6 +34,24 @@ interface WarehouseItem {
   is_default: boolean
   is_active: boolean
   created_at: string
+  branch_id?: string | null
+  branch?: { id: string; name: string } | null
+  is_primary?: boolean
+}
+
+interface BranchOption { id: string; name: string }
+
+interface WarehouseStats {
+  warehouse_id: string
+  is_central: boolean
+  total_skus: number
+  skus_with_stock: number
+  total_units: number
+  total_reserved: number
+  inventory_cost: number
+  inventory_retail: number
+  out_of_stock: number
+  critical: number
 }
 
 interface StockItem {
@@ -59,7 +77,8 @@ type SortDir = 'asc' | 'desc'
 interface Transfer {
   id: string
   created_at: string
-  status: 'pending' | 'approved'
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled'
+  close_reason?: string
   notes?: string
   approved_at?: string
   from_warehouse: { name: string }
@@ -70,14 +89,33 @@ interface Transfer {
 
 interface Supplier { id: string; name: string }
 
+interface RestockSuggestion {
+  product_id: string
+  product_name: string
+  to_warehouse_id: string
+  to_warehouse_name: string
+  to_available: number
+  to_stock_min: number
+  from_warehouse_id: string
+  from_warehouse_name: string
+  from_surplus: number
+}
+
 const selectClass = 'px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]'
+
+const TRANSFER_STATUS: Record<Transfer['status'], { label: string; variant: 'success' | 'warning' | 'danger' | 'default' }> = {
+  pending:   { label: 'Pendiente', variant: 'warning' },
+  approved:  { label: 'Aprobado',  variant: 'success' },
+  rejected:  { label: 'Rechazado', variant: 'danger'  },
+  cancelled: { label: 'Cancelado', variant: 'default' },
+}
 
 function SortIcon({ field, sortBy, sortDir }: { field: SortField; sortBy: SortField; sortDir: SortDir }) {
   if (sortBy !== field) return <ArrowUpDown size={11} className="opacity-25 group-hover:opacity-60 transition-opacity" />
   return sortDir === 'asc' ? <ChevronUp size={11} className="text-[var(--accent)]" /> : <ChevronDown size={11} className="text-[var(--accent)]" />
 }
 
-const emptyForm = { name: '', address: '', is_default: false }
+const emptyForm = { name: '', address: '', is_default: false, branch_id: '', is_primary: false }
 
 export default function WarehousesPage() {
   const { user } = useAuth()
@@ -111,6 +149,8 @@ export default function WarehousesPage() {
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [categories, setCategories] = useState<Category[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [branches, setBranches] = useState<BranchOption[]>([])
+  const [warehouseStats, setWarehouseStats] = useState<Record<string, WarehouseStats>>({})
   const [categoryFilter, setCategoryFilter] = useState('')
   const [supplierFilter, setSupplierFilter] = useState('')
   const [minStockInput, setMinStockInput] = useState('')
@@ -125,6 +165,12 @@ export default function WarehousesPage() {
   const [loadingTransfers, setLoadingTransfers] = useState(false)
   const [approvingId, setApprovingId] = useState<string | null>(null)
   const [transferDetail, setTransferDetail] = useState<Transfer | null>(null)
+  const [cancelModal, setCancelModal] = useState(false)
+  const [cancelTransfer, setCancelTransfer] = useState<Transfer | null>(null)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelling, setCancelling] = useState(false)
+  const [suggestions, setSuggestions] = useState<RestockSuggestion[]>([])
+  const [transferPrefill, setTransferPrefill] = useState<TransferPrefill | null>(null)
 
   // Refs
   const selectedWarehouseRef = useRef(selectedWarehouse)
@@ -168,6 +214,10 @@ export default function WarehousesPage() {
       if (!selectedWarehouseRef.current && data.length > 0) {
         setSelectedWarehouse(data.find(w => w.is_default) ?? data[0])
       }
+      // Métricas por depósito (valuación + estado de stock)
+      api.get<WarehouseStats[]>('/api/warehouses/stats')
+        .then(stats => setWarehouseStats(Object.fromEntries(stats.map(s => [s.warehouse_id, s]))))
+        .catch(() => {})
     } catch (err) { console.error(err) }
     finally { setLoading(false) }
   }, [])
@@ -229,6 +279,7 @@ export default function WarehousesPage() {
 
   // Cargar categorías y proveedores para filtros
   useEffect(() => {
+    api.get<BranchOption[]>('/api/branches').then(setBranches).catch(() => {})
     api.get<Category[]>('/api/products/categories').then(setCategories).catch(() => {})
     api.get<Supplier[]>('/api/purchases/suppliers').then(setSuppliers).catch(() => {})
   }, [])
@@ -238,9 +289,22 @@ export default function WarehousesPage() {
     try {
       const res = await api.get<{ data: Transfer[] }>('/api/warehouses/transfers')
       setTransfers(res.data)
+      api.get<RestockSuggestion[]>('/api/warehouses/restock-suggestions')
+        .then(setSuggestions).catch(() => {})
     } catch (err) { console.error(err) }
     finally { setLoadingTransfers(false) }
   }, [])
+
+  const openTransferFromSuggestion = (s: RestockSuggestion) => {
+    const qty = Math.max(1, Math.min(s.from_surplus, (s.to_stock_min - s.to_available) || 1))
+    setTransferPrefill({
+      fromId: s.from_warehouse_id,
+      toId:   s.to_warehouse_id,
+      product: { id: s.product_id, name: s.product_name, stock_current: s.from_surplus } as never,
+      quantity: qty,
+    })
+    setTransferModal(true)
+  }
 
   const handleApprove = async (t: Transfer) => {
     setApprovingId(t.id)
@@ -253,6 +317,25 @@ export default function WarehousesPage() {
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al aprobar')
     } finally { setApprovingId(null) }
+  }
+
+  const handleCancel = async () => {
+    if (!cancelTransfer) return
+    setCancelling(true)
+    try {
+      const cancelled = await api.post<Transfer>(`/api/warehouses/transfers/${cancelTransfer.id}/cancel`, {
+        status: 'cancelled',
+        reason: cancelReason.trim() || null,
+      })
+      toast.success('Transferencia cancelada — reserva liberada')
+      setTransfers(prev => prev.map(tr => tr.id === cancelled.id ? cancelled : tr))
+      fetchStock()
+      setCancelModal(false)
+      setCancelTransfer(null)
+      setCancelReason('')
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al cancelar')
+    } finally { setCancelling(false) }
   }
 
   const printRemito = (t: Transfer) => {
@@ -306,7 +389,10 @@ export default function WarehousesPage() {
 
   const openEdit = (w: WarehouseItem) => {
     setEditWarehouse(w)
-    setForm({ name: w.name, address: w.address ?? '', is_default: w.is_default })
+    setForm({
+      name: w.name, address: w.address ?? '', is_default: w.is_default,
+      branch_id: w.branch_id ?? '', is_primary: !!w.is_primary,
+    })
     setWarehouseModal(true)
   }
 
@@ -314,7 +400,14 @@ export default function WarehousesPage() {
     if (!form.name.trim()) { toast.error('El nombre es obligatorio'); return }
     setSaving(true)
     try {
-      const payload = { name: form.name.trim(), address: form.address.trim() || null, is_default: form.is_default }
+      const payload = {
+        name: form.name.trim(),
+        address: form.address.trim() || null,
+        is_default: form.is_default,
+        branch_id: form.branch_id || null,
+        // Central (sin sucursal) nunca es depósito de venta
+        is_primary: form.branch_id ? form.is_primary : false,
+      }
       if (editWarehouse) {
         await api.patch(`/api/warehouses/${editWarehouse.id}`, payload)
         toast.success('Depósito actualizado')
@@ -383,7 +476,7 @@ export default function WarehousesPage() {
 
       <div className="p-5 space-y-4">
         <HelpBanner id="warehouses" title="Depósitos y stock">
-          <p>Administrá el stock real por depósito y hacé transferencias entre ellos. Cada depósito está vinculado a una sucursal, así controlás de dónde sale la mercadería.</p>
+          <p>Administrá el stock real por depósito y hacé transferencias entre ellos. Cada sucursal tiene un <strong>depósito de venta</strong> (de ahí descuenta el POS); los <strong>depósitos centrales</strong> abastecen a las sucursales vía transferencias.</p>
         </HelpBanner>
         {/* Tabs */}
         <div className="flex border-b border-[var(--border)]">
@@ -422,7 +515,21 @@ export default function WarehousesPage() {
                         <h3 className="text-sm font-semibold text-[var(--text)]">{w.name}</h3>
                         {w.is_default && <Star size={13} className="text-[var(--accent)] fill-[var(--accent)]" />}
                       </div>
-                      {w.address && <p className="text-xs text-[var(--text3)] mt-0.5">{w.address}</p>}
+                      <div className="flex items-center gap-1.5 mt-1">
+                        {w.branch ? (
+                          <span className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded ${w.is_primary
+                            ? 'bg-[var(--accent-subtle)] text-[var(--accent)] font-medium'
+                            : 'bg-[var(--surface2)] text-[var(--text3)]'
+                            }`}>
+                            <Building2 size={10} /> {w.branch.name}{w.is_primary && ' · venta'}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded bg-[var(--surface2)] text-[var(--text3)]">
+                            Central
+                          </span>
+                        )}
+                      </div>
+                      {w.address && <p className="text-xs text-[var(--text3)] mt-1">{w.address}</p>}
                     </div>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button onClick={() => openEdit(w)}
@@ -438,6 +545,28 @@ export default function WarehousesPage() {
                     </div>
                   </div>
                   {w.is_default && <Badge variant="success">Por defecto</Badge>}
+
+                  {/* Resumen de stock del depósito */}
+                  {(() => {
+                    const st = warehouseStats[w.id]
+                    if (!st) return null
+                    return (
+                      <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-2">
+                        <div className="flex items-baseline justify-between gap-2 min-w-0">
+                          <span className="text-xs text-[var(--text3)] flex-shrink-0">Valor a costo</span>
+                          <span className="text-sm font-semibold mono text-[var(--text)] truncate" title={formatCurrency(st.inventory_cost)}>{formatCompactCurrency(st.inventory_cost)}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-[var(--text3)]">
+                          <span>{st.skus_with_stock}/{st.total_skus} productos · {st.total_units} u.</span>
+                          <div className="flex gap-1">
+                            {st.critical > 0 && <Badge variant="warning">{st.critical} crítico{st.critical === 1 ? '' : 's'}</Badge>}
+                            {st.out_of_stock > 0 && <Badge variant="danger">{st.out_of_stock} sin stock</Badge>}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()}
+
                   <button
                     onClick={() => { setSelectedWarehouse(w); setTab('stock') }}
                     className="mt-3 w-full text-xs text-[var(--accent)] hover:underline text-left">
@@ -676,7 +805,39 @@ export default function WarehousesPage() {
 
         {/* ── Tab: Transferencias ── */}
         {tab === 'transfers' && (
-          loadingTransfers ? <PageLoader /> : transfers.length === 0 ? (
+          <div className="space-y-4">
+
+          {/* Sugerencias de reposición */}
+          {suggestions.length > 0 && (
+            <div className="bg-[var(--surface)] border border-[var(--warning)]/40 rounded-[var(--radius-lg)] overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border)] bg-[var(--warning-subtle)]/40">
+                <TrendingDown size={14} className="text-[var(--warning)]" />
+                <h3 className="text-sm font-semibold text-[var(--text)]">Sugerencias de reposición</h3>
+                <span className="text-xs text-[var(--text3)]">· {suggestions.length} producto{suggestions.length === 1 ? '' : 's'} con stock bajo y excedente en otro depósito</span>
+              </div>
+              <div className="divide-y divide-[var(--border)] max-h-72 overflow-y-auto">
+                {suggestions.slice(0, 20).map(s => (
+                  <div key={`${s.product_id}-${s.to_warehouse_id}`} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm text-[var(--text)] truncate">{s.product_name}</p>
+                      <p className="text-xs text-[var(--text3)]">
+                        <span className="text-[var(--danger)]">{s.to_warehouse_name}</span> tiene {s.to_available} (mín. {s.to_stock_min}) ·{' '}
+                        <span className="text-[var(--accent)]">{s.from_warehouse_name}</span> excedente {s.from_surplus}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => openTransferFromSuggestion(s)}
+                      className="flex items-center gap-1 px-2.5 py-1 text-xs rounded font-medium bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white transition-colors flex-shrink-0"
+                    >
+                      <ArrowLeftRight size={12} /> Transferir
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {loadingTransfers ? <PageLoader /> : transfers.length === 0 ? (
             <EmptyState icon={ArrowLeftRight} title="Sin transferencias"
               description="Transferí stock entre depósitos para redistribuir mercadería."
               action={<Button onClick={() => setTransferModal(true)}><ArrowLeftRight size={15} /> Nueva transferencia</Button>}
@@ -721,21 +882,31 @@ export default function WarehousesPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <Badge variant={t.status === 'approved' ? 'success' : 'warning'}>
-                          {t.status === 'approved' ? 'Aprobado' : 'Pendiente'}
+                        <Badge variant={TRANSFER_STATUS[t.status].variant}>
+                          {TRANSFER_STATUS[t.status].label}
                         </Badge>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 justify-end" onClick={e => e.stopPropagation()}>
                           {t.status === 'pending' && (
-                            <button
-                              onClick={() => handleApprove(t)}
-                              disabled={approvingId === t.id}
-                              className="flex items-center gap-1 px-2.5 py-1 text-xs rounded font-medium bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white transition-colors disabled:opacity-50"
-                            >
-                              <CheckCircle size={12} />
-                              {approvingId === t.id ? 'Aprobando…' : 'Aprobar'}
-                            </button>
+                            <>
+                              <button
+                                onClick={() => handleApprove(t)}
+                                disabled={approvingId === t.id}
+                                className="flex items-center gap-1 px-2.5 py-1 text-xs rounded font-medium bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white transition-colors disabled:opacity-50"
+                              >
+                                <CheckCircle size={12} />
+                                {approvingId === t.id ? 'Aprobando…' : 'Aprobar'}
+                              </button>
+                              <button
+                                onClick={() => { setCancelTransfer(t); setCancelModal(true) }}
+                                disabled={approvingId === t.id}
+                                className="flex items-center gap-1 px-2.5 py-1 text-xs rounded font-medium bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--danger-subtle)] hover:text-[var(--danger)] transition-colors disabled:opacity-50"
+                              >
+                                <X size={12} />
+                                Cancelar
+                              </button>
+                            </>
                           )}
                           {t.status === 'approved' && (
                             <button
@@ -753,9 +924,26 @@ export default function WarehousesPage() {
                 </tbody>
               </table>
             </div>
-          )
+          )}
+          </div>
         )}
       </div>
+
+      {/* Modal cancelar transferencia */}
+      <Modal open={cancelModal} onClose={() => setCancelModal(false)} title="Cancelar transferencia" size="sm">
+        <div className="space-y-4">
+          <p className="text-sm text-[var(--text2)]">
+            Se va a liberar la reserva de stock del depósito de origen. Esta acción no se puede deshacer.
+          </p>
+          <Input label="Motivo (opcional)" value={cancelReason}
+            onChange={e => setCancelReason(e.target.value)}
+            placeholder="Ej: error de carga, ya no se necesita..." autoFocus />
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={() => setCancelModal(false)} disabled={cancelling}>Volver</Button>
+            <Button variant="danger" onClick={handleCancel} loading={cancelling}>Cancelar transferencia</Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Modal crear/editar depósito */}
       <Modal open={warehouseModal} onClose={() => setWarehouseModal(false)}
@@ -767,6 +955,32 @@ export default function WarehousesPage() {
           <Input label="Dirección" value={form.address}
             onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
             placeholder="Opcional" />
+
+          {/* Sucursal */}
+          <div className="flex flex-col gap-1">
+            <label className="text-sm font-medium text-[var(--text2)]">Sucursal</label>
+            <select
+              value={form.branch_id}
+              onChange={e => setForm(f => ({ ...f, branch_id: e.target.value, is_primary: e.target.value ? f.is_primary : false }))}
+              className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+            >
+              <option value="">Depósito central (sin sucursal)</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+            <p className="text-xs text-[var(--text3)]">Un depósito central abastece a las sucursales vía transferencias; no vende por caja.</p>
+          </div>
+
+          {form.branch_id && (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={form.is_primary}
+                onChange={e => setForm(f => ({ ...f, is_primary: e.target.checked }))}
+                className="w-4 h-4 accent-[var(--accent)]" />
+              <span className="text-sm text-[var(--text2)]">Es el depósito de venta de esta sucursal</span>
+            </label>
+          )}
+
           <label className="flex items-center gap-2 cursor-pointer">
             <input type="checkbox" checked={form.is_default}
               onChange={e => setForm(f => ({ ...f, is_default: e.target.checked }))}
@@ -814,9 +1028,10 @@ export default function WarehousesPage() {
       {/* Modal transferencia */}
       <TransferModal
         open={transferModal}
-        onClose={() => setTransferModal(false)}
+        onClose={() => { setTransferModal(false); setTransferPrefill(null) }}
         onSaved={() => { fetchTransfers(); fetchStock() }}
         warehouses={warehouses}
+        prefill={transferPrefill}
       />
 
       {/* Modal detalle de transferencia */}

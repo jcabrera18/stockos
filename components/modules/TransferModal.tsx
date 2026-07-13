@@ -20,14 +20,22 @@ interface TransferItem {
   quantity: number
 }
 
+export interface TransferPrefill {
+  fromId: string
+  toId: string
+  product: Product
+  quantity: number
+}
+
 interface TransferModalProps {
   open: boolean
   onClose: () => void
   onSaved: () => void
   warehouses: Warehouse[]
+  prefill?: TransferPrefill | null
 }
 
-export function TransferModal({ open, onClose, onSaved, warehouses }: TransferModalProps) {
+export function TransferModal({ open, onClose, onSaved, warehouses, prefill }: TransferModalProps) {
   const [fromId, setFromId] = useState('')
   const [toId, setToId] = useState('')
   const [notes, setNotes] = useState('')
@@ -40,7 +48,13 @@ export function TransferModal({ open, onClose, onSaved, warehouses }: TransferMo
 
   useEffect(() => {
     if (!open) { setFromId(''); setToId(''); setNotes(''); setItems([]); setQuery(''); setResults([]) }
-  }, [open])
+    else if (prefill) {
+      setFromId(prefill.fromId)
+      setToId(prefill.toId)
+      setItems([{ product: prefill.product, quantity: prefill.quantity }])
+      setNotes(''); setQuery(''); setResults([])
+    }
+  }, [open, prefill])
 
   useEffect(() => {
     if (!query.trim() || !fromId) { setResults([]); return }

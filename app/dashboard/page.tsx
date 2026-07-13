@@ -8,7 +8,8 @@ import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { StatCardSkeleton, CardListSkeleton } from '@/components/ui/Skeleton'
 import { SmartInsightsCard } from '@/components/modules/SmartInsightsCard'
-import { OnboardingCard } from '@/components/onboarding/OnboardingCard'
+// import { OnboardingCard } from '@/components/onboarding/OnboardingCard' // WIP oculto
+import Link from 'next/link'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { formatCurrency, formatCompactCurrency, formatIntCurrency, formatAxisCurrency, formatNumber, formatDateTime, getPaymentMethodLabel, getPeriodDates, getLocalWeekStart } from '@/lib/utils'
@@ -232,8 +233,8 @@ export default function DashboardPage() {
 
       <div className="p-5 space-y-6">
 
-        {/* ══ Onboarding (se auto-oculta al completarse) ═════════ */}
-        {(role === 'owner' || role === 'admin') && <OnboardingCard />}
+        {/* ══ Onboarding con Stocky — OCULTO (WIP, tira error). Re-habilitar cuando esté listo ══ */}
+        {/* {(role === 'owner' || role === 'admin') && <OnboardingCard />} */}
 
         {/* ══ KPIs ═══════════════════════════════════════════════ */}
         <div className={`grid grid-cols-2 md:grid-cols-3 ${stockEnabled ? 'xl:grid-cols-5' : 'xl:grid-cols-4'} gap-3`}>
@@ -483,6 +484,12 @@ export default function DashboardPage() {
                   </div>
                 ))}
               </div>
+              {(role === 'owner' || role === 'admin') && (
+                <Link href="/branches"
+                  className="mt-3 block text-xs text-[var(--accent)] hover:underline">
+                  Ver comparativa completa (ticket, mes, inventario) →
+                </Link>
+              )}
             </Card>
           )}
 
