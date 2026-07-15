@@ -145,7 +145,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const isPublic =
           path === '/login' || path === '/register' ||
           path === '/forgot-password' || path === '/reset-password' ||
-          path === '/home' || path.startsWith('/home/')
+          path === '/home' || path.startsWith('/home/') ||
+          path.startsWith('/c/')
         if (!isPublic) window.location.replace('/login')
       }
     })

@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -42,6 +43,7 @@ interface CashRegister {
   system_cuenta_corriente: number
   system_cash_in?: number
   system_cc_collected?: number
+  system_cc_collected_other?: Record<string, number> | null
   system_cash_out?: number
   system_total: number
   system_sales_count?: number
@@ -64,6 +66,14 @@ interface ClosingStats {
   avg_signed_difference: number
   ok_rate: number
 }
+
+// Etiquetas de medios para el desglose de cobros no-efectivo del arqueo.
+const CC_METHOD_LABELS: Record<string, string> = {
+  efectivo: 'Efectivo', transferencia: 'Transferencia',
+  debito: 'Débito', credito: 'Crédito', qr: 'QR', cheque: 'Cheque',
+}
+const ccOtherEntries = (obj?: Record<string, number> | null) =>
+  Object.entries(obj ?? {}).filter(([, v]) => Number(v) > 0)
 
 export default function CashRegisterPage() {
   const { workstation, loaded } = useWorkstation()
@@ -489,12 +499,24 @@ export default function CashRegisterPage() {
                             <span className="text-xs font-semibold text-[var(--text)]">Total vendido</span>
                             <span className="text-sm font-bold mono whitespace-nowrap text-[var(--text)]">{formatCurrency(r.system_total)}</span>
                           </div>
+                          {(!!r.system_cc_collected || ccOtherEntries(r.system_cc_collected_other).length > 0) && (
+                            <div className="px-1 pt-1">
+                              <p className="text-[11px] font-semibold text-[var(--text2)]">Cobros del turno</p>
+                              <p className="text-[10px] text-[var(--text3)] leading-tight">Pagos de pedidos y cuenta corriente. No son ventas nuevas: la venta ya se contó arriba.</p>
+                            </div>
+                          )}
                           {!!r.system_cc_collected && (
                             <div className="flex items-center justify-between gap-3 px-1">
-                              <span className="text-xs text-[var(--text3)]">Cobros cta. cte.</span>
+                              <span className="text-xs text-[var(--text3)]">Efectivo <span className="opacity-60">(suma al esperado)</span></span>
                               <span className="text-xs font-semibold mono whitespace-nowrap text-[var(--accent)]">+{formatCurrency(r.system_cc_collected)}</span>
                             </div>
                           )}
+                          {ccOtherEntries(r.system_cc_collected_other).map(([method, amount]) => (
+                            <div key={method} className="flex items-center justify-between gap-3 px-1">
+                              <span className="text-xs text-[var(--text3)]">{CC_METHOD_LABELS[method] ?? method} <span className="opacity-60">(no al efectivo)</span></span>
+                              <span className="text-xs font-semibold mono whitespace-nowrap text-[var(--text2)]">+{formatCurrency(Number(amount))}</span>
+                            </div>
+                          ))}
                           {!!r.system_cash_out && (
                             <div className="flex items-center justify-between gap-3 px-1">
                               <span className="text-xs text-[var(--text3)]">Egresos de caja</span>
@@ -566,14 +588,28 @@ export default function CashRegisterPage() {
                             {formatCurrency(current.system_total)}
                           </span>
                         </div>
+                        {(!!current.system_cc_collected || ccOtherEntries(current.system_cc_collected_other).length > 0) && (
+                          <div className="pt-1">
+                            <p className="text-sm font-semibold text-[var(--text2)]">Cobros del turno</p>
+                            <p className="text-xs text-[var(--text3)] leading-tight">Pagos de pedidos y cuenta corriente. No son ventas nuevas: la venta ya se contó arriba.</p>
+                          </div>
+                        )}
                         {!!current.system_cc_collected && (
                           <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm text-[var(--text3)]">Cobros de cuenta corriente</span>
+                            <span className="text-sm text-[var(--text3)]">Efectivo <span className="opacity-60">(suma al esperado)</span></span>
                             <span className="text-sm font-semibold mono whitespace-nowrap text-[var(--accent)]">
                               +{formatCurrency(current.system_cc_collected)}
                             </span>
                           </div>
                         )}
+                        {ccOtherEntries(current.system_cc_collected_other).map(([method, amount]) => (
+                          <div key={method} className="flex items-center justify-between gap-3">
+                            <span className="text-sm text-[var(--text3)]">{CC_METHOD_LABELS[method] ?? method} <span className="opacity-60">(no suma al efectivo)</span></span>
+                            <span className="text-sm font-semibold mono whitespace-nowrap text-[var(--text2)]">
+                              +{formatCurrency(Number(amount))}
+                            </span>
+                          </div>
+                        ))}
                         {!!current.system_cash_in && (
                           <div className="flex items-center justify-between gap-3">
                             <span className="text-sm text-[var(--text3)]">Ingresos de caja</span>
@@ -729,8 +765,8 @@ export default function CashRegisterPage() {
             </>
           )}
 
-          <Input label="Fondo inicial *" type="number" min="0" step="100"
-            value={openingAmount} onChange={e => setOpeningAmount(e.target.value)} placeholder="Ej: 5000" />
+          <MoneyInput label="Fondo inicial *"
+            value={openingAmount} onChange={v => setOpeningAmount(v)} placeholder="Ej: 5000" />
           <Input label="Notas" value={notes}
             onChange={e => setNotes(e.target.value)} placeholder="Observaciones (opcional)" />
 
@@ -812,8 +848,8 @@ export default function CashRegisterPage() {
               </span>
             </div>
 
-            <Input label="Efectivo físico en caja *" type="number" min="0" step="100"
-              value={closingAmount} onChange={e => setClosingAmount(e.target.value)}
+            <MoneyInput label="Efectivo físico en caja *"
+              value={closingAmount} onChange={v => setClosingAmount(v)}
               placeholder="Contá los billetes e ingresá el total" autoFocus />
 
             {closingAmount !== '' && !isNaN(Number(closingAmount)) && (() => {
@@ -971,8 +1007,8 @@ export default function CashRegisterPage() {
             </button>
           </div>
 
-          <Input label="Monto *" type="number" min="0" step="100"
-            value={movementAmount} onChange={e => setMovementAmount(e.target.value)}
+          <MoneyInput label="Monto *"
+            value={movementAmount} onChange={v => setMovementAmount(v)}
             placeholder="Ej: 5000" autoFocus />
 
           <Input label="Motivo *" value={movementReason}

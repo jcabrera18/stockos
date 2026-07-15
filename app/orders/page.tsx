@@ -7,6 +7,7 @@ import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Select } from '@/components/ui/Select'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -25,9 +26,11 @@ import {
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
 import { CustomerDetailModal } from '@/components/modules/CustomerDetailModal'
+import { CashRegisterPicker, type RegisterWithBranch } from '@/components/modules/CashRegisterPicker'
 import { PaymentModal, type SavedMovement } from '@/components/modules/PaymentModal'
 import type { CustomerSummary } from '@/app/customers/page'
 import { useAuth } from '@/hooks/useAuth'
+import { useWorkstation } from '@/hooks/useWorkstation'
 import { usePOSSync } from '@/hooks/usePOSSync'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useCollapseSidebar } from '@/contexts/SidePanelContext'
@@ -122,7 +125,7 @@ interface Warehouse {
 const STATUS_LABELS: Record<OrderStatus, string> = {
   pending: 'Pendiente',
   confirmed: 'Confirmado',
-  partially_delivered: 'Retiro parcial',
+  partially_delivered: 'Entrega parcial',
   delivered: 'Entregado',
   cancelled: 'Cancelado',
 }
@@ -155,6 +158,7 @@ function OrdersPageInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const { user: authUser } = useAuth()
+  const { workstation }   = useWorkstation()
   const stockEnabled      = authUser?.business?.stock_enabled ?? false
   const sellerWarehouseId = authUser?.role === 'seller' ? (authUser.warehouse_id ?? null) : null
   // El form de nuevo pedido necesita el catálogo local (productos/promos/precios).
@@ -193,6 +197,13 @@ function OrdersPageInner() {
   // Nuevo pedido
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
+  // Depósito preferido del usuario (asignado al crearlo). Se preselecciona y va
+  // primero en el dropdown para que no tenga que buscar el que ya usa siempre.
+  const preferredWarehouseId = authUser?.warehouse_id ?? null
+  const orderedWarehouses = [...warehouses].sort((a, b) => {
+    const rank = (w: Warehouse) => w.id === preferredWarehouseId ? 0 : w.is_default ? 1 : 2
+    return rank(a) - rank(b) || a.name.localeCompare(b.name)
+  })
   // Map<product_id, Map<price_list_id, price>> — cargado una vez
   const priceOverridesRef = useRef<Map<string, Map<string, number>>>(new Map())
 
@@ -202,14 +213,20 @@ function OrdersPageInner() {
   const [priceListId, setPriceListId] = useState('')
   const [orderNotes, setOrderNotes] = useState('')
   const [orderDiscount, setOrderDiscount] = useState('')
+  // Cobro opcional al crear el pedido (seña o total). Si no, nace a cuenta corriente.
+  const [collectNow, setCollectNow] = useState(false)
+  const [collectNowMethod, setCollectNowMethod] = useState<PaymentMethod>('efectivo')
+  const [collectNowAmount, setCollectNowAmount] = useState('')
   const [cart, setCart] = useState<CartItem[]>([])
   const [productQuery, setProductQuery] = useState('')
   const [productResults, setProductResults] = useState<Product[]>([])
   const [productHighlight, setProductHighlight] = useState(0)
   const [searchingProducts, setSearchingProducts] = useState(false)
-  const [payAlreadyCollected, setPayAlreadyCollected] = useState(false)
-  const [collectedMethod, setCollectedMethod] = useState<PaymentMethod>('efectivo')
-  const [collectedAmount, setCollectedAmount] = useState('')
+  // Selector de caja para impactar el efectivo cobrado en el arqueo (opcional).
+  const [allRegisters, setAllRegisters] = useState<RegisterWithBranch[]>([])
+  const [collectBranchId, setCollectBranchId] = useState<string | null>(null)
+  const [collectRegisterId, setCollectRegisterId] = useState<string | null>(null)
+  const collectDefaultsSet = useRef(false)
   const [pickupMode, setPickupMode] = useState(false)
   const [savingOrder, setSavingOrder] = useState(false)
 
@@ -224,8 +241,10 @@ function OrdersPageInner() {
   const [withdrawShowDelivered, setWithdrawShowDelivered] = useState(false)
   const [withdrawShowNote, setWithdrawShowNote] = useState(false)
 
-  // Entrega
+  // Entrega. mode 'full' = entregar todo y facturar el total; 'short' = cerrar el
+  // pedido facturando solo lo despachado (el remanente queda disponible).
   const [deliverModal, setDeliverModal] = useState(false)
+  const [deliverMode, setDeliverMode] = useState<'full' | 'short'>('full')
   const [deliverOrderId, setDeliverOrderId] = useState<string | null>(null)
   const [deliverMethod, setDeliverMethod] = useState<PaymentMethod>('efectivo')
   const [deliverAmount, setDeliverAmount] = useState('')
@@ -581,6 +600,36 @@ function OrdersPageInner() {
   useEffect(() => { searchRef.current = debouncedSearch }, [debouncedSearch])
   useEffect(() => { idSearchRef.current = debouncedIdSearch }, [debouncedIdSearch])
 
+  // Cajas del negocio (sucursal + estado abierta/cerrada) para el selector de cobro.
+  useEffect(() => {
+    api.get<RegisterWithBranch[]>('/api/branches/all-registers')
+      .then(regs => setAllRegisters(regs ?? []))
+      .catch(() => {})
+  }, [])
+
+  // Precarga sucursal/caja con el workstation del usuario logueado (una sola vez).
+  useEffect(() => {
+    if (collectDefaultsSet.current || allRegisters.length === 0) return
+    collectDefaultsSet.current = true
+    const branchIds = new Set(allRegisters.map(r => r.branches?.id).filter(Boolean))
+    const defBranch = (workstation?.branch_id && branchIds.has(workstation.branch_id))
+      ? workstation.branch_id
+      : allRegisters.find(r => r.is_open)?.branches?.id
+      ?? allRegisters[0]?.branches?.id ?? null
+    setCollectBranchId(defBranch)
+    const wsReg = allRegisters.find(r => r.id === workstation?.register_id)
+    setCollectRegisterId(wsReg?.is_open ? wsReg.id : null)
+  }, [allRegisters, workstation?.branch_id, workstation?.register_id])
+
+  // Al cambiar de sucursal, la caja elegida deja de ser válida si no pertenece.
+  const handleCollectBranchChange = useCallback((bid: string | null) => {
+    setCollectBranchId(bid)
+    setCollectRegisterId(prev => {
+      const reg = allRegisters.find(r => r.id === prev)
+      return reg && reg.branches?.id === bid ? prev : null
+    })
+  }, [allRegisters])
+
   // Estado optimista que el replica del server puede no reflejar aún (lag
   // read-after-write). El re-fetch lo reconcilia en vez de pisarlo.
   const optimisticRef = useRef(makeOptimisticState<OrderSummary>())
@@ -681,12 +730,15 @@ function OrdersPageInner() {
   useEffect(() => {
     api.get<Warehouse[]>('/api/warehouses').then(wh => {
       setWarehouses(wh)
+      // Preferir el depósito del usuario (asignado al crearlo); si no, el default
+      // del negocio; si no, el primero. Aplica a todos los roles.
+      const preferred = wh.find(w => w.id === (authUser?.warehouse_id ?? ''))?.id
+      const chosen = preferred ?? wh.find(w => w.is_default)?.id ?? wh[0]?.id ?? ''
       if (sellerWarehouseId) {
-        setWarehouseId(sellerWarehouseId)
+        setWarehouseId(chosen)  // seller: fijo, sin dropdown
       } else {
-        const def = wh.find(w => w.is_default)
         // No pisar un depósito ya restaurado desde el borrador
-        setWarehouseId(current => current || def?.id || '')
+        setWarehouseId(current => current || chosen)
       }
     }).catch(() => { })
   }, [])
@@ -733,9 +785,9 @@ function OrdersPageInner() {
         if (d.priceListId) setPriceListId(d.priceListId)
         if (d.orderNotes) setOrderNotes(d.orderNotes)
         if (d.orderDiscount) setOrderDiscount(d.orderDiscount)
-        if (d.payAlreadyCollected) setPayAlreadyCollected(true)
-        if (d.collectedMethod) setCollectedMethod(d.collectedMethod)
-        if (d.collectedAmount) setCollectedAmount(d.collectedAmount)
+        if (d.collectNow) setCollectNow(true)
+        if (d.collectNowMethod) setCollectNowMethod(d.collectNowMethod)
+        if (d.collectNowAmount) setCollectNowAmount(d.collectNowAmount)
         if (d.pickupMode) setPickupMode(true)
       }
     } catch { /* ignore */ }
@@ -750,11 +802,11 @@ function OrdersPageInner() {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({
         cart, selectedCustomerId, customerName, selectedCustomerBalance, selectedCustomerCreditLimit,
-        warehouseId, priceListId, orderNotes, orderDiscount, payAlreadyCollected, collectedMethod, collectedAmount, pickupMode,
+        warehouseId, priceListId, orderNotes, orderDiscount, collectNow, collectNowMethod, collectNowAmount, pickupMode,
       }))
     } catch { /* ignore */ }
   }, [cart, selectedCustomerId, customerName, selectedCustomerBalance, selectedCustomerCreditLimit,
-    warehouseId, priceListId, orderNotes, orderDiscount, payAlreadyCollected, collectedMethod, collectedAmount, pickupMode])
+    warehouseId, priceListId, orderNotes, orderDiscount, collectNow, collectNowMethod, collectNowAmount, pickupMode])
 
   // Búsqueda de productos para el pedido
   useEffect(() => {
@@ -864,7 +916,9 @@ function OrdersPageInner() {
     try {
       const d = await api.get<OrderDetail>(`/api/orders/${id}`)
       setDetail(d)
-      if (d.pickup_mode) fetchDeliveries(id)
+      // Retiro: siempre tiene despachos. Envío: solo mientras está en curso
+      // (confirmado o parcialmente despachado) puede tener despachos parciales.
+      if (d.pickup_mode || d.status === 'confirmed' || d.status === 'partially_delivered') fetchDeliveries(id)
       // Usar invoice directo del pedido si existe
       if (d.invoices) {
         setDetailInvoice(d.invoices)
@@ -914,6 +968,14 @@ function OrdersPageInner() {
         optimisticRef.current.created = [optimistic, ...optimisticRef.current.created.filter(o => o.id !== optimistic.id)]
         fetchOrders(true)
       })
+      router.replace('/orders')
+      return
+    }
+    // ?order=<N°> (prefijo del UUID) → filtra la tabla por ese pedido. Lo usan los
+    // links de la cuenta corriente para saltar al pedido de un cobro/saldo a favor.
+    const orderNum = searchParams.get('order')
+    if (orderNum) {
+      setIdSearch(orderNum)
       router.replace('/orders')
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -986,7 +1048,7 @@ function OrdersPageInner() {
 
   const resetOrderForm = () => {
     setOrderNotes(''); setOrderDiscount(''); setCart([])
-    setPayAlreadyCollected(false); setCollectedAmount(''); setCollectedMethod('efectivo')
+    setCollectNow(false); setCollectNowAmount(''); setCollectNowMethod('efectivo')
     setPickupMode(false)
     setCustomerQuery(''); setCustomerResults([]); setSelectedCustomerId(null)
     setSelectedCustomerBalance(0); setSelectedCustomerCreditLimit(0)
@@ -1081,9 +1143,14 @@ function OrdersPageInner() {
       return
     }
     if (cart.length === 0) { toast.error('Agregá al menos un producto'); return }
-    if (cartStockIssues.length > 0) { toast.error('Hay productos con stock insuficiente'); return }
+    // Backorder: se permite tomar el pedido aunque falte stock (se entrega cuando
+    // llegue la reposición). El stock se descuenta al despachar, no al crear.
 
     setSavingOrder(true)
+
+    // Cobro al crear activo solo si se marcó, el medio no es CC y hay monto.
+    const collectingNow = collectNow && collectNowMethod !== 'cuenta_corriente'
+      && (Number(collectNowAmount) || cartTotal) > 0
 
     const payload = {
       customer_name: customerName.trim(),
@@ -1098,11 +1165,15 @@ function OrdersPageInner() {
         unit_price: i.unit_price,
         discount: i.discount,
       })),
-      paid_amount: payAlreadyCollected ? Number(collectedAmount) || cartTotal : 0,
-      payment_method: payAlreadyCollected ? collectedMethod : null,
-      payment_status: payAlreadyCollected
-        ? ((Number(collectedAmount) || cartTotal) >= cartTotal ? 'paid' : 'partial')
+      // Cobro opcional al crear (seña/total). Si no, nace a cuenta corriente y el
+      // cobro se registra después con "Registrar pago".
+      paid_amount: collectingNow ? Number(collectNowAmount) || cartTotal : 0,
+      payment_method: collectingNow ? collectNowMethod : null,
+      payment_status: collectingNow
+        ? ((Number(collectNowAmount) || cartTotal) >= cartTotal ? 'paid' : 'partial')
         : 'unpaid',
+      branch_id: collectBranchId,
+      register_id: collectRegisterId,
       pickup_mode: pickupMode,
     }
 
@@ -1128,11 +1199,16 @@ function OrdersPageInner() {
       }
       const created = await api.post<OrderSummary>('/api/orders', payload)
       toast.success('Pedido creado correctamente')
-      // Optimista: si estamos en la primera página sin filtros que lo excluyan,
-      // mostramos el pedido recién creado al instante (el re-fetch reconcilia
-      // item_count/total_units y demás campos calculados por el view).
-      const noExcludingFilter = pageRef.current === 1
-        && (!statusFilterRef.current || statusFilterRef.current === 'pending')
+      // Volvemos a la página 1 antes de refrescar: el pedido nuevo (status
+      // 'pending') encabeza la lista, así aparece al instante aunque estuvieras
+      // paginando. Mismo patrón que /quotes.
+      pageRef.current = 1
+      setPage(1)
+      // Optimista: si el filtro actual no lo excluye, mostramos el pedido recién
+      // creado al instante (el re-fetch reconcilia item_count/total_units y demás
+      // campos calculados por el view).
+      const noExcludingFilter =
+        (!statusFilterRef.current || statusFilterRef.current === 'pending')
         && !searchRef.current && !idSearchRef.current
       if (created?.id && noExcludingFilter) {
         const optimistic: OrderSummary = {
@@ -1223,8 +1299,9 @@ function OrdersPageInner() {
         payment_method: deliverMethod,
         paid_amount: collected,
         delivery_notes: deliverNotes || null,
+        register_id: collectRegisterId,
       })
-      toast.success('Entrega confirmada — venta generada automáticamente')
+      toast.success('Pedido entregado')
       const deliveredId = deliverOrderId
       setDeliverModal(false)
       setDeliverOrderId(null)
@@ -1241,6 +1318,34 @@ function OrdersPageInner() {
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al confirmar entrega')
+    } finally { setDelivering(false) }
+  }
+
+  // Cerrar corto: factura solo lo despachado y cierra el pedido. El remanente no
+  // entregado nunca se descontó de stock (backorder), así que queda disponible.
+  const handleCloseShort = async () => {
+    if (!deliverOrderId) return
+    setDelivering(true)
+    try {
+      await api.post(`/api/orders/${deliverOrderId}/close`, {
+        payment_method: deliverMethod,
+        paid_amount: Number(deliverAmount) || 0,
+        delivery_notes: deliverNotes || null,
+        register_id: collectRegisterId,
+      })
+      toast.success('Pedido cerrado — saldo a favor por lo no entregado')
+      const closedId = deliverOrderId
+      setDeliverModal(false)
+      setDeliverOrderId(null)
+      setDeliverAmount(''); setDeliverNotes('')
+      setOrders(prev => prev.map(o => o.id === closedId ? { ...o, status: 'delivered' } : o))
+      setDetail(prev => prev && prev.id === closedId ? { ...prev, status: 'delivered' } : prev)
+      reconcileCountRef.current = 0
+      optimisticRef.current.patches.set(closedId, { status: 'delivered' })
+      fetchOrders()
+      if (detail?.id === closedId) refetchDetail(closedId, { status: 'delivered' })
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Error al cerrar el pedido')
     } finally { setDelivering(false) }
   }
 
@@ -1311,10 +1416,11 @@ function OrdersPageInner() {
 
   const handleWithdraw = async () => {
     if (!withdrawOrderId || !detail) return
+    const noun = detail.pickup_mode ? 'retiro' : 'despacho'
     const items = Object.entries(withdrawQty)
       .map(([order_item_id, qty]) => ({ order_item_id, quantity: Number(qty) || 0 }))
       .filter(i => i.quantity > 0)
-    if (items.length === 0) { toast.error('Ingresá al menos una cantidad a retirar'); return }
+    if (items.length === 0) { toast.error(`Ingresá al menos una cantidad a ${detail.pickup_mode ? 'retirar' : 'despachar'}`); return }
 
     const orderId = withdrawOrderId
     setWithdrawing(true)
@@ -1323,7 +1429,7 @@ function OrdersPageInner() {
         items,
         notes: withdrawNotes || null,
       })
-      toast.success('Retiro registrado')
+      toast.success(`${noun.charAt(0).toUpperCase()}${noun.slice(1)} registrado`)
       setWithdrawModal(false)
       setWithdrawOrderId(null)
       setWithdrawQty({}); setWithdrawNotes('')
@@ -1357,7 +1463,7 @@ function OrdersPageInner() {
       refetchDetail(orderId, newStatus ? { status: newStatus } : undefined)
       fetchDeliveries(orderId)
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Error al registrar el retiro')
+      toast.error(err instanceof Error ? err.message : `Error al registrar el ${noun}`)
     } finally { setWithdrawing(false) }
   }
 
@@ -1368,6 +1474,7 @@ function OrdersPageInner() {
       const updatedRow = await api.post<Partial<OrderDetail>>(`/api/orders/${paymentOrderId}/payment`, {
         payment_method: paymentMethod,
         paid_amount: Number(paymentAmount),
+        register_id: collectRegisterId,
       })
       toast.success('Pago registrado')
       setPaymentModal(false)
@@ -1680,11 +1787,13 @@ function OrdersPageInner() {
                   })
                 })() : (() => {
                   const statuses: OrderStatus[] = ['pending', 'confirmed', 'delivered']
-                  const currentIdx = statuses.indexOf(detail.status)
+                  // Envío parcial en curso: 'confirmed' ya alcanzado, 'Entregar'
+                  // (facturar el total) es el próximo paso.
+                  const currentIdx = detail.status === 'partially_delivered' ? 1 : statuses.indexOf(detail.status)
                   const NEXT_LABELS: Partial<Record<OrderStatus, string>> = { confirmed: 'Confirmar', delivered: 'Entregar' }
                   const advance = (target: OrderStatus) => {
                     if (target === 'confirmed') setConfirmOrder({ id: detail.id, customer_name: detail.customer_name })
-                    else if (target === 'delivered') { setDeliverOrderId(detail.id); setDeliverModal(true) }
+                    else if (target === 'delivered') { setDeliverMode('full'); setDeliverOrderId(detail.id); setDeliverAmount(''); setDeliverNotes(''); setDeliverModal(true) }
                   }
                   return statuses.map((s, i) => {
                     const done = i < currentIdx
@@ -1726,29 +1835,59 @@ function OrdersPageInner() {
                 {detail.delivered_at && <span>· Entregado <span className="font-medium text-[var(--text2)]">{formatDateTime(detail.delivered_at)}</span></span>}
               </div>
               {detail.status === 'pending' && (
-                <button
-                  onClick={() => setCancelConfirmOrder({ id: detail.id, customer_name: detail.customer_name })}
-                  className="inline-flex items-center gap-1.5 self-start rounded-[var(--radius-md)] border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--danger)] hover:bg-[var(--danger)]/20 transition-colors">
-                  <X size={14} /> Cancelar pedido
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" onClick={() => setConfirmOrder({ id: detail.id, customer_name: detail.customer_name })}>
+                    <CheckCircle size={14} /> Confirmar pedido
+                  </Button>
+                  <button
+                    onClick={() => setCancelConfirmOrder({ id: detail.id, customer_name: detail.customer_name })}
+                    className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--danger)] hover:bg-[var(--danger)]/20 transition-colors">
+                    <X size={14} /> Cancelar pedido
+                  </button>
+                </div>
               )}
             </div>
 
-            {/* ── Modo retiro: retiros parciales (la deuda ya está en la cuenta corriente) ── */}
-            {detail.pickup_mode && detail.status !== 'cancelled' && (
+            {/* ── Despachos/retiros parciales ──
+                Retiro: la deuda ya está en la CC, el cliente retira por partes.
+                Envío: se despacha lo que se carga al camión; la factura se emite al
+                entregar el total ("Entregar"). Misma mecánica, distinta terminología. */}
+            {detail.status !== 'cancelled' && (detail.pickup_mode || detail.status === 'confirmed' || detail.status === 'partially_delivered') && (() => {
+              const isPickup = detail.pickup_mode
+              const title = isPickup ? 'Modo retiro' : 'Despacho por partes'
+              const subtitle = isPickup
+                ? 'La deuda está cargada en la cuenta corriente. El cliente puede retirar aunque no haya pagado.'
+                : 'Despachá lo que vas cargando. La factura se emite al entregar el total.'
+              const actionLabel = isPickup ? 'Registrar retiro' : 'Registrar despacho'
+              const doneVerb = isPickup ? 'Retirado' : 'Despachado'
+              const historyTitle = isPickup ? 'Retiros realizados' : 'Despachos realizados'
+              const historyWord = isPickup ? 'Retiro' : 'Despacho'
+              // Envío con parte entregada y parte pendiente: se puede cerrar corto
+              // (facturar lo despachado y dar por terminado el resto).
+              const someDelivered = detail.order_items.some(i => (i.quantity_delivered ?? 0) > 0)
+              const somePending = detail.order_items.some(i => (i.quantity - (i.quantity_delivered ?? 0)) > 0)
+              const canCloseShort = !isPickup && someDelivered && somePending && detail.status !== 'delivered'
+              return (
               <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3.5 space-y-3 border border-[var(--accent)]/30">
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <p className="text-sm font-semibold text-[var(--text)]">Modo retiro</p>
-                    <p className="text-[11px] text-[var(--text3)]">La deuda está cargada en la cuenta corriente. El cliente puede retirar aunque no haya pagado.</p>
+                    <p className="text-sm font-semibold text-[var(--text)]">{title}</p>
+                    <p className="text-[11px] text-[var(--text3)]">{subtitle}</p>
                   </div>
                   {detail.status !== 'delivered' && (
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      <Button size="sm" variant="secondary" onClick={() => copyPickupText(detail)}>
-                        <Copy size={14} /> <span className="hidden sm:inline">Enviar pendientes</span>
-                      </Button>
+                      {isPickup && (
+                        <Button size="sm" variant="secondary" onClick={() => copyPickupText(detail)}>
+                          <Copy size={14} /> <span className="hidden sm:inline">Enviar pendientes</span>
+                        </Button>
+                      )}
+                      {canCloseShort && (
+                        <Button size="sm" variant="secondary" onClick={() => { setDeliverMode('short'); setDeliverOrderId(detail.id); setDeliverAmount(''); setDeliverNotes(''); setDeliverModal(true) }}>
+                          Cerrar entrega
+                        </Button>
+                      )}
                       <Button size="sm" onClick={() => { setWithdrawOrderId(detail.id); setWithdrawQty({}); setWithdrawNotes(''); setWithdrawSearch(''); setWithdrawShowDelivered(false); setWithdrawShowNote(false); setWithdrawModal(true) }}>
-                        Registrar retiro
+                        {actionLabel}
                       </Button>
                     </div>
                   )}
@@ -1761,7 +1900,7 @@ function OrdersPageInner() {
                       <div key={i.id} className="flex items-center justify-between gap-2 text-xs">
                         <span className="text-[var(--text2)] truncate">{i.products?.name ?? i.product_name}</span>
                         <span className="flex-shrink-0 text-[var(--text3)]">
-                          Retirado <span className="font-medium text-[var(--text)]">{delivered}</span>/{i.quantity}
+                          {doneVerb} <span className="font-medium text-[var(--text)]">{delivered}</span>/{i.quantity}
                           {pending > 0
                             ? <span className="ml-1.5 font-medium text-[var(--accent)]">· faltan {pending}</span>
                             : <span className="ml-1.5 font-medium text-[var(--accent)]">· completo</span>}
@@ -1771,11 +1910,11 @@ function OrdersPageInner() {
                   })}
                 </div>
 
-                {/* Historial de retiros: cada uno con su remito imprimible */}
+                {/* Historial: cada despacho/retiro con su remito imprimible */}
                 {deliveries.length > 0 && (
                   <div className="space-y-2 pt-3 border-t border-[var(--border)]">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--text3)]">
-                      Retiros realizados ({deliveries.length})
+                      {historyTitle} ({deliveries.length})
                     </p>
                     {deliveries.map((dl, idx) => {
                       const when = new Date(dl.delivered_at).toLocaleString('es-AR', {
@@ -1794,7 +1933,7 @@ function OrdersPageInner() {
                         <div key={dl.id} className="flex items-start justify-between gap-2 bg-[var(--surface)] rounded-[var(--radius-sm)] p-2.5 border border-[var(--border)]">
                           <div className="min-w-0">
                             <p className="text-xs font-medium text-[var(--text)]">
-                              Retiro #{deliveries.length - idx} · <span className="text-[var(--text3)] font-normal">{when}</span>
+                              {historyWord} #{deliveries.length - idx} · <span className="text-[var(--text3)] font-normal">{when}</span>
                             </p>
                             <p className="text-[11px] text-[var(--text2)] mt-0.5 leading-snug">
                               {lines.map(l => `${l.name} ×${l.quantity}`).join(' · ')}
@@ -1813,7 +1952,8 @@ function OrdersPageInner() {
                   </div>
                 )}
               </div>
-            )}
+              )
+            })()}
 
             {/* Info cliente + pago */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1941,17 +2081,29 @@ function OrdersPageInner() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[var(--border)]">
-                    {detail.order_items?.map(item => (
-                      <tr key={item.id}>
+                    {(() => {
+                      // Solo mostramos estado de entrega si el pedido tiene seguimiento
+                      // de despachos (evita marcar pedidos viejos sin tracking).
+                      const hasTracking = detail.order_items?.some(i => (i.quantity_delivered ?? 0) > 0)
+                      return detail.order_items?.map(item => {
+                        const qd = item.quantity_delivered ?? 0
+                        const notDelivered = hasTracking && qd === 0
+                        const partialItem = hasTracking && qd > 0 && qd < item.quantity
+                        return (
+                      <tr key={item.id} className={notDelivered ? 'opacity-50' : ''}>
                         <td className="px-3 py-2.5">
-                          <p className="font-medium text-[var(--text)]">{item.products?.name ?? item.product_name ?? '(producto eliminado)'}</p>
+                          <p className={cn('font-medium text-[var(--text)]', notDelivered && 'line-through')}>{item.products?.name ?? item.product_name ?? '(producto eliminado)'}</p>
                           {item.products?.barcode && <p className="text-[11px] text-[var(--text3)] mono">{item.products.barcode}</p>}
+                          {notDelivered && <p className="text-[11px] text-[var(--warning,var(--text3))] font-medium">No entregado · saldo a favor</p>}
+                          {partialItem && <p className="text-[11px] text-[var(--text3)] font-medium">Entregado {qd} de {item.quantity}</p>}
                         </td>
-                        <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">{item.quantity} {item.products?.unit ?? ''}</td>
+                        <td className={cn('px-3 py-2.5 text-right mono text-[var(--text2)]', notDelivered && 'line-through')}>{item.quantity} {item.products?.unit ?? ''}</td>
                         <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">{formatCurrency(item.unit_price)}</td>
-                        <td className="px-3 py-2.5 text-right mono font-semibold text-[var(--text)]">{formatCurrency(item.subtotal)}</td>
+                        <td className={cn('px-3 py-2.5 text-right mono font-semibold text-[var(--text)]', notDelivered && 'line-through')}>{formatCurrency(item.subtotal)}</td>
                       </tr>
-                    ))}
+                        )
+                      })
+                    })()}
                   </tbody>
                   <tfoot>
                     {detail.discount > 0 && (
@@ -2175,9 +2327,9 @@ function OrdersPageInner() {
                       onChange={e => setQcForm(f => ({ ...f, phone: e.target.value }))}
                       placeholder="11-1234-5678" />
                   </div>
-                  <Input label="Límite de crédito" type="number" min="0" step="1000"
+                  <MoneyInput label="Límite de crédito"
                     value={qcForm.credit_limit}
-                    onChange={e => setQcForm(f => ({ ...f, credit_limit: e.target.value }))}
+                    onChange={v => setQcForm(f => ({ ...f, credit_limit: v }))}
                     placeholder="0 = sin límite" hint="Podés modificarlo después desde Clientes" />
                   <div className="flex gap-2">
                     <Button variant="secondary" className="flex-1" onClick={() => setQuickCustomerModal(false)} disabled={qcSaving}>
@@ -2271,7 +2423,7 @@ function OrdersPageInner() {
           <div className={`grid gap-3 ${sellerWarehouseId ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
             {!sellerWarehouseId && (
               <Select label="Depósito"
-                options={warehouses.map(w => ({ value: w.id, label: w.name }))}
+                options={orderedWarehouses.map(w => ({ value: w.id, label: w.is_default ? `${w.name} (default)` : w.name }))}
                 value={warehouseId} onChange={e => { setWarehouseId(e.target.value); setCart([]); setProductResults([]) }} />
             )}
             {priceLists.length > 0 && (
@@ -2344,12 +2496,13 @@ function OrdersPageInner() {
             )}
           </div>
 
-          {/* Banner de stock insuficiente */}
+          {/* Backorder: aviso informativo, NO bloquea. Se puede tomar el pedido y
+              reponer contra el proveedor; se entrega cuando llega la mercadería. */}
           {cartStockIssues.length > 0 && (
-            <div className="flex items-start gap-2 px-3 py-2.5 bg-[var(--danger-subtle)] border border-[var(--danger)] rounded-[var(--radius-md)] text-xs text-[var(--danger)]">
+            <div className="flex items-start gap-2 px-3 py-2.5 bg-[var(--warning-subtle,var(--surface2))] border border-[var(--warning,var(--border))] rounded-[var(--radius-md)] text-xs text-[var(--text2)]">
               <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
               <span>
-                <strong>{cartStockIssues.length} producto(s)</strong> con stock insuficiente. Ajustá las cantidades antes de crear el pedido.
+                <strong>{cartStockIssues.length} producto(s)</strong> sin stock suficiente. Podés tomar el pedido igual: se entrega cuando repongas (el stock se descuenta al despachar).
               </span>
             </div>
           )}
@@ -2361,13 +2514,13 @@ function OrdersPageInner() {
                 {cart.map(item => {
                   const hasStockIssue = stockEnabled && item.quantity > (item.product.stock_current ?? 0)
                   return (
-                    <div key={item.product.id} className={`p-3 ${hasStockIssue ? 'bg-[var(--danger-subtle)]' : ''}`}>
+                    <div key={item.product.id} className="p-3">
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <div className="min-w-0">
                           <p className="font-medium text-[var(--text)] text-sm leading-tight">{item.product.name}</p>
                           {hasStockIssue && (
-                            <p className="text-xs text-[var(--danger)] font-medium mt-0.5">
-                              ⚠ Stock disponible: {item.product.stock_current ?? 0}
+                            <p className="text-xs text-[var(--text3)] font-medium mt-0.5">
+                              A reponer · stock actual: {item.product.stock_current ?? 0}
                             </p>
                           )}
                         </div>
@@ -2400,8 +2553,8 @@ function OrdersPageInner() {
                         {/* Precio unitario */}
                         <div className="flex items-center gap-1">
                           <span className="text-xs text-[var(--text3)]">$</span>
-                          <input type="number" min="0" step="0.01" value={item.unit_price}
-                            onChange={e => updateCartPrice(item.product.id, e.target.value)}
+                          <MoneyInput unstyled value={item.unit_price}
+                            onChange={v => updateCartPrice(item.product.id, v)}
                             className="w-24 h-7 text-sm mono text-right bg-[var(--surface)] border border-[var(--border)] rounded-md px-2 focus:outline-none focus:border-[var(--accent)]"
                           />
                         </div>
@@ -2446,56 +2599,55 @@ function OrdersPageInner() {
             onChange={e => setOrderNotes(e.target.value)}
             placeholder="Instrucciones de entrega, observaciones..." />
 
-          {/* ¿Ya cobró? */}
+          {/* ¿Cobrás ahora? (seña o total). Opcional: si no, nace a cuenta corriente. */}
           <div className="border border-[var(--border)] rounded-[var(--radius-md)] p-3 space-y-3">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={payAlreadyCollected}
-                onChange={e => setPayAlreadyCollected(e.target.checked)}
+              <input type="checkbox" checked={collectNow}
+                onChange={e => setCollectNow(e.target.checked)}
                 className="w-4 h-4 accent-[var(--accent)]" />
               <span className="text-sm font-medium text-[var(--text)]">
-                Ya cobré este pedido al cliente
+                Cobrar ahora (seña o total)
               </span>
             </label>
-            {payAlreadyCollected && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <Select label="Método de cobro"
-                  options={PAYMENT_METHODS}
-                  value={collectedMethod}
-                  onChange={e => setCollectedMethod(e.target.value as PaymentMethod)} />
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label htmlFor="monto-cobrado-pedido" className="text-sm font-medium text-[var(--text2)]">
-                      Monto cobrado
-                    </label>
-                    <button type="button"
-                      onClick={() => setCollectedAmount(String(Math.round(cartTotal * 100) / 100))}
-                      className="text-xs font-medium text-[var(--accent)] hover:underline">
-                      Total: {formatCurrency(cartTotal)}
-                    </button>
+            {collectNow && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <Select label="Método de cobro"
+                    options={PAYMENT_METHODS}
+                    value={collectNowMethod}
+                    onChange={e => setCollectNowMethod(e.target.value as PaymentMethod)} />
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label htmlFor="monto-cobrado-pedido" className="text-sm font-medium text-[var(--text2)]">
+                        Monto cobrado
+                      </label>
+                      <button type="button"
+                        onClick={() => setCollectNowAmount(String(Math.round(cartTotal * 100) / 100))}
+                        className="text-xs font-medium text-[var(--accent)] hover:underline">
+                        Total: {formatCurrency(cartTotal)}
+                      </button>
+                    </div>
+                    <MoneyInput id="monto-cobrado-pedido"
+                      value={collectNowAmount} placeholder={String(Math.round(cartTotal * 100) / 100)}
+                      onChange={v => setCollectNowAmount(v)} />
                   </div>
-                  <Input id="monto-cobrado-pedido" type="number" min="0"
-                    value={collectedAmount} placeholder={String(Math.round(cartTotal * 100) / 100)}
-                    onChange={e => setCollectedAmount(e.target.value)} />
                 </div>
-              </div>
+                <CashRegisterPicker
+                  registers={allRegisters}
+                  branchId={collectBranchId}
+                  registerId={collectRegisterId}
+                  onBranchChange={handleCollectBranchChange}
+                  onRegisterChange={setCollectRegisterId}
+                />
+              </>
             )}
           </div>
 
-          {/* Modo retiro (corralón): deuda a cuenta corriente + retiros en varias veces */}
-          <div className="border border-[var(--border)] rounded-[var(--radius-md)] p-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={pickupMode}
-                onChange={e => setPickupMode(e.target.checked)}
-                className="w-4 h-4 accent-[var(--accent)]" />
-              <span className="text-sm font-medium text-[var(--text)]">
-                Modo retiro (retira en varias veces)
-              </span>
-            </label>
-            {pickupMode && (
-              <p className="mt-2 text-[11px] text-[var(--text3)]">
-                La deuda se carga a la cuenta corriente del cliente al crear el pedido. Puede ir retirando la mercadería en varias veces y pagar cuando quiera (parcial o total).
-              </p>
-            )}
+          {/* Modelo unificado: la venta se genera al crear y se carga a la cuenta
+              corriente; el resto del cobro se registra después con "Registrar pago". */}
+          <div className="flex items-start gap-2 px-3 py-2.5 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] text-[11px] text-[var(--text3)]">
+            <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+            <span>Si no cobrás ahora, la venta se carga a la cuenta corriente y podés cobrar después con <span className="font-medium text-[var(--text2)]">Registrar pago</span>. Podés entregar por partes; lo que no entregues genera un saldo a favor al cerrar.</span>
           </div>
 
               <div className="sticky bottom-0 -mx-4 sm:-mx-5 px-4 sm:px-5 bg-[var(--surface)] pt-3 pb-4 mt-2 border-t border-[var(--border)]">
@@ -2514,18 +2666,35 @@ function OrdersPageInner() {
         )}
       </div>
 
-      {/* ── Modal confirmar entrega ── */}
+      {/* ── Modal confirmar entrega / cerrar corto ── */}
       <Modal open={deliverModal} onClose={() => { setDeliverModal(false); setDeliverOrderId(null) }}
-        title="Confirmar entrega" size="sm">
+        title={deliverMode === 'short' ? 'Cerrar entrega' : 'Confirmar entrega'} size="sm">
         {(() => {
-          const total = Number(detail?.total ?? 0)
+          const isShort = deliverMode === 'short'
+          // Cerrar corto factura solo lo entregado: recalculamos ese total
+          // (mismo prorrateo que el backend) para mostrar el saldo correcto.
+          const deliveredTotal = (() => {
+            const items = detail?.order_items ?? []
+            const partialSubtotal = items.reduce((a, i) => {
+              const qd = i.quantity_delivered ?? 0
+              if (qd <= 0) return a
+              const lineDisc = Math.round((Number(i.discount) * qd / i.quantity) * 100) / 100
+              return a + (i.unit_price * qd - lineDisc)
+            }, 0)
+            const orderSub = Number(detail?.subtotal ?? 0)
+            const proratedDisc = orderSub > 0 ? Math.round((Number(detail?.discount ?? 0) * partialSubtotal / orderSub) * 100) / 100 : 0
+            return Math.max(0, partialSubtotal - proratedDisc)
+          })()
+          const total = isShort ? deliveredTotal : Number(detail?.total ?? 0)
           const alreadyPaid = Number(detail?.paid_amount ?? 0)
           const pendingToCollect = Math.max(0, total - alreadyPaid)
           const fullyPaid = alreadyPaid > 0 && pendingToCollect <= 0
           return (
         <div className="space-y-4">
           <div className="px-3 py-2.5 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)] text-xs text-[var(--accent)]">
-            Se generará una venta automáticamente al confirmar la entrega.
+            {isShort
+              ? `Se cierra el pedido con lo entregado (${formatCurrency(deliveredTotal)}). Lo no entregado (${formatCurrency(Math.max(0, Number(detail?.total ?? 0) - deliveredTotal))}) se acredita como saldo a favor del cliente.`
+              : 'Se entrega lo que falta y se cierra el pedido. La venta ya está registrada desde que se creó.'}
           </div>
           {alreadyPaid > 0 && (
             <div className="px-3 py-2 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] text-xs text-[var(--text2)]">
@@ -2556,10 +2725,19 @@ function OrdersPageInner() {
                     </button>
                   )}
                 </div>
-                <Input id="monto-cobrado" type="number" min="0" max={pendingToCollect || undefined}
+                <MoneyInput id="monto-cobrado"
                   value={deliverAmount} placeholder="0 si no cobró en la entrega"
-                  onChange={e => setDeliverAmount(e.target.value)} />
+                  onChange={v => setDeliverAmount(v)} />
               </div>
+              {deliverMethod !== 'cuenta_corriente' && (Number(deliverAmount) || 0) > 0 && (
+                <CashRegisterPicker
+                  registers={allRegisters}
+                  branchId={collectBranchId}
+                  registerId={collectRegisterId}
+                  onBranchChange={handleCollectBranchChange}
+                  onRegisterChange={setCollectRegisterId}
+                />
+              )}
             </>
           )}
           <Input label="Notas de entrega" value={deliverNotes}
@@ -2570,8 +2748,8 @@ function OrdersPageInner() {
               <Button variant="secondary" onClick={() => { setDeliverModal(false); setDeliverOrderId(null) }} disabled={delivering}>
                 Cancelar
               </Button>
-              <Button onClick={handleDeliver} loading={delivering}>
-                Confirmar entrega
+              <Button onClick={isShort ? handleCloseShort : handleDeliver} loading={delivering}>
+                {isShort ? 'Cerrar pedido' : 'Confirmar entrega'}
               </Button>
             </div>
           </div>
@@ -2580,8 +2758,10 @@ function OrdersPageInner() {
         })()}
       </Modal>
 
-      {/* ── Modal registrar retiro parcial (modo retiro) ── */}
+      {/* ── Modal registrar retiro/despacho parcial ── */}
       {(() => {
+        const isPickup = detail?.pickup_mode ?? false
+        const noun = isPickup ? 'retiro' : 'despacho'
         const allItems = detail?.order_items ?? []
         const pendingItems = allItems.filter(i => (i.quantity - (i.quantity_delivered ?? 0)) > 0)
         const deliveredItems = allItems.filter(i => (i.quantity - (i.quantity_delivered ?? 0)) <= 0)
@@ -2596,7 +2776,7 @@ function OrdersPageInner() {
 
         return (
       <Modal open={withdrawModal} onClose={() => { setWithdrawModal(false); setWithdrawOrderId(null) }}
-        title="Registrar retiro" size="sm"
+        title={isPickup ? 'Registrar retiro' : 'Registrar despacho'} size="sm"
         footer={
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3 min-h-[20px]">
@@ -2615,7 +2795,7 @@ function OrdersPageInner() {
             {withdrawShowNote && (
               <Input value={withdrawNotes} autoFocus
                 onChange={e => setWithdrawNotes(e.target.value)}
-                placeholder="Observaciones del retiro (opcional)" />
+                placeholder={`Observaciones del ${noun} (opcional)`} />
             )}
             <div className="flex gap-2">
               <Button variant="secondary" className="flex-1" onClick={() => { setWithdrawModal(false); setWithdrawOrderId(null) }} disabled={withdrawing}>
@@ -2640,19 +2820,19 @@ function OrdersPageInner() {
           {/* Encabezado: conteo + retirar todo */}
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] uppercase tracking-wide text-[var(--text3)] font-medium">
-              {pendingItems.length} pendiente{pendingItems.length !== 1 ? 's' : ''} de retiro
+              {pendingItems.length} pendiente{pendingItems.length !== 1 ? 's' : ''} de {noun}
             </span>
             {totalPending > 0 && (
               <button type="button" onClick={() => allFilled ? setWithdrawQty({}) : fillAllPending()}
                 className="text-xs font-medium text-[var(--accent)] hover:underline">
-                {allFilled ? 'Limpiar todo' : 'Retirar todo'}
+                {allFilled ? 'Limpiar todo' : (isPickup ? 'Retirar todo' : 'Despachar todo')}
               </button>
             )}
           </div>
 
           {/* Lista de pendientes */}
           {pendingItems.length === 0 ? (
-            <p className="py-6 text-center text-sm text-[var(--text3)]">No hay productos pendientes de retiro.</p>
+            <p className="py-6 text-center text-sm text-[var(--text3)]">No hay productos pendientes de {noun}.</p>
           ) : visiblePending.length === 0 ? (
             <p className="py-6 text-center text-sm text-[var(--text3)]">Sin resultados para «{withdrawSearch}».</p>
           ) : (
@@ -2697,7 +2877,7 @@ function OrdersPageInner() {
               <button type="button" onClick={() => setWithdrawShowDelivered(v => !v)}
                 className="flex items-center gap-1.5 text-xs font-medium text-[var(--text3)] hover:text-[var(--text2)] transition-colors">
                 <ChevronRight size={14} className={cn('transition-transform', withdrawShowDelivered && 'rotate-90')} />
-                {deliveredItems.length} producto{deliveredItems.length !== 1 ? 's' : ''} ya retirado{deliveredItems.length !== 1 ? 's' : ''}
+                {deliveredItems.length} producto{deliveredItems.length !== 1 ? 's' : ''} ya {isPickup ? 'retirado' : 'despachado'}{deliveredItems.length !== 1 ? 's' : ''}
               </button>
               {withdrawShowDelivered && (
                 <div className="mt-1.5 space-y-1">
@@ -2736,10 +2916,19 @@ function OrdersPageInner() {
                 </button>
               )}
             </div>
-            <Input type="number" min="0"
-              value={paymentAmount} placeholder="0.00"
-              onChange={e => setPaymentAmount(e.target.value)} />
+            <MoneyInput
+              value={paymentAmount} placeholder="0"
+              onChange={v => setPaymentAmount(v)} />
           </div>
+          {paymentMethod !== 'cuenta_corriente' && (Number(paymentAmount) || 0) > 0 && (
+            <CashRegisterPicker
+              registers={allRegisters}
+              branchId={collectBranchId}
+              registerId={collectRegisterId}
+              onBranchChange={handleCollectBranchChange}
+              onRegisterChange={setCollectRegisterId}
+            />
+          )}
           <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
             <div className="flex justify-end gap-2">
               <Button variant="secondary" onClick={() => { setPaymentModal(false); setPaymentOrderId(null); setPaymentOrderPending(0) }} disabled={registeringPayment}>

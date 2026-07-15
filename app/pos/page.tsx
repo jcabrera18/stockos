@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/Button'
 import { evaluatePromo, type Promotion } from '@/lib/promoUtils'
 import { Modal } from '@/components/ui/Modal'
 import { Drawer } from '@/components/ui/Drawer'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { usePOSSync } from '@/hooks/usePOSSync'
 import {
   resolveBarcode,
@@ -1802,10 +1803,11 @@ export default function POSPage() {
 
                   {/* Unit price — editable inline */}
                   <div className="w-[84px] flex-shrink-0" onClick={e => e.stopPropagation()}>
-                    <input
+                    <MoneyInput
+                      unstyled
                       ref={el => { priceInputRefs.current[item.product.id] = el }}
-                      type="number" min="0" step="0.01" value={item.unit_price}
-                      onChange={e => updateItemPrice(item.product.id, e.target.value)}
+                      value={item.unit_price}
+                      onChange={v => updateItemPrice(item.product.id, v)}
                       onFocus={e => { e.target.select(); setFocusedCartIndex(index) }}
                       onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); searchRef.current?.focus() } }}
                       className={`w-full text-sm mono text-right bg-transparent border-b-2 px-1 py-0.5 focus:outline-none transition-colors rounded-t ${
@@ -1927,8 +1929,8 @@ export default function POSPage() {
               {shippingEnabled && (
                 <div className="flex items-center gap-1">
                   <span className="text-sm text-[var(--text3)]">$</span>
-                  <input type="number" min="0" step="0.01" value={shippingAmount || ''} placeholder="0"
-                    onChange={e => setShippingAmount(Math.max(0, Number(e.target.value) || 0))}
+                  <MoneyInput unstyled value={shippingAmount || ''} placeholder="0"
+                    onChange={v => setShippingAmount(Math.max(0, Number(v) || 0))}
                     onFocus={e => e.target.select()}
                     className="w-24 text-sm mono text-right bg-[var(--surface2)] border border-[var(--accent)] rounded px-2 py-1.5 focus:outline-none focus:border-[var(--accent)]" />
                 </div>
@@ -2098,9 +2100,9 @@ export default function POSPage() {
                         {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                       </select>
 
-                      <input type="number" min="0" step="0.01" value={col.amount || ''}
+                      <MoneyInput unstyled value={col.amount || ''}
                         onFocus={e => e.target.select()}
-                        onChange={e => setSplitColumn(i, { amount: Math.max(0, Number(e.target.value) || 0) })}
+                        onChange={v => setSplitColumn(i, { amount: Math.max(0, Number(v) || 0) })}
                         onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (!processing && canMainAction) handleMainAction() } }}
                         placeholder="0"
                         className="w-full px-2.5 py-2 text-xl mono font-bold rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
@@ -2116,8 +2118,8 @@ export default function POSPage() {
                       {col.method === 'efectivo' && (col.amount || 0) > 0 && (
                         <div className="space-y-1.5 pt-1.5 border-t border-[var(--border)]">
                           <label className="text-[10px] font-medium text-[var(--text3)]">Paga con (para el vuelto)</label>
-                          <input type="number" min={col.amount} step="1" value={col.received || ''}
-                            onChange={e => setSplitColumn(i, { received: Number(e.target.value) || 0 })}
+                          <MoneyInput unstyled value={col.received || ''}
+                            onChange={v => setSplitColumn(i, { received: Number(v) || 0 })}
                             placeholder={String(Math.ceil(col.amount))}
                             className={`w-full px-2.5 py-1.5 text-sm mono rounded-[var(--radius-md)] bg-[var(--surface)] border text-[var(--text)] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${colRecvBad ? 'border-[var(--danger)]' : 'border-[var(--border)] focus:border-[var(--accent)]'}`} />
                           {colChange > 0 && <p className="text-[11px] font-medium text-[var(--accent)]">Vuelto {formatCurrency(colChange)}</p>}
@@ -2225,12 +2227,12 @@ export default function POSPage() {
                         </button>
                       )}
                     </div>
-                    <input
+                    <MoneyInput
+                      unstyled
                       ref={draftAmountRef}
-                      type="number" min="0" step="0.01"
                       value={draft.amount || ''}
                       onFocus={() => setSelectedApplied(null)}
-                      onChange={e => setDraftAmount(e.target.value)}
+                      onChange={v => setDraftAmount(v)}
                       onKeyDown={handleDraftAmountKeyDown}
                       className={`w-full px-3 py-2.5 text-2xl mono font-bold rounded-[var(--radius-md)] bg-[var(--surface2)] border text-[var(--text)] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none
                         ${exceedsRemaining ? 'border-[var(--danger)] focus:border-[var(--danger)]' : 'border-[var(--border)] focus:border-[var(--accent)]'}`}
@@ -2304,11 +2306,11 @@ export default function POSPage() {
                           <label className="text-xs font-medium text-[var(--text3)]">Paga con</label>
                           <kbd className="text-[9px] font-mono bg-[var(--surface3)] border border-[var(--border)] px-1 py-0.5 rounded text-[var(--text3)]">V</kbd>
                         </div>
-                        <input
+                        <MoneyInput
+                          unstyled
                           ref={draftReceivedRef}
-                          type="number" min={draftAmount} step="1"
                           value={draft.received || ''}
-                          onChange={e => setDraftReceived(Number(e.target.value))}
+                          onChange={v => setDraftReceived(Number(v))}
                           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (!processing) handleMainAction() } }}
                           placeholder={String(Math.ceil(draftAmount))}
                           className={`w-full px-3 py-2 text-base mono rounded-[var(--radius-md)] bg-[var(--surface2)] border text-[var(--text)] focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none

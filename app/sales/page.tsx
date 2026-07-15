@@ -4,6 +4,7 @@ import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -248,12 +249,11 @@ export default function SalesPage() {
           {/* Monto mínimo */}
           <div className="flex items-center gap-1">
             <span className="text-xs text-[var(--text3)]">Desde $</span>
-            <input
-              type="number"
-              min="0"
+            <MoneyInput
+              unstyled
               placeholder="0"
               value={minAmount}
-              onChange={e => setMinAmount(e.target.value)}
+              onChange={v => setMinAmount(v)}
               className="w-24 text-xs px-2 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
@@ -261,12 +261,11 @@ export default function SalesPage() {
           {/* Monto máximo */}
           <div className="flex items-center gap-1">
             <span className="text-xs text-[var(--text3)]">Hasta $</span>
-            <input
-              type="number"
-              min="0"
+            <MoneyInput
+              unstyled
               placeholder="∞"
               value={maxAmount}
-              onChange={e => setMaxAmount(e.target.value)}
+              onChange={v => setMaxAmount(v)}
               className="w-24 text-xs px-2 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>

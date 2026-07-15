@@ -33,7 +33,9 @@ export async function middleware(request: NextRequest) {
     pathname === '/forgot-password' ||
     pathname === '/reset-password' ||
     pathname === '/home' ||
-    pathname.startsWith('/home/')
+    pathname.startsWith('/home/') ||
+    // Catálogo público compartible — accesible sin login
+    pathname.startsWith('/c/')
   ) return response
 
   try {

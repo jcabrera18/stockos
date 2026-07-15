@@ -6,6 +6,7 @@ import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Button } from '@/components/ui/Button'
 import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
@@ -323,7 +324,7 @@ export default function SettingsPage() {
         role:           newUser.role,
         business_id:    user.business_id,
         branch_id:      branchId,
-        warehouse_id:   isSeller ? newUser.warehouse_id : undefined,
+        warehouse_id:   newUser.warehouse_id || null,
         commission_pct: commissionPct,
       })
 
@@ -380,7 +381,7 @@ export default function SettingsPage() {
     try {
       await api.patch(`/api/auth/users/${editingUser.id}`, {
         branch_id:      editForm.branch_id,
-        warehouse_id:   isSeller ? editForm.warehouse_id : null,
+        warehouse_id:   editForm.warehouse_id || null,
         commission_pct: isSeller ? parsedCommission : null,
       })
       toast.success('Usuario actualizado')
@@ -609,12 +610,9 @@ export default function SettingsPage() {
                   <p className="text-xs text-[var(--text3)] mb-1">Precio de envío por defecto</p>
                   <p className="text-xs text-[var(--text3)] mb-2">Se pre-carga al activar el envío en el POS</p>
                   <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
+                    <MoneyInput
                       value={shippingDefault}
-                      onChange={e => setShippingDefault(e.target.value)}
+                      onChange={v => setShippingDefault(v)}
                       placeholder="0"
                       className="max-w-[140px]"
                     />
@@ -868,7 +866,7 @@ export default function SettingsPage() {
                       </p>
                     )}
                   </div>
-                  <div className={newUser.role === 'seller' ? '' : 'col-span-2'}>
+                  <div>
                     <p className="text-xs text-[var(--text3)] mb-1">Sucursal</p>
                     <Select
                       options={branches.map(branch => ({ value: branch.id, label: branch.name }))}
@@ -877,17 +875,17 @@ export default function SettingsPage() {
                       placeholder="Seleccionar sucursal"
                     />
                   </div>
-                  {newUser.role === 'seller' && (
-                    <div>
-                      <p className="text-xs text-[var(--text3)] mb-1">Depósito</p>
-                      <Select
-                        options={warehouses.map(w => ({ value: w.id, label: w.name }))}
-                        value={newUser.warehouse_id}
-                        onChange={e => setNewUser(prev => ({ ...prev, warehouse_id: e.target.value }))}
-                        placeholder="Seleccionar depósito"
-                      />
-                    </div>
-                  )}
+                  <div>
+                    <p className="text-xs text-[var(--text3)] mb-1">
+                      Depósito por default {newUser.role !== 'seller' && <span className="text-[var(--text3)] opacity-70">(opcional)</span>}
+                    </p>
+                    <Select
+                      options={warehouses.map(w => ({ value: w.id, label: w.name }))}
+                      value={newUser.warehouse_id}
+                      onChange={e => setNewUser(prev => ({ ...prev, warehouse_id: e.target.value }))}
+                      placeholder="Seleccionar depósito"
+                    />
+                  </div>
                   {newUser.role === 'seller' && (
                     <div>
                       <p className="text-xs text-[var(--text3)] mb-1">Comisión (%)</p>
@@ -993,17 +991,17 @@ export default function SettingsPage() {
             />
           </div>
 
-          {editingUser?.role === 'seller' && (
-            <div>
-              <p className="text-xs text-[var(--text3)] mb-1">Depósito</p>
-              <Select
-                options={warehouses.map(w => ({ value: w.id, label: w.name }))}
-                value={editForm.warehouse_id}
-                onChange={e => setEditForm(prev => ({ ...prev, warehouse_id: e.target.value }))}
-                placeholder="Seleccionar depósito"
-              />
-            </div>
-          )}
+          <div>
+            <p className="text-xs text-[var(--text3)] mb-1">
+              Depósito por default {editingUser?.role !== 'seller' && <span className="text-[var(--text3)] opacity-70">(opcional)</span>}
+            </p>
+            <Select
+              options={warehouses.map(w => ({ value: w.id, label: w.name }))}
+              value={editForm.warehouse_id}
+              onChange={e => setEditForm(prev => ({ ...prev, warehouse_id: e.target.value }))}
+              placeholder="Seleccionar depósito"
+            />
+          </div>
 
           {editingUser?.role === 'seller' && (
             <div>

@@ -7,6 +7,7 @@ import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Select } from '@/components/ui/Select'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -22,9 +23,20 @@ import {
   AlertCircle, Printer, RefreshCw, Clock, ShoppingCart, Copy,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { useWorkstation } from '@/hooks/useWorkstation'
 import { usePOSSync } from '@/hooks/usePOSSync'
+import { CashRegisterPicker, type RegisterWithBranch } from '@/components/modules/CashRegisterPicker'
+
+const CONVERT_PAYMENT_METHODS = [
+  { value: 'efectivo', label: 'Efectivo' },
+  { value: 'transferencia', label: 'Transferencia' },
+  { value: 'debito', label: 'Débito' },
+  { value: 'credito', label: 'Crédito' },
+  { value: 'qr', label: 'QR' },
+]
 import { useCollapseSidebar } from '@/contexts/SidePanelContext'
 import { searchProductsLocal, searchCustomersLocal } from '@/lib/pos-cache'
+import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
 import { makeOptimisticState, reconcileList, clearOptimisticState } from '@/lib/optimistic-reconcile'
 import { toast } from 'sonner'
 
@@ -102,6 +114,7 @@ const formatDate = (iso?: string | null) =>
 export default function QuotesPage() {
   const router = useRouter()
   const { user: authUser } = useAuth()
+  const { workstation } = useWorkstation()
   const { cacheReady, syncing: cacheSyncing, forceSync } = usePOSSync(null)
 
   // Lista
@@ -126,6 +139,12 @@ export default function QuotesPage() {
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
   const priceOverridesRef = useRef<Map<string, Map<string, number>>>(new Map())
+  // Depósito del usuario primero en el dropdown (el que usa siempre).
+  const preferredWarehouseId = authUser?.warehouse_id ?? null
+  const orderedWarehouses = [...warehouses].sort((a, b) => {
+    const rank = (w: Warehouse) => w.id === preferredWarehouseId ? 0 : w.is_default ? 1 : 2
+    return rank(a) - rank(b) || a.name.localeCompare(b.name)
+  })
 
   // Form
   const [customerName, setCustomerName] = useState('')
@@ -158,15 +177,53 @@ export default function QuotesPage() {
   const [convertCustomerName, setConvertCustomerName] = useState('')
   const [convertCustomerQuery, setConvertCustomerQuery] = useState('')
   const [convertCustomerResults, setConvertCustomerResults] = useState<{ id: string; full_name: string; phone?: string }[]>([])
+  const [convertCustomerHighlight, setConvertCustomerHighlight] = useState(0)
+  const [convertQuickCustomerOpen, setConvertQuickCustomerOpen] = useState(false)
   const [convertWarehouseId, setConvertWarehouseId] = useState('')
-  const [convertPickupMode, setConvertPickupMode] = useState(false)
   const [converting, setConverting] = useState(false)
+  // Cobro opcional al convertir (seña o total) + selector de caja.
+  const [convertCollectNow, setConvertCollectNow] = useState(false)
+  const [convertCollectMethod, setConvertCollectMethod] = useState('efectivo')
+  const [convertCollectAmount, setConvertCollectAmount] = useState('')
+  const [allRegisters, setAllRegisters] = useState<RegisterWithBranch[]>([])
+  const [collectBranchId, setCollectBranchId] = useState<string | null>(null)
+  const [collectRegisterId, setCollectRegisterId] = useState<string | null>(null)
+  const collectDefaultsSet = useRef(false)
 
   const statusFilterRef = useRef(statusFilter)
   const searchRef = useRef(search)
   const pageRef = useRef(page)
   useEffect(() => { statusFilterRef.current = statusFilter }, [statusFilter])
   useEffect(() => { searchRef.current = search }, [search])
+
+  // Cajas del negocio para el selector de cobro al convertir.
+  useEffect(() => {
+    api.get<RegisterWithBranch[]>('/api/branches/all-registers')
+      .then(regs => setAllRegisters(regs ?? []))
+      .catch(() => {})
+  }, [])
+
+  // Precarga sucursal/caja con el workstation del usuario logueado (una sola vez).
+  useEffect(() => {
+    if (collectDefaultsSet.current || allRegisters.length === 0) return
+    collectDefaultsSet.current = true
+    const branchIds = new Set(allRegisters.map(r => r.branches?.id).filter(Boolean))
+    const defBranch = (workstation?.branch_id && branchIds.has(workstation.branch_id))
+      ? workstation.branch_id
+      : allRegisters.find(r => r.is_open)?.branches?.id
+      ?? allRegisters[0]?.branches?.id ?? null
+    setCollectBranchId(defBranch)
+    const wsReg = allRegisters.find(r => r.id === workstation?.register_id)
+    setCollectRegisterId(wsReg?.is_open ? wsReg.id : null)
+  }, [allRegisters, workstation?.branch_id, workstation?.register_id])
+
+  const handleCollectBranchChange = useCallback((bid: string | null) => {
+    setCollectBranchId(bid)
+    setCollectRegisterId(prev => {
+      const reg = allRegisters.find(r => r.id === prev)
+      return reg && reg.branches?.id === bid ? prev : null
+    })
+  }, [allRegisters])
 
   // Estado optimista que el replica del server puede no reflejar aún (lag
   // read-after-write). El re-fetch lo reconcilia en vez de pisarlo.
@@ -331,6 +388,7 @@ export default function QuotesPage() {
     }, 180)
     return () => clearTimeout(timer)
   }, [convertCustomerQuery, convertCustomerId])
+  useEffect(() => { setConvertCustomerHighlight(0) }, [convertCustomerResults])
 
   const openDetail = async (id: string) => {
     setNewQuoteModal(false)
@@ -508,9 +566,11 @@ export default function QuotesPage() {
     setConvertCustomerName(detail.customer_id ? detail.customer_name : '')
     setConvertCustomerQuery('')
     setConvertCustomerResults([])
+    // Preferir el depósito del usuario (asignado al crearlo); si no, el default.
+    const preferred = warehouses.find(w => w.id === (authUser?.warehouse_id ?? ''))
     const defWh = warehouses.find(w => w.is_default)
-    setConvertWarehouseId(defWh?.id ?? warehouses[0]?.id ?? '')
-    setConvertPickupMode(false)
+    setConvertWarehouseId(preferred?.id ?? defWh?.id ?? warehouses[0]?.id ?? '')
+    setConvertCollectNow(false); setConvertCollectMethod('efectivo'); setConvertCollectAmount('')
     setConvertModal(true)
   }
 
@@ -518,11 +578,17 @@ export default function QuotesPage() {
     if (!detail) return
     if (!convertCustomerId) { toast.error('Seleccioná un cliente registrado para el pedido'); return }
     setConverting(true)
+    const quoteTotal = Number(detail.total) || 0
+    const collectingNow = convertCollectNow && convertCollectMethod !== 'cuenta_corriente'
+      && (Number(convertCollectAmount) || quoteTotal) > 0
     try {
       const res = await api.post<{ order_id: string }>(`/api/quotes/${detail.id}/convert`, {
         customer_id: convertCustomerId,
         warehouse_id: convertWarehouseId || null,
-        pickup_mode: convertPickupMode,
+        branch_id: collectBranchId,
+        register_id: collectRegisterId,
+        payment_method: collectingNow ? convertCollectMethod : null,
+        paid_amount: collectingNow ? Number(convertCollectAmount) || quoteTotal : 0,
       })
       toast.success('Presupuesto convertido en pedido')
       setConvertModal(false)
@@ -660,6 +726,31 @@ export default function QuotesPage() {
       if (c) selectCustomer(c)
     } else if (e.key === 'Escape') {
       setCustomerResults([])
+    }
+  }
+
+  // Selección de cliente en el modal de conversión (click / Enter / recién creado)
+  const selectConvertCustomer = (c: { id: string; full_name: string; phone?: string }) => {
+    setConvertCustomerId(c.id)
+    setConvertCustomerName(c.full_name)
+    setConvertCustomerQuery('')
+    setConvertCustomerResults([])
+  }
+  // Navegación con teclado del dropdown de clientes del modal de conversión
+  const handleConvertCustomerKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (convertCustomerResults.length === 0) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setConvertCustomerHighlight(h => Math.min(h + 1, convertCustomerResults.length - 1))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setConvertCustomerHighlight(h => Math.max(h - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const c = convertCustomerResults[convertCustomerHighlight]
+      if (c) selectConvertCustomer(c)
+    } else if (e.key === 'Escape') {
+      setConvertCustomerResults([])
     }
   }
 
@@ -1126,8 +1217,8 @@ export default function QuotesPage() {
                           </div>
                           <div className="flex items-center gap-1">
                             <span className="text-xs text-[var(--text3)]">$</span>
-                            <input type="number" min="0" step="0.01" value={item.unit_price}
-                              onChange={e => updateCartPrice(item.product.id, e.target.value)}
+                            <MoneyInput unstyled value={item.unit_price}
+                              onChange={v => updateCartPrice(item.product.id, v)}
                               className="w-24 h-7 text-sm mono text-right bg-[var(--surface)] border border-[var(--border)] rounded-md px-2 focus:outline-none focus:border-[var(--accent)]"
                             />
                           </div>
@@ -1180,7 +1271,7 @@ export default function QuotesPage() {
       </div>
 
       {/* ── Modal conversión a pedido ── */}
-      <Modal open={convertModal} onClose={() => setConvertModal(false)} title="Convertir en pedido" size="sm">
+      <Modal open={convertModal} onClose={() => setConvertModal(false)} title="Convertir en pedido" size="md">
         <div className="space-y-4">
           <div className="px-3 py-2.5 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)] text-xs text-[var(--accent)]">
             Se creará un pedido con los precios de este presupuesto. Si tenés stock habilitado, se descontará del depósito elegido.
@@ -1207,17 +1298,26 @@ export default function QuotesPage() {
                 <input
                   value={convertCustomerQuery}
                   onChange={e => setConvertCustomerQuery(e.target.value)}
+                  onKeyDown={handleConvertCustomerKeyDown}
                   placeholder="Buscar cliente..."
                   className="w-full pl-9 pr-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
                 />
               </div>
-              <p className="text-[11px] text-[var(--text3)] mt-1">El pedido requiere un cliente registrado. Creá uno desde Clientes si no existe.</p>
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-[11px] text-[var(--text3)]">El pedido requiere un cliente registrado.</p>
+                <button
+                  onClick={() => setConvertQuickCustomerOpen(true)}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-[var(--accent)] hover:underline">
+                  <Plus size={12} /> Nuevo cliente
+                </button>
+              </div>
               {convertCustomerResults.length > 0 && (
                 <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-20 overflow-hidden max-h-52 overflow-y-auto">
-                  {convertCustomerResults.map(c => (
+                  {convertCustomerResults.map((c, idx) => (
                     <button key={c.id}
-                      onClick={() => { setConvertCustomerId(c.id); setConvertCustomerName(c.full_name); setConvertCustomerQuery(''); setConvertCustomerResults([]) }}
-                      className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
+                      onClick={() => selectConvertCustomer(c)}
+                      onMouseEnter={() => setConvertCustomerHighlight(idx)}
+                      className={`w-full flex items-center justify-between px-3 py-2.5 transition-colors text-left border-b border-[var(--border)] last:border-0 ${convertCustomerHighlight === idx ? 'bg-[var(--surface2)]' : ''}`}>
                       <p className="text-sm font-medium text-[var(--text)]">{c.full_name}</p>
                       {c.phone && <p className="text-xs text-[var(--text3)]">{c.phone}</p>}
                     </button>
@@ -1229,24 +1329,49 @@ export default function QuotesPage() {
 
           {warehouses.length > 0 && (
             <Select label="Depósito"
-              options={warehouses.map(w => ({ value: w.id, label: w.name }))}
+              options={orderedWarehouses.map(w => ({ value: w.id, label: w.is_default ? `${w.name} (default)` : w.name }))}
               value={convertWarehouseId} onChange={e => setConvertWarehouseId(e.target.value)} />
           )}
 
-          {/* Modo retiro (corralón): deuda a cuenta corriente + retiros en varias veces */}
-          <div className="border border-[var(--border)] rounded-[var(--radius-md)] p-3">
+          {/* ¿Cobrás ahora? (seña o total). Opcional: si no, nace a cuenta corriente. */}
+          <div className="border border-[var(--border)] rounded-[var(--radius-md)] p-3 space-y-3">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={convertPickupMode}
-                onChange={e => setConvertPickupMode(e.target.checked)}
+              <input type="checkbox" checked={convertCollectNow}
+                onChange={e => setConvertCollectNow(e.target.checked)}
                 className="w-4 h-4 accent-[var(--accent)]" />
-              <span className="text-sm font-medium text-[var(--text)]">
-                Modo retiro (retira en varias veces)
-              </span>
+              <span className="text-sm font-medium text-[var(--text)]">Cobrar ahora (seña o total)</span>
             </label>
-            {convertPickupMode && (
-              <p className="mt-2 text-[11px] text-[var(--text3)]">
-                La deuda se carga a la cuenta corriente del cliente al crear el pedido. Puede ir retirando la mercadería en varias veces y pagar cuando quiera (parcial o total).
-              </p>
+            {convertCollectNow && (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <Select label="Método de cobro"
+                    options={CONVERT_PAYMENT_METHODS}
+                    value={convertCollectMethod}
+                    onChange={e => setConvertCollectMethod(e.target.value)} />
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label htmlFor="monto-cobrado-quote" className="text-sm font-medium text-[var(--text2)]">Monto cobrado</label>
+                      {!!detail?.total && (
+                        <button type="button"
+                          onClick={() => setConvertCollectAmount(String(Math.round(Number(detail.total) * 100) / 100))}
+                          className="text-xs font-medium text-[var(--accent)] hover:underline">
+                          Total: {formatCurrency(Number(detail.total))}
+                        </button>
+                      )}
+                    </div>
+                    <MoneyInput id="monto-cobrado-quote"
+                      value={convertCollectAmount} placeholder={String(Math.round((Number(detail?.total) || 0) * 100) / 100)}
+                      onChange={v => setConvertCollectAmount(v)} />
+                  </div>
+                </div>
+                <CashRegisterPicker
+                  registers={allRegisters}
+                  branchId={collectBranchId}
+                  registerId={collectRegisterId}
+                  onBranchChange={handleCollectBranchChange}
+                  onRegisterChange={setCollectRegisterId}
+                />
+              </>
             )}
           </div>
 
@@ -1262,6 +1387,14 @@ export default function QuotesPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Alta rápida de cliente desde el modal de conversión */}
+      <QuickCustomerModal
+        open={convertQuickCustomerOpen}
+        onClose={() => setConvertQuickCustomerOpen(false)}
+        initialName={convertCustomerQuery.trim()}
+        onCreated={(c) => selectConvertCustomer({ id: c.id, full_name: c.full_name, phone: c.phone ?? undefined })}
+      />
 
       {/* ── Confirmación anulación ── */}
       {cancelConfirm && (

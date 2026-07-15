@@ -1,5 +1,6 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Drawer } from '@/components/ui/Drawer'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -14,6 +15,7 @@ import { CreditCard, TrendingUp, TrendingDown, SlidersHorizontal, MapPin, Calend
 import { useAuth } from '@/hooks/useAuth'
 import { printFacturaA4, type PrintInvoiceData } from '@/lib/printFactura'
 import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
+import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 
 interface Movement {
   id: string
@@ -23,6 +25,7 @@ interface Movement {
   description: string
   payment_method?: string
   created_at: string
+  sale_id?: string | null
   users?: { full_name: string }
   /** Factura emitida por este cobro (si se facturó). */
   invoice?: { id: string; invoice_type: string; numero: number; afip_status: string; afip_cae?: string | null } | null
@@ -53,6 +56,18 @@ const PAGE_SIZE = 10
 
 export function CustomerDetailModal({ open, onClose, customer, onPayment, refreshKey = 0, seedMovement = null }: CustomerDetailModalProps) {
   const { user } = useAuth()
+  const router = useRouter()
+  // Muchos movimientos referencian un pedido en su descripción ("pedido #XXXXXXXX",
+  // prefijo del UUID). Si está, el movimiento se vuelve clickeable → salta al pedido.
+  const orderRefOf = (description: string): string | null => {
+    // "Pago pedido #XXXXXXXX", "Saldo a favor — no entregado pedido #XXXXXXXX" →
+    // el prefijo del UUID del pedido. (La venta enlaza a la venta por sale_id.)
+    const m = description.match(/pedido #([0-9A-Za-z]{8})/i)
+    return m ? m[1] : null
+  }
+  const goToOrder = (shortId: string) => { onClose(); router.push(`/orders?order=${shortId}`) }
+  // Detalle de venta abierto desde un movimiento tipo 'sale'.
+  const [saleDetailId, setSaleDetailId] = useState<string | null>(null)
   const [movements, setMovements] = useState<Movement[]>([])
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: PAGE_SIZE, pages: 0 })
   const [page, setPage] = useState(1)
@@ -400,13 +415,30 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
                   const isAuthorized = !!inv && inv.afip_status === 'authorized' && !!inv.afip_cae
                   // Cobros facturables/reintenables (owner/admin, ya reconciliados).
                   const canInvoiceThis = mov.type === 'payment' && canInvoice && !mov.id.startsWith('optimistic-')
+                  // Venta → abre la venta. Cobro/pago/saldo a favor → van al pedido.
+                  const saleRef = mov.type === 'sale' && mov.sale_id ? mov.sale_id : null
+                  const orderRef = saleRef ? null : orderRefOf(mov.description)
                   return (
                     <div key={mov.id} className="flex items-center gap-3 px-3 py-2.5">
                       <div className="w-7 h-7 rounded-full bg-[var(--surface3)] flex items-center justify-center flex-shrink-0">
                         <Icon size={13} className={cfg.color} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm text-[var(--text)] truncate">{mov.description}</p>
+                        {saleRef ? (
+                          <button type="button" onClick={() => setSaleDetailId(saleRef)}
+                            title="Ver venta"
+                            className="text-sm text-[var(--accent)] hover:underline truncate block max-w-full text-left">
+                            {mov.description}
+                          </button>
+                        ) : orderRef ? (
+                          <button type="button" onClick={() => goToOrder(orderRef)}
+                            title="Ir al pedido"
+                            className="text-sm text-[var(--accent)] hover:underline truncate block max-w-full text-left">
+                            {mov.description}
+                          </button>
+                        ) : (
+                          <p className="text-sm text-[var(--text)] truncate">{mov.description}</p>
+                        )}
                         <p className="text-xs text-[var(--text3)]">
                           {formatDateTime(mov.created_at)}
                           {mov.payment_method && ` · ${mov.payment_method}`}
@@ -466,6 +498,13 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
         zIndex={70}
         onClose={() => { setShowConvert(false); refresh() }}
         onSuccess={() => { setShowConvert(false); refresh() }}
+      />
+
+      {/* Detalle de la venta de un movimiento (se abre sin salir del drawer de CC). */}
+      <SaleDetailModal
+        open={!!saleDetailId}
+        saleId={saleDetailId}
+        onClose={() => setSaleDetailId(null)}
       />
     </Drawer>
   )

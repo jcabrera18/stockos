@@ -26,6 +26,35 @@ export interface PromoResult {
   promotion_id: string | null
 }
 
+// Etiqueta estática de la promo (independiente de la cantidad), para mostrar un
+// badge "Promoción" en catálogos/listados donde todavía no hay un qty definido.
+export function staticPromoLabel(p: Promotion): string {
+  const c = p.config
+  if (p.type === 'percentage')  return `${Number(c.discount_pct ?? 0)}% OFF`
+  if (p.type === 'nxm')         return `${Number(c.get ?? 1)}x${Number(c.pay ?? 1)}`
+  if (p.type === 'second_half') return `2do al ${Number(c.discount_pct ?? 50)}%`
+  if (p.type === 'fixed_price') return `${Number(c.qty ?? 1)} x $${Number(c.price ?? 0)}`
+  return 'Promoción'
+}
+
+// Devuelve la primera promo activa hoy que aplica a un producto por su scope,
+// sin depender de la cantidad (para decidir si mostrar el badge).
+export function findApplicablePromo(
+  product: { id: string; brand_id?: string | null; category_id?: string | null; supplier_id?: string | null },
+  promotions: Promotion[],
+): Promotion | null {
+  return promotions.find(p => {
+    if (!p.is_active)      return false
+    if (!isActiveToday(p)) return false
+    if (p.scope === 'all')      return true
+    if (p.scope === 'product'  && p.scope_id === product.id)                     return true
+    if (p.scope === 'brand'    && p.scope_id === (product.brand_id ?? null))     return true
+    if (p.scope === 'category' && p.scope_id === (product.category_id ?? null))  return true
+    if (p.scope === 'supplier' && p.scope_id === (product.supplier_id ?? null))  return true
+    return false
+  }) ?? null
+}
+
 function isActiveToday(p: Promotion): boolean {
   const today     = new Date()
   const todayDate = today.toISOString().split('T')[0]

@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -407,9 +408,9 @@ export default function PromotionsPage() {
                 value={form.qty}
                 onChange={e => setForm(f => ({ ...f, qty: e.target.value }))}
                 placeholder="3" hint="Ej: 3 unidades" />
-              <Input label="Precio total *" type="number" min="0"
+              <MoneyInput label="Precio total *"
                 value={form.price}
-                onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
+                onChange={v => setForm(f => ({ ...f, price: v }))}
                 placeholder="1000" hint="Precio por el lote" />
             </div>
           )}

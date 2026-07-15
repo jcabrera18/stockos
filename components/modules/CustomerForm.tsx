@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { Input } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
@@ -154,6 +155,10 @@ export function CustomerForm({ customer, onSaved, onClose }: CustomerFormProps) 
     setForm(f => ({ ...f, [field]: e.target.value }))
     setErrors(er => ({ ...er, [field]: '' }))
   }
+  const setMoney = (field: string) => (v: string) => {
+    setForm(f => ({ ...f, [field]: v }))
+    setErrors(er => ({ ...er, [field]: '' }))
+  }
 
   const handleSave = async (mode: 'close' | 'create-another' = 'close') => {
     if (!form.full_name.trim()) { setErrors({ full_name: 'El nombre es obligatorio' }); return }
@@ -279,8 +284,8 @@ export function CustomerForm({ customer, onSaved, onClose }: CustomerFormProps) 
                   options={zoneOptions} placeholder="Sin zona" />
                 <Select label="Categoría" value={form.client_category_id} onChange={set('client_category_id')}
                   options={categoryOptions} placeholder="Sin categoría" />
-                <Input label="Límite de crédito" type="number" min="0" step="0.01"
-                  value={form.credit_limit} onChange={set('credit_limit')} placeholder="0 = sin límite" />
+                <MoneyInput label="Límite de crédito"
+                  value={form.credit_limit} onChange={setMoney('credit_limit')} placeholder="0 = sin límite" />
                 {priceListOptions.length > 0 ? (
                   <Select label="Lista de precios" value={form.price_list_id} onChange={set('price_list_id')}
                     options={priceListOptions} placeholder="Sin lista asignada" />

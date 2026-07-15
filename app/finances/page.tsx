@@ -11,6 +11,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import { PageLoader } from '@/components/ui/Spinner'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Select } from '@/components/ui/Select'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
@@ -638,8 +639,8 @@ export default function FinancesPage() {
         <div className="space-y-4">
           <Select label="Categoría" options={EXPENSE_CATEGORIES} value={form.category}
             onChange={e => setForm(f => ({ ...f, category: e.target.value }))} />
-          <Input label="Monto" type="number" min="0" step="0.01" placeholder="0.00" value={form.amount}
-            onChange={e => setForm(f => ({ ...f, amount: e.target.value }))} />
+          <MoneyInput label="Monto" placeholder="0" value={form.amount}
+            onChange={v => setForm(f => ({ ...f, amount: v }))} />
           <Input label="Descripción" placeholder="Ej: Pago de alquiler enero" value={form.description}
             onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
           <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">

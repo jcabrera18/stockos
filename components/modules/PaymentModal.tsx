@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
@@ -127,7 +128,9 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
         amount: amountNum,
         payment_method: method,
         description: description.trim() || 'Pago de cuenta corriente',
-        ...(method === 'efectivo' && workstation?.register_id
+        // El efectivo suma al esperado; otros medios quedan como info del turno.
+        // 'cuenta_corriente' no aplica (no es un cobro que entra a la caja).
+        ...(method !== 'cuenta_corriente' && workstation?.register_id
           ? { register_id: workstation.register_id }
           : {}),
       })
@@ -277,9 +280,9 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
                 </label>
               )}
 
-              <Input label="Monto *" type="number" min="0.01" step="0.01"
-                value={amount} onChange={e => { setAmount(e.target.value); setPayAll(false) }}
-                placeholder="0.00" disabled={payAll} />
+              <MoneyInput label="Monto *"
+                value={amount} onChange={v => { setAmount(v); setPayAll(false) }}
+                placeholder="0" disabled={payAll} />
 
               <Select label="Método de pago" options={PAYMENT_OPTIONS}
                 value={method} onChange={e => setMethod(e.target.value)} />
@@ -343,9 +346,9 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
                   value={percent} onChange={e => setPercent(e.target.value)}
                   placeholder="Ej: 10" hint="Se calcula sobre el saldo deudor actual" />
               ) : (
-                <Input label="Monto a agregar *" type="number" min="0.01" step="0.01"
-                  value={debtAmount} onChange={e => setDebtAmount(e.target.value)}
-                  placeholder="0.00" />
+                <MoneyInput label="Monto a agregar *"
+                  value={debtAmount} onChange={v => setDebtAmount(v)}
+                  placeholder="0" />
               )}
 
               <Input label="Motivo" value={debtReason}

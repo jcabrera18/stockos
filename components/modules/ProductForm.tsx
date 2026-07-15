@@ -1,6 +1,7 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Input } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
@@ -453,6 +454,11 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
   const numBlur = (field: string, fallback = '0') => (e: React.FocusEvent<HTMLInputElement>) => {
     if (e.target.value.trim() === '') setForm(f => ({ ...f, [field]: fallback }))
   }
+  // Versión de `set` para MoneyInput: recibe el valor crudo ya parseado.
+  const setMoney = (field: string) => (v: string) => {
+    setForm(f => ({ ...f, [field]: v }))
+    setErrors(er => ({ ...er, [field]: '' }))
+  }
 
   const validate = () => {
     const errs: Record<string, string> = {}
@@ -804,15 +810,12 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                 <p className="text-xs text-[var(--text3)]">Las listas calculan sobre el costo con IVA</p>
               </div>
               <div className="grid grid-cols-3 gap-3">
-                <Input
+                <MoneyInput
                   ref={costPriceRef}
                   label="Costo"
-                  type="number"
-                  min="0"
-                  step="0.01"
                   value={form.cost_price_net}
-                  onChange={set('cost_price_net')}
-                  placeholder="0.00"
+                  onChange={setMoney('cost_price_net')}
+                  placeholder="0"
                   error={errors.cost_price_net}
                 />
                 <Select label="IVA" options={VAT_OPTIONS} value={form.vat_rate} onChange={set('vat_rate')} />
@@ -851,15 +854,12 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                   </div>
                 </label>
                 {form.use_fixed_sell_price && (
-                  <Input
+                  <MoneyInput
                     ref={sellPriceRef}
                     label="Precio de venta"
-                    type="number"
-                    min="0"
-                    step="0.01"
                     value={form.sell_price}
-                    onChange={set('sell_price')}
-                    placeholder="0.00"
+                    onChange={setMoney('sell_price')}
+                    placeholder="0"
                     error={errors.sell_price}
                   />
                 )}
@@ -961,15 +961,12 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
               <SectionLabel>Costos y precios</SectionLabel>
 
               <div className="grid grid-cols-3 gap-3">
-                <Input
+                <MoneyInput
                   ref={costPriceRef}
                   label="Costo neto"
-                  type="number"
-                  min="0"
-                  step="0.01"
                   value={form.cost_price_net}
-                  onChange={set('cost_price_net')}
-                  placeholder="0.00"
+                  onChange={setMoney('cost_price_net')}
+                  placeholder="0"
                   error={errors.cost_price_net}
                 />
                 <Select label="IVA" options={VAT_OPTIONS} value={form.vat_rate} onChange={set('vat_rate')} />
@@ -1005,15 +1002,12 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
               </div>
 
               {currentPriceMode === 'fixed' && (
-                <Input
+                <MoneyInput
                   ref={sellPriceRef}
                   label="Precio de venta"
-                  type="number"
-                  min="0"
-                  step="0.01"
                   value={form.sell_price}
-                  onChange={set('sell_price')}
-                  placeholder="0.00"
+                  onChange={setMoney('sell_price')}
+                  placeholder="0"
                   error={errors.sell_price}
                 />
               )}
@@ -1080,13 +1074,10 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                           {mode === 'pesos' ? (
                             <>
                               <span className="text-[var(--text3)] text-xs">$</span>
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
+                              <MoneyInput
+                                unstyled
                                 value={overrideVal}
-                                onChange={e => {
-                                  const v = e.target.value
+                                onChange={v => {
                                   setOverridePrices(prev => { const next = { ...prev }; if (v === '') delete next[list.id]; else next[list.id] = v; return next })
                                 }}
                                 placeholder={calculated.toLocaleString('es-AR', { minimumFractionDigits: 2 })}

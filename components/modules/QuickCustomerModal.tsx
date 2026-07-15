@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
@@ -30,6 +31,10 @@ export function QuickCustomerModal({
 
   const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm(f => ({ ...f, [field]: e.target.value }))
+    setErrors(er => ({ ...er, [field]: '' }))
+  }
+  const setMoney = (field: string) => (v: string) => {
+    setForm(f => ({ ...f, [field]: v }))
     setErrors(er => ({ ...er, [field]: '' }))
   }
 
@@ -86,13 +91,10 @@ export function QuickCustomerModal({
             placeholder="11-1234-5678"
           />
         </div>
-        <Input
+        <MoneyInput
           label="Límite de crédito"
-          type="number"
-          min="0"
-          step="1000"
           value={form.credit_limit}
-          onChange={set('credit_limit')}
+          onChange={setMoney('credit_limit')}
           placeholder="0 = sin límite"
           hint="Podés modificarlo después desde Clientes"
         />

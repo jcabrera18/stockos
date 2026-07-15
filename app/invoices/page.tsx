@@ -6,6 +6,7 @@ import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Modal } from '@/components/ui/Modal'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
@@ -855,10 +856,10 @@ function InvoicesPageInner() {
 
           {/* Monto manual — solo para ND o si no hay items */}
           {(noteType === 'ND' || noteItems.length === 0) && (
-            <Input label="Monto *" type="number" min="0" step="0.01"
+            <MoneyInput label="Monto *"
               value={noteAmount}
-              onChange={e => setNoteAmount(e.target.value)}
-              placeholder="0.00"
+              onChange={v => setNoteAmount(v)}
+              placeholder="0"
               hint={noteTarget?.invoice_type === 'A' ? 'Ingresá el monto total con IVA incluido' : ''} />
           )}
 

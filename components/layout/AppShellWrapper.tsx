@@ -11,7 +11,7 @@ import { EmailConfirmBanner } from './EmailConfirmBanner'
 import { SidePanelProvider } from '@/contexts/SidePanelContext'
 
 // Rutas que manejan su propio layout full-screen (no necesitan shell)
-const NO_SHELL = ['/login', '/register', '/forgot-password', '/reset-password', '/pos', '/home']
+const NO_SHELL = ['/login', '/register', '/forgot-password', '/reset-password', '/pos', '/home', '/c']
 
 const POS_CART_KEY = 'stockos_pos_cart'
 

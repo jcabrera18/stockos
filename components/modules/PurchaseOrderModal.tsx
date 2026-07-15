@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Select } from '@/components/ui/Select'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
@@ -259,12 +260,10 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         <span className="text-sm text-[var(--text3)]">$</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
+                        <MoneyInput
+                          unstyled
                           value={item.unit_cost_net}
-                          onChange={e => updateItem(item.product.id, 'unit_cost_net', e.target.value)}
+                          onChange={v => updateItem(item.product.id, 'unit_cost_net', v)}
                           className="w-36 text-base mono text-right bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] px-3 py-2 focus:outline-none focus:border-[var(--accent)]"
                         />
                       </div>

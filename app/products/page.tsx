@@ -5,6 +5,7 @@ import { useCollapseSidebar } from '@/contexts/SidePanelContext'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { HelpBanner } from '@/components/ui/HelpBanner'
 import { Button } from '@/components/ui/Button'
+import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { TableSkeleton, ProductFormSkeleton } from '@/components/ui/Skeleton'
@@ -642,9 +643,9 @@ export default function ProductsPage() {
                   <div className="flex flex-col gap-1 sm:col-span-2">
                     <label className="text-xs font-medium text-[var(--text3)]">Precio venta</label>
                     <div className="flex items-center gap-2">
-                      <input type="number" min="0" value={minPriceInput} onChange={e => setMinPriceInput(e.target.value)} placeholder="Mínimo" className={`${selectClass} flex-1 min-w-0`} />
+                      <MoneyInput unstyled value={minPriceInput} onChange={v => setMinPriceInput(v)} placeholder="Mínimo" className={`${selectClass} flex-1 min-w-0`} />
                       <span className="text-xs text-[var(--text3)] flex-shrink-0">—</span>
-                      <input type="number" min="0" value={maxPriceInput} onChange={e => setMaxPriceInput(e.target.value)} placeholder="Máximo" className={`${selectClass} flex-1 min-w-0`} />
+                      <MoneyInput unstyled value={maxPriceInput} onChange={v => setMaxPriceInput(v)} placeholder="Máximo" className={`${selectClass} flex-1 min-w-0`} />
                     </div>
                   </div>
                 )}
