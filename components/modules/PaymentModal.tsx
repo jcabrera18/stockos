@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -14,6 +14,7 @@ import type { CustomerSummary } from '@/app/customers/page'
 import { useAuth } from '@/hooks/useAuth'
 import { useWorkstation } from '@/hooks/useWorkstation'
 import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
+import { CashRegisterPicker, type RegisterWithBranch } from '@/components/modules/CashRegisterPicker'
 
 /** Movimiento recién registrado, para que el detalle lo refleje al instante. */
 export interface SavedMovement {
@@ -76,6 +77,12 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
   const [description, setDesc] = useState('Pago de cuenta corriente')
   const [payAll, setPayAll] = useState(false)
 
+  // ── Sucursal / caja donde impacta el cobro (arqueo) ──
+  const [allRegisters, setAllRegisters] = useState<RegisterWithBranch[]>([])
+  const [collectBranchId, setCollectBranchId] = useState<string | null>(null)
+  const [collectRegisterId, setCollectRegisterId] = useState<string | null>(null)
+  const collectDefaultsSet = useRef(false)
+
   // ── Agregar deuda ──
   const [debtMode, setDebtMode] = useState<'percent' | 'fixed'>('percent')
   const [percent, setPercent] = useState('')
@@ -117,6 +124,37 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
     if (payAll && customer) setAmount(String(customer.current_balance))
   }, [payAll, customer])
 
+  // Cajas del negocio (sucursal + estado abierta/cerrada) para el selector de cobro.
+  useEffect(() => {
+    if (!open) return
+    api.get<RegisterWithBranch[]>('/api/branches/all-registers')
+      .then(regs => setAllRegisters(regs ?? []))
+      .catch(() => {})
+  }, [open])
+
+  // Precarga sucursal/caja con el workstation del usuario logueado (una sola vez).
+  useEffect(() => {
+    if (collectDefaultsSet.current || allRegisters.length === 0) return
+    collectDefaultsSet.current = true
+    const branchIds = new Set(allRegisters.map(r => r.branches?.id).filter(Boolean))
+    const defBranch = (workstation?.branch_id && branchIds.has(workstation.branch_id))
+      ? workstation.branch_id
+      : allRegisters.find(r => r.is_open)?.branches?.id
+      ?? allRegisters[0]?.branches?.id ?? null
+    setCollectBranchId(defBranch)
+    const wsReg = allRegisters.find(r => r.id === workstation?.register_id)
+    setCollectRegisterId(wsReg?.is_open ? wsReg.id : null)
+  }, [allRegisters, workstation?.branch_id, workstation?.register_id])
+
+  // Al cambiar de sucursal, la caja elegida deja de ser válida si no pertenece.
+  const handleCollectBranchChange = useCallback((bid: string | null) => {
+    setCollectBranchId(bid)
+    setCollectRegisterId(prev => {
+      const reg = allRegisters.find(r => r.id === prev)
+      return reg && reg.branches?.id === bid ? prev : null
+    })
+  }, [allRegisters])
+
   const handleSave = async () => {
     if (!customer) return
     const amountNum = Number(amount)
@@ -130,8 +168,8 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
         description: description.trim() || 'Pago de cuenta corriente',
         // El efectivo suma al esperado; otros medios quedan como info del turno.
         // 'cuenta_corriente' no aplica (no es un cobro que entra a la caja).
-        ...(method !== 'cuenta_corriente' && workstation?.register_id
-          ? { register_id: workstation.register_id }
+        ...(method !== 'cuenta_corriente' && collectRegisterId
+          ? { register_id: collectRegisterId }
           : {}),
       })
       setSavedMovementId(res?.account_movement_id ?? null)
@@ -290,6 +328,16 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
               <Input label="Descripción" value={description}
                 onChange={e => setDesc(e.target.value)}
                 placeholder="Ej: Pago parcial, Pago con cheque..." />
+
+              {/* Sucursal + caja donde impacta el cobro (arqueo). El efectivo suma
+                  al esperado de la caja elegida; otros medios quedan informativos. */}
+              <CashRegisterPicker
+                registers={allRegisters}
+                branchId={collectBranchId}
+                registerId={collectRegisterId}
+                onBranchChange={handleCollectBranchChange}
+                onRegisterChange={setCollectRegisterId}
+              />
 
               {amountNum > 0 && (
                 <div className="space-y-1 px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)]">
