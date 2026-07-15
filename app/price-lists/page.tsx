@@ -143,13 +143,14 @@ export default function PriceListsPage() {
   }
 
   const handleCreatePresets = async () => {
+    if (creatingPresets) return
     setCreatingPresets(true)
+    setPresetsModal(false)
     try {
       for (const preset of PRESET_LISTS) {
         await api.post('/api/price-lists', preset)
       }
       toast.success('Listas creadas correctamente')
-      setPresetsModal(false)
       fetchLists()
       notifyPOSDataChanged()
     } catch (err: unknown) {
