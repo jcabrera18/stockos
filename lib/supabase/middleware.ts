@@ -46,6 +46,12 @@ export async function updateSession(request: NextRequest) {
     && !request.nextUrl.pathname.startsWith('/reset-password')
     && !request.nextUrl.pathname.startsWith('/auth')
     && !request.nextUrl.pathname.startsWith('/home')
+    // Catálogo público compartible — accesible sin login
+    && !request.nextUrl.pathname.startsWith('/c/')
+    // Scripts del PWA/service worker servidos desde public/: no deben
+    // redirigir a /login (rompen el registro del SW: "script behind redirect")
+    && request.nextUrl.pathname !== '/sw.js'
+    && !request.nextUrl.pathname.startsWith('/swe-worker')
     && request.nextUrl.pathname !== '/'
 
   if (isProtected && !user) {
