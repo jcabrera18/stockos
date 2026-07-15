@@ -15,6 +15,7 @@ import { SupplierModal } from '@/components/modules/SupplierModal'
 import { AdjustStockModal } from '@/components/modules/AdjustStockModal'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { useWorkstation } from '@/hooks/useWorkstation'
+import { useAuth } from '@/hooks/useAuth'
 
 interface ProductFormProps {
   product: Product | null
@@ -75,6 +76,7 @@ const emptyForm = {
   brand_id: '',
   cost_price_net: '',
   vat_rate: '21',
+  cost_currency: 'ARS' as 'ARS' | 'USD',
   sell_price: '',
   initial_stock: '0',
   stock_min: '0',
@@ -159,6 +161,12 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
   const [confirmClose, setConfirmClose] = useState(false)
   const baselineRef = useRef('')
   const { workstation } = useWorkstation()
+  const { user } = useAuth()
+
+  // Multimoneda: solo relevante si el negocio activó la feature. usdRate es la
+  // cotización vigente para mostrar la conversión USD→ARS en vivo.
+  const mcEnabled = user?.business?.multicurrency_enabled ?? false
+  const usdRate = user?.business?.usd_rate ?? null
 
   const isEdit = !!product
 
@@ -173,7 +181,14 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
     if (isDirty) { setConfirmClose(true); return }
     onClose()
   }
-  const costNet = Number(form.cost_price_net) || 0
+  // Con multimoneda en USD, el campo de costo está en dólares: lo convertimos a
+  // ARS con la cotización vigente para que TODOS los cálculos de precio/margen
+  // (aguas abajo) trabajen en pesos, igual que en el flujo ARS de siempre.
+  const isUsdCost = mcEnabled && form.cost_currency === 'USD'
+  const costNetInput = Number(form.cost_price_net) || 0
+  const costNet = isUsdCost
+    ? Math.round(costNetInput * (usdRate ?? 0) * 100) / 100
+    : costNetInput
   const vatRate = Number(form.vat_rate) || 0
   const costWithVat = Math.round(costNet * (1 + vatRate / 100) * 100) / 100
 
@@ -340,8 +355,12 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         category_id: product.category_id ?? '',
         supplier_id: product.supplier_id ?? '',
         brand_id: product.brand_id ?? '',
-        cost_price_net: String(product.cost_price_net ?? product.cost_price ?? 0),
+        // En USD el campo de costo muestra el valor original en dólares.
+        cost_price_net: product.cost_currency === 'USD'
+          ? String(product.cost_price_usd ?? 0)
+          : String(product.cost_price_net ?? product.cost_price ?? 0),
         vat_rate: String(product.vat_rate ?? 0),
+        cost_currency: (product.cost_currency === 'USD' ? 'USD' : 'ARS') as 'ARS' | 'USD',
         sell_price: product.use_fixed_sell_price ? String(product.sell_price) : '',
         initial_stock: String(product.stock_current ?? 0),
         stock_min: String(product.stock_min ?? 0),
@@ -489,9 +508,12 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
       supplier_id: form.supplier_id || null,
       brand_id: form.brand_id || null,
       cost_price: costWithVat,
-      cost_price_net: costNet,
+      // En USD mandamos el costo en dólares; el backend lo convierte a ARS.
+      cost_price_net: isUsdCost ? costNetInput : costNet,
       vat_rate: vatRate,
       cost_price_with_vat: costWithVat,
+      // Solo tocamos la moneda si la feature está activa (flujo ARS intacto).
+      ...(mcEnabled ? { cost_currency: form.cost_currency } : {}),
       sell_price: sellPrice,
       use_fixed_sell_price: form.use_fixed_sell_price,
       initial_stock: Number(form.initial_stock) || 0,
@@ -809,10 +831,18 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                 <p className="text-sm font-medium text-[var(--text2)]">Costo e IVA</p>
                 <p className="text-xs text-[var(--text3)]">Las listas calculan sobre el costo con IVA</p>
               </div>
+              {mcEnabled && (
+                <Select
+                  label="Moneda del costo"
+                  options={[{ value: 'ARS', label: 'Pesos (ARS)' }, { value: 'USD', label: 'Dólares (USD)' }]}
+                  value={form.cost_currency}
+                  onChange={set('cost_currency')}
+                />
+              )}
               <div className="grid grid-cols-3 gap-3">
                 <MoneyInput
                   ref={costPriceRef}
-                  label="Costo"
+                  label={isUsdCost ? 'Costo (USD)' : 'Costo'}
                   value={form.cost_price_net}
                   onChange={setMoney('cost_price_net')}
                   placeholder="0"
@@ -827,6 +857,13 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                   hint="Calculado automáticamente"
                 />
               </div>
+              {isUsdCost && (
+                <p className="text-xs text-[var(--text3)]">
+                  {usdRate
+                    ? `USD ${costNetInput.toLocaleString('es-AR')} × $${usdRate.toLocaleString('es-AR')} = $${costNet.toLocaleString('es-AR')} (neto en ARS). El precio sigue la cotización.`
+                    : 'Configurá la cotización del dólar en Ajustes para calcular el costo en pesos.'}
+                </p>
+              )}
             </div>
 
             {form.price_mode === 'fixed' && (
@@ -960,10 +997,18 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
             <div className="space-y-4">
               <SectionLabel>Costos y precios</SectionLabel>
 
+              {mcEnabled && (
+                <Select
+                  label="Moneda del costo"
+                  options={[{ value: 'ARS', label: 'Pesos (ARS)' }, { value: 'USD', label: 'Dólares (USD)' }]}
+                  value={form.cost_currency}
+                  onChange={set('cost_currency')}
+                />
+              )}
               <div className="grid grid-cols-3 gap-3">
                 <MoneyInput
                   ref={costPriceRef}
-                  label="Costo neto"
+                  label={isUsdCost ? 'Costo neto (USD)' : 'Costo neto'}
                   value={form.cost_price_net}
                   onChange={setMoney('cost_price_net')}
                   placeholder="0"
@@ -972,6 +1017,13 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                 <Select label="IVA" options={VAT_OPTIONS} value={form.vat_rate} onChange={set('vat_rate')} />
                 <Input label="c/ IVA" value={costWithVat ? String(costWithVat) : '0'} readOnly placeholder="0.00" hint="Auto" />
               </div>
+              {isUsdCost && (
+                <p className="text-xs text-[var(--text3)]">
+                  {usdRate
+                    ? `USD ${costNetInput.toLocaleString('es-AR')} × $${usdRate.toLocaleString('es-AR')} = $${costNet.toLocaleString('es-AR')} neto en ARS`
+                    : 'Configurá la cotización del dólar en Ajustes para calcular el costo en pesos.'}
+                </p>
+              )}
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">

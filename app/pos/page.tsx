@@ -36,6 +36,7 @@ import {
   type PricingResult,
   type ScanResult,
 } from '@/lib/pos-cache'
+import { onPOSDataChanged } from '@/lib/pos-sync-signal'
 import { queueSale, syncPendingSales, pushSale, getPendingSalesCount, isNetworkError } from '@/lib/sales-queue'
 
 // Mínimo de caracteres para disparar búsqueda de texto (no aplica a códigos de barra)
@@ -127,6 +128,9 @@ export default function POSPage() {
 
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Product[]>([])
+  // Se incrementa cuando otra pestaña edita precios/catálogo y ya re-sincronizamos,
+  // para forzar el recálculo de la búsqueda visible con los precios frescos.
+  const [dataVersion, setDataVersion] = useState(0)
   const [searching, setSearching] = useState(false)
   const [activeResultIndex, setActiveResultIndex] = useState(-1)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -233,6 +237,22 @@ export default function POSPage() {
     getPendingSalesCount().then(setPendingCount).catch(() => {})
     refreshVariableProducts().catch(() => {})
   }, [cacheReady, refreshVariableProducts])
+
+  // Re-sincronizar al instante cuando otra pestaña edita precios/catálogo
+  // (ej. cambio de precio en /products). Sin esto el POS mostraría el precio
+  // viejo hasta el próximo sync periódico (10 min) o al recuperar foco.
+  useEffect(() => {
+    if (!cacheReady) return
+    return onPOSDataChanged(() => {
+      forceSync()
+        .then(() => {
+          setDataVersion(v => v + 1)          // re-corre la búsqueda visible
+          refreshVariableProducts().catch(() => {})
+          getLastSyncTime().then(t => setLastSyncedAt(t)).catch(() => {})
+        })
+        .catch(() => {})
+    })
+  }, [cacheReady, forceSync, refreshVariableProducts])
 
   // Sincronizar ventas offline cuando se recupera la conexión
   useEffect(() => {
@@ -775,7 +795,7 @@ export default function POSPage() {
     }, isBarcode ? 35 : 300)
 
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [query]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query, dataVersion]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const q = customerQuery.trim()

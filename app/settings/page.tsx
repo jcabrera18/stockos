@@ -85,6 +85,15 @@ export default function SettingsPage() {
   const [shippingDefault, setShippingDefault] = useState('')
   const [savingShipping, setSavingShipping]   = useState(false)
 
+  // Multimoneda (costo en USD)
+  const [mcEnabled, setMcEnabled]       = useState(false)
+  const [mcSource, setMcSource]         = useState('blue')
+  const [mcManualRate, setMcManualRate] = useState('')
+  const [mcRate, setMcRate]             = useState<number | null>(null)
+  const [mcUpdatedAt, setMcUpdatedAt]   = useState<string | null>(null)
+  const [mcRates, setMcRates]           = useState<{ casa: string; nombre: string; venta: number }[]>([])
+  const [savingMc, setSavingMc]         = useState(false)
+
   // ARCA
   const [ivaCondition, setIvaCondition]     = useState('MO')
   const [ptoVenta, setPtoVenta]             = useState('')
@@ -130,7 +139,22 @@ export default function SettingsPage() {
     setPtoVenta(user.business?.afip_punto_venta ? String(user.business.afip_punto_venta) : '')
     setAfipEnv(user.business?.afip_environment ?? 'homo')
     setMonoLimit(user.business?.monotributo_limite_anual != null ? String(user.business.monotributo_limite_anual) : '')
+    setMcEnabled(user.business?.multicurrency_enabled ?? false)
+    setMcSource(user.business?.usd_rate_source ?? 'blue')
+    setMcRate(user.business?.usd_rate ?? null)
+    setMcUpdatedAt(user.business?.usd_rate_updated_at ?? null)
+    if (user.business?.usd_rate_source === 'manual' && user.business?.usd_rate != null) {
+      setMcManualRate(String(user.business.usd_rate))
+    }
   }, [user])
+
+  // Trae las cotizaciones de dolarapi para poblar el selector de casa.
+  useEffect(() => {
+    if (!mcEnabled || !isOwnerAdmin) return
+    api.get<{ rates: { casa: string; nombre: string; venta: number }[] }>('/api/auth/usd-rates')
+      .then(d => setMcRates(d?.rates ?? []))
+      .catch(() => { /* silencioso: el selector sigue usable sin la lista */ })
+  }, [mcEnabled])
 
   // Acepta el formato de AFIP ($46.211.109,37) y lo convierte a un número plano (46211109.37).
   // Punto = separador de miles, coma = decimal. También admite que el usuario escriba "68000000".
@@ -165,6 +189,54 @@ export default function SettingsPage() {
       toast.error('Error al guardar')
     } finally {
       setSavingBiz(false)
+    }
+  }
+
+  const handleSaveMc = async () => {
+    setSavingMc(true)
+    try {
+      const payload: Record<string, unknown> = {
+        multicurrency_enabled: mcEnabled,
+        usd_rate_source: mcSource,
+      }
+      // Manual: mandamos el valor tipeado. Casa: el backend lo trae de dolarapi.
+      if (mcSource === 'manual') {
+        const manual = Number(mcManualRate)
+        if (mcEnabled && (!manual || manual <= 0)) {
+          toast.error('Ingresá una cotización válida')
+          setSavingMc(false)
+          return
+        }
+        if (manual > 0) payload.usd_rate = manual
+      }
+      const res = await api.patch<{ usd_rate?: number }>('/api/auth/business-settings', payload)
+      if (res?.usd_rate != null) {
+        setMcRate(res.usd_rate)
+        setMcUpdatedAt(new Date().toISOString())
+      }
+      toast.success('Multimoneda actualizada')
+      await refreshUser()
+    } catch {
+      toast.error('No se pudo guardar la configuración de multimoneda')
+    } finally {
+      setSavingMc(false)
+    }
+  }
+
+  const handleRefreshRate = async () => {
+    setSavingMc(true)
+    try {
+      const res = await api.post<{ usd_rate?: number }>('/api/auth/refresh-usd-rate', { source: mcSource })
+      if (res?.usd_rate != null) {
+        setMcRate(res.usd_rate)
+        setMcUpdatedAt(new Date().toISOString())
+      }
+      toast.success('Cotización actualizada')
+      await refreshUser()
+    } catch {
+      toast.error('No se pudo actualizar la cotización')
+    } finally {
+      setSavingMc(false)
     }
   }
 
@@ -619,6 +691,83 @@ export default function SettingsPage() {
                     <Button onClick={handleSaveShipping} disabled={savingShipping}>
                       {savingShipping ? 'Guardando...' : 'Guardar'}
                     </Button>
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            {/* Multimoneda (costo en USD) */}
+            {isOwnerAdmin && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CreditCard size={15} className="text-[var(--accent)]" />
+                    Multimoneda (costo en USD)
+                  </CardTitle>
+                </CardHeader>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-[var(--text2)]">Cargar costos en dólares</p>
+                      <p className="text-xs text-[var(--text3)]">
+                        El precio de venta se calcula en pesos y sigue la cotización del dólar.
+                      </p>
+                    </div>
+                    <Toggle checked={mcEnabled} onChange={setMcEnabled} disabled={savingMc} />
+                  </div>
+
+                  {mcEnabled && (
+                    <>
+                      <div>
+                        <p className="text-xs text-[var(--text3)] mb-1">Cotización a usar</p>
+                        <Select
+                          value={mcSource}
+                          onChange={e => setMcSource(e.target.value)}
+                          options={[
+                            ...mcRates.map(r => ({
+                              value: r.casa,
+                              label: `${r.nombre} — $${r.venta.toLocaleString('es-AR')}`,
+                            })),
+                            { value: 'manual', label: 'Manual (fijar valor)' },
+                          ]}
+                        />
+                      </div>
+
+                      {mcSource === 'manual' && (
+                        <div>
+                          <p className="text-xs text-[var(--text3)] mb-1">Valor del dólar (ARS)</p>
+                          <MoneyInput
+                            value={mcManualRate}
+                            onChange={setMcManualRate}
+                            placeholder="0"
+                            className="max-w-[160px]"
+                          />
+                        </div>
+                      )}
+
+                      <div className="text-xs text-[var(--text3)]">
+                        Cotización vigente:{' '}
+                        <span className="font-medium text-[var(--text)]">
+                          {mcRate != null ? `$${mcRate.toLocaleString('es-AR')}` : '—'}
+                        </span>
+                        {mcUpdatedAt && (
+                          <span className="ml-1">
+                            (actualizada {new Date(mcUpdatedAt).toLocaleString('es-AR')})
+                          </span>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  <div className="flex items-center gap-2">
+                    <Button onClick={handleSaveMc} disabled={savingMc}>
+                      {savingMc ? 'Guardando...' : 'Guardar'}
+                    </Button>
+                    {mcEnabled && mcSource !== 'manual' && (
+                      <Button variant="secondary" onClick={handleRefreshRate} disabled={savingMc}>
+                        Actualizar cotización
+                      </Button>
+                    )}
                   </div>
                 </div>
               </Card>

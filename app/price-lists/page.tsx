@@ -11,6 +11,7 @@ import { PageLoader } from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/Badge'
 import { HelpBanner } from '@/components/ui/HelpBanner'
 import { api } from '@/lib/api'
+import { notifyPOSDataChanged } from '@/lib/pos-sync-signal'
 import { Plus, Tag, Pencil, Trash2, Star, TrendingUp, Printer, Share2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { PrintShelfLabelsModal } from '@/components/modules/PrintShelfLabelsModal'
@@ -120,6 +121,7 @@ export default function PriceListsPage() {
       }
       setModal(false)
       fetchLists()
+      notifyPOSDataChanged()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
     } finally { setSaving(false) }
@@ -134,6 +136,7 @@ export default function PriceListsPage() {
       setDeleteModal(false)
       setDeleteList(null)
       fetchLists()
+      notifyPOSDataChanged()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar')
     } finally { setDeleting(false) }
@@ -148,6 +151,7 @@ export default function PriceListsPage() {
       toast.success('Listas creadas correctamente')
       setPresetsModal(false)
       fetchLists()
+      notifyPOSDataChanged()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al crear listas')
     } finally { setCreatingPresets(false) }
@@ -407,7 +411,7 @@ export default function PriceListsPage() {
       <PrintShelfLabelsModal open={printModal} onClose={() => setPrintModal(false)} />
 
       <PrintPriceListModal open={priceListPrintModal} onClose={() => setPriceListPrintModal(false)} />
-      <BulkPriceModal open={bulkPriceModal} onClose={() => setBulkPriceModal(false)} onApplied={() => {}} />
+      <BulkPriceModal open={bulkPriceModal} onClose={() => setBulkPriceModal(false)} onApplied={() => notifyPOSDataChanged()} />
       <ShareCatalogModal open={shareModal} onClose={() => setShareModal(false)} lists={lists} />
     </AppShell>
   )

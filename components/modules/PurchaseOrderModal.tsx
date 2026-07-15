@@ -10,6 +10,7 @@ import { formatCurrency } from '@/lib/utils'
 import type { Supplier, Product } from '@/types'
 import { Search, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { useAuth } from '@/hooks/useAuth'
 
 interface Warehouse { id: string; name: string; is_default: boolean }
 
@@ -21,12 +22,14 @@ const VAT_OPTIONS = [
 ]
 
 const round2 = (n: number) => Math.round(n * 100) / 100
-const grossCost = (i: OrderItem) => round2(i.unit_cost_net * (1 + i.vat_rate / 100))
+const grossCost = (i: OrderItem) => round2((Number(i.unit_cost_net) || 0) * (1 + i.vat_rate / 100))
 
 interface OrderItem {
   product: Product
   quantity: number
-  unit_cost_net: number
+  // Crudo Number()-safe emitido por MoneyInput ("95", "95.5"). Se guarda como
+  // string para preservar el estado decimal mientras se tipea (ej: "95," → "95.").
+  unit_cost_net: string
   vat_rate: number
 }
 
@@ -44,6 +47,17 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
   const [notes, setNotes] = useState('')
   const [items, setItems] = useState<OrderItem[]>([])
   const [saving, setSaving] = useState(false)
+  const [currency, setCurrency] = useState<'ARS' | 'USD'>('ARS')
+
+  const { user } = useAuth()
+  const mcEnabled = user?.business?.multicurrency_enabled ?? false
+  const usdRate = user?.business?.usd_rate ?? null
+  const isUsd = mcEnabled && currency === 'USD'
+  // Formatea en la moneda de la orden (US$ para USD, $ para ARS).
+  const fmt = (n: number) =>
+    isUsd
+      ? `US$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      : formatCurrency(n)
 
   // Búsqueda de productos
   const [query, setQuery] = useState('')
@@ -69,6 +83,7 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
       setItems([])
       setQuery('')
       setResults([])
+      setCurrency('ARS')
     }
   }, [open])
 
@@ -89,10 +104,14 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
   }, [query, items])
 
   const addItem = (product: Product) => {
+    // En USD prellenamos con el costo en dólares del producto (si lo tiene).
+    const prefillNet = isUsd
+      ? (product.cost_currency === 'USD' ? (product.cost_price_usd ?? 0) : 0)
+      : (product.cost_price_net ?? product.cost_price)
     setItems(prev => [...prev, {
       product,
       quantity: 1,
-      unit_cost_net: product.cost_price_net ?? product.cost_price,
+      unit_cost_net: prefillNet ? String(prefillNet) : '',
       vat_rate: product.vat_rate ?? 0,
     }])
     setQuery('')
@@ -100,11 +119,12 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
   }
 
   const updateItem = (id: string, field: 'quantity' | 'unit_cost_net' | 'vat_rate', value: string) => {
-    setItems(prev => prev.map(i =>
-      i.product.id === id
-        ? { ...i, [field]: Math.max(field === 'quantity' ? 1 : 0, Number(value) || 0) }
-        : i
-    ))
+    setItems(prev => prev.map(i => {
+      if (i.product.id !== id) return i
+      // El costo se guarda crudo (string) para preservar el separador decimal al tipear.
+      if (field === 'unit_cost_net') return { ...i, unit_cost_net: value }
+      return { ...i, [field]: Math.max(field === 'quantity' ? 1 : 0, Number(value) || 0) }
+    }))
   }
 
   const removeItem = (id: string) => setItems(prev => prev.filter(i => i.product.id !== id))
@@ -113,12 +133,17 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
 
   const handleSave = async () => {
     if (items.length === 0) { toast.error('Agregá al menos un producto'); return }
+    if (isUsd && (!usdRate || usdRate <= 0)) {
+      toast.error('Configurá la cotización del dólar en Ajustes antes de cargar una compra en USD')
+      return
+    }
     setSaving(true)
     try {
       await api.post('/api/purchases', {
         supplier_id:  supplierId || null,
         warehouse_id: warehouseId || null,
         notes: notes.trim() || null,
+        ...(mcEnabled ? { currency, ...(isUsd && usdRate ? { usd_rate: usdRate } : {}) } : {}),
         items: items.map(i => ({
           product_id: i.product.id,
           quantity:   i.quantity,
@@ -158,6 +183,25 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
             placeholder="Sin depósito"
           />
         </div>
+        {mcEnabled && (
+          <div className="grid grid-cols-2 gap-3">
+            <Select
+              label="Moneda de la compra"
+              options={[{ value: 'ARS', label: 'Pesos (ARS)' }, { value: 'USD', label: 'Dólares (USD)' }]}
+              value={currency}
+              onChange={e => setCurrency(e.target.value as 'ARS' | 'USD')}
+            />
+            {isUsd && (
+              <div className="flex flex-col justify-end">
+                <p className="text-xs text-[var(--text3)] pb-2">
+                  {usdRate
+                    ? `Cotización: $${usdRate.toLocaleString('es-AR')} — el gasto se registra en pesos.`
+                    : 'Configurá la cotización del dólar en Ajustes.'}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
         <Input
           label="Notas"
           value={notes}
@@ -259,7 +303,7 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        <span className="text-sm text-[var(--text3)]">$</span>
+                        <span className="text-sm text-[var(--text3)]">{isUsd ? 'US$' : '$'}</span>
                         <MoneyInput
                           unstyled
                           value={item.unit_cost_net}
@@ -278,10 +322,10 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
                       </select>
                     </td>
                     <td className="px-4 py-3 text-right mono text-[var(--text2)]">
-                      {formatCurrency(grossCost(item))}
+                      {fmt(grossCost(item))}
                     </td>
                     <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)]">
-                      {formatCurrency(item.quantity * grossCost(item))}
+                      {fmt(item.quantity * grossCost(item))}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button onClick={() => removeItem(item.product.id)} className="text-[var(--text3)] hover:text-[var(--danger)]">
@@ -293,9 +337,11 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-[var(--border)]">
-                  <td colSpan={5} className="px-4 py-3.5 text-base font-semibold text-[var(--text)]">Total c/IVA</td>
+                  <td colSpan={5} className="px-4 py-3.5 text-base font-semibold text-[var(--text)]">
+                    Total c/IVA{isUsd ? ' (USD)' : ''}
+                  </td>
                   <td className="px-4 py-3.5 text-right mono text-lg font-bold text-[var(--accent)]">
-                    {formatCurrency(total)}
+                    {fmt(total)}
                   </td>
                   <td />
                 </tr>

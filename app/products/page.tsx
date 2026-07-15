@@ -17,6 +17,7 @@ import { cn } from '@/lib/utils'
 import { useCatalogSync } from '@/hooks/useCatalogSync'
 import { queryCatalog, removeCatalogProduct } from '@/lib/catalog-cache'
 import { removeProductFromPOS } from '@/lib/pos-cache'
+import { notifyPOSDataChanged } from '@/lib/pos-sync-signal'
 import type { StockSummary, Product, Category, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import {
   Plus, Search, Package, Pencil, Trash2,
@@ -504,6 +505,7 @@ export default function ProductsPage() {
       // Idem para el cache del POS (store `products` + `barcodes`), si no seguiría
       // apareciendo en el POS de cobro hasta el próximo full sync.
       await removeProductFromPOS(deleteProduct.id)
+      notifyPOSDataChanged()
       setDeleteModal(false)
       setDeleteProduct(null)
       if (selectedId === deleteProduct.id) {
@@ -755,7 +757,14 @@ export default function ProductsPage() {
                         )}
                         {!panelOpen && (
                           <td className="px-4 py-3 text-right mono text-[var(--text2)] whitespace-nowrap hidden sm:table-cell">
-                            {formatCurrency(product.cost_price)}
+                            <div className="flex flex-col items-end gap-0.5">
+                              <span>{formatCurrency(product.cost_price)}</span>
+                              {product.cost_currency === 'USD' && (
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-[var(--accent)]/10 text-[var(--accent)]">
+                                  USD {(product.cost_price_usd ?? 0).toLocaleString('es-AR')}
+                                </span>
+                              )}
+                            </div>
                           </td>
                         )}
                         {!panelOpen && (
@@ -819,6 +828,9 @@ export default function ProductsPage() {
                     // (su updated_at cambió) y luego re-consulta. Si el sync falla,
                     // re-consultamos igual con lo que haya.
                     forceCatalogSync().finally(() => fetchProductsRef.current?.())
+                    // Avisar a la pestaña del POS (si está abierta) que el precio/
+                    // catálogo cambió, para que re-sincronice al instante.
+                    notifyPOSDataChanged()
                   }}
                   onClose={closePanel}
                   onNavigateToProduct={handleNavigateToProduct}

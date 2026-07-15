@@ -12,6 +12,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { api } from '@/lib/api'
+import { notifyPOSDataChanged } from '@/lib/pos-sync-signal'
 import { formatCurrency } from '@/lib/utils'
 import { Percent, Plus, Pencil, Trash2, Tag, Calendar, CheckCircle, XCircle, Search } from 'lucide-react'
 import { toast } from 'sonner'
@@ -221,6 +222,7 @@ export default function PromotionsPage() {
       }
       setModal(false)
       fetchAll()
+      notifyPOSDataChanged()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
     } finally { setSaving(false) }
@@ -234,6 +236,7 @@ export default function PromotionsPage() {
       toast.success('Promoción desactivada')
       setDeleteModal(false)
       fetchAll()
+      notifyPOSDataChanged()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error')
     } finally { setDeleting(false) }

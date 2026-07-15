@@ -26,6 +26,10 @@ export interface UserProfile {
     afip_environment:       string
     monotributo_limite_anual: number | null
     stock_enabled:          boolean
+    multicurrency_enabled:  boolean
+    usd_rate:               number | null
+    usd_rate_source:        string
+    usd_rate_updated_at:    string | null
     subscription: {
       plan:               string
       billing_cycle:      string | null

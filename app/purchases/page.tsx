@@ -35,7 +35,14 @@ interface CostPreviewItem {
   weighted_avg: number
   highest:      number
   cost_changed: boolean
+  currency?:    'ARS' | 'USD'
 }
+
+// Formatea un costo del preview en la moneda del costo del producto.
+const fmtCost = (n: number, ccy?: 'ARS' | 'USD') =>
+  ccy === 'USD'
+    ? `US$ ${n.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    : formatCurrency(n)
 
 const COST_OPTIONS: {
   key: CostDecision
@@ -436,7 +443,8 @@ export default function PurchasesPage() {
                             <Badge variant={sc.variant}>{sc.label}</Badge>
                           </td>
                           <td className="px-4 py-3 text-right mono font-semibold text-[var(--text)]">
-                            {formatCurrency(order.total)}
+                            {fmtCost(order.total, order.currency)}
+                            {order.currency === 'USD' && <span className="ml-1 text-[10px] text-[var(--text3)]">USD</span>}
                           </td>
                         </tr>
                       )
@@ -625,15 +633,17 @@ export default function PurchasesPage() {
                           <tr key={i}>
                             <td className="px-3 py-2 text-[var(--text)]">{(item.products as { name: string } | undefined)?.name ?? '—'}</td>
                             <td className="px-3 py-2 text-right mono text-[var(--text2)]">{item.quantity}</td>
-                            <td className="px-3 py-2 text-right mono text-[var(--text2)]">{formatCurrency(item.unit_cost)}</td>
-                            <td className="px-3 py-2 text-right mono font-medium text-[var(--text)]">{formatCurrency(item.subtotal)}</td>
+                            <td className="px-3 py-2 text-right mono text-[var(--text2)]">{fmtCost(item.unit_cost, detailOrder.currency)}</td>
+                            <td className="px-3 py-2 text-right mono font-medium text-[var(--text)]">{fmtCost(item.subtotal, detailOrder.currency)}</td>
                           </tr>
                         ))}
                       </tbody>
                       <tfoot>
                         <tr className="border-t-2 border-[var(--border)]">
-                          <td colSpan={3} className="px-3 py-2 text-sm font-semibold text-[var(--text)]">Total</td>
-                          <td className="px-3 py-2 text-right mono font-bold text-[var(--accent)]">{formatCurrency(detailOrder.total)}</td>
+                          <td colSpan={3} className="px-3 py-2 text-sm font-semibold text-[var(--text)]">
+                            Total{detailOrder.currency === 'USD' ? ' (USD)' : ''}
+                          </td>
+                          <td className="px-3 py-2 text-right mono font-bold text-[var(--accent)]">{fmtCost(detailOrder.total, detailOrder.currency)}</td>
                         </tr>
                       </tfoot>
                     </table>
@@ -711,7 +721,7 @@ export default function PurchasesPage() {
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-sm font-medium text-[var(--text)]">{item.product_name}</p>
                     <span className="text-xs text-[var(--text3)] mono">
-                      {formatCurrency(item.current_cost)} → {formatCurrency(item.order_cost)}
+                      {fmtCost(item.current_cost, item.currency)} → {fmtCost(item.order_cost, item.currency)}
                     </span>
                   </div>
                   <div className="grid grid-cols-2 gap-1.5">
@@ -731,7 +741,7 @@ export default function PurchasesPage() {
                         >
                           <span className="font-medium">{opt.label}</span>
                           <span className={`mono font-bold ${selected ? 'text-white/90' : 'text-[var(--text)]'}`}>
-                            {formatCurrency(val)}
+                            {fmtCost(val, item.currency)}
                           </span>
                         </button>
                       )

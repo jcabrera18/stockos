@@ -55,6 +55,8 @@ export interface Product {
   cost_price_net?: number
   vat_rate?: number
   cost_price_with_vat?: number
+  cost_currency?: 'ARS' | 'USD'
+  cost_price_usd?: number | null
   sell_price: number
   stock_current: number
   stock_min: number
@@ -144,6 +146,8 @@ export interface PurchaseOrder {
   status: 'pending' | 'received' | 'cancelled'
   subtotal: number
   total: number
+  currency?: 'ARS' | 'USD'
+  usd_rate?: number | null
   notes?: string
   received_at?: string
   created_at: string
