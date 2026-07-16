@@ -314,6 +314,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   const [recentHours, setRecentHours] = useState('0')
   const [showCode, setShowCode] = useState(false)
   const [showTiers, setShowTiers] = useState(false)
+  const [hiddenTierListIds, setHiddenTierListIds] = useState<Set<string>>(new Set())
   const [copies, setCopies] = useState(1)
   const [columns, setColumns] = useState(4)
 
@@ -335,7 +336,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     if (!open) {
       setStep('config')
       setMainListId(''); setCategoryId(''); setBrandId(''); setRecentHours('0')
-      setShowCode(false); setShowTiers(false); setCopies(1); setColumns(4)
+      setShowCode(false); setShowTiers(false); setHiddenTierListIds(new Set()); setCopies(1); setColumns(4)
       setAllProducts([]); setSelected(new Set()); setSearchText('')
       setPreviewPage(1)
       return
@@ -415,10 +416,14 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   const hasLists = priceLists.length > 0
   // Si no hay listas (comercio con precio fijo), usamos la lista sintética
   const mainList = priceLists.find(l => l.id === mainListId) ?? (hasLists ? undefined : FALLBACK_LIST)
-  const otherLists = [...priceLists]
+  // Listas candidatas a escala por cantidad (todas menos la principal y las manuales)
+  const tierCandidates = [...priceLists]
     // Las listas manuales (min_quantity == null) no son tiers por cantidad: se excluyen
     .filter(l => l.id !== mainListId && l.min_quantity != null)
     .sort((a, b) => (a.min_quantity ?? 1) - (b.min_quantity ?? 1))
+  // Escalas que efectivamente se imprimen: el usuario puede ocultar las que no
+  // quiere mostrar en góndola (ej: precio mayorista)
+  const otherLists = tierCandidates.filter(l => !hiddenTierListIds.has(l.id))
 
   const selectedProducts = allProducts.filter(p => selected.has(p.id))
   const labelItems: ProductRow[] = selectedProducts.flatMap(p => Array(copies).fill(p))
@@ -612,16 +617,48 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium text-[var(--text2)]">Contenido de la etiqueta</label>
             <div className="flex flex-col gap-2">
-              {otherLists.length > 0 && (
-                <label className="flex items-center gap-2 text-sm text-[var(--text2)] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showTiers}
-                    onChange={e => setShowTiers(e.target.checked)}
-                    className="w-4 h-4 accent-[var(--accent)]"
-                  />
-                  Mostrar escalas de precio (otras listas activas)
-                </label>
+              {tierCandidates.length > 0 && (
+                <>
+                  <label className="flex items-center gap-2 text-sm text-[var(--text2)] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showTiers}
+                      onChange={e => setShowTiers(e.target.checked)}
+                      className="w-4 h-4 accent-[var(--accent)]"
+                    />
+                    Mostrar escalas de precio (otras listas activas)
+                  </label>
+
+                  {/* Elegir qué listas mostrar como escala (ocultar las que no
+                      querés que vea el cliente en góndola) */}
+                  {showTiers && (
+                    <div className="flex flex-col gap-1.5 pl-6">
+                      {tierCandidates.map(l => (
+                        <label key={l.id} className="flex items-center gap-2 text-xs text-[var(--text2)] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={!hiddenTierListIds.has(l.id)}
+                            onChange={e => setHiddenTierListIds(prev => {
+                              const next = new Set(prev)
+                              e.target.checked ? next.delete(l.id) : next.add(l.id)
+                              return next
+                            })}
+                            className="w-3.5 h-3.5 accent-[var(--accent)]"
+                          />
+                          {l.name}
+                          <span className="text-[var(--text3)]">
+                            {l.margin_pct > 0 ? '+' : ''}{l.margin_pct}% · desde {l.min_quantity} {l.min_quantity === 1 ? 'unidad' : 'unidades'}
+                          </span>
+                        </label>
+                      ))}
+                      {otherLists.length === 0 && (
+                        <p className="text-xs" style={{ color: '#b45309' }}>
+                          Ocultaste todas las escalas: la etiqueta saldrá sin escalas de precio.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
               <label className="flex items-center gap-2 text-sm text-[var(--text2)] cursor-pointer">
                 <input
