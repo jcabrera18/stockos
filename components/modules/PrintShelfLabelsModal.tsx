@@ -70,13 +70,6 @@ function qtyLabel(qty: number): string {
   return qty === 1 ? '1 unidad' : `x${qty} unidades`
 }
 
-function calcSaving(mainPrice: number, tierPrice: number): { pct: number; amount: number } {
-  if (mainPrice <= 0 || tierPrice >= mainPrice) return { pct: 0, amount: 0 }
-  const amount = Math.round(mainPrice - tierPrice)
-  const pct = Math.round((amount / mainPrice) * 100)
-  return { pct, amount }
-}
-
 // ─── Barcode helpers ──────────────────────────────────────────────────────────
 
 const MM_TO_PX = 96 / 25.4         // ≈ 3.78 px por mm @96dpi
@@ -213,9 +206,9 @@ function labelStyles(scope = '', columns = 4): string {
   const s = scope ? scope + ' ' : ''
   return `
     ${s}.grid { display:grid; grid-template-columns:repeat(${columns}, 1fr); gap:3mm; align-content:start; }
-    ${s}.label { border:1px solid #d1d5db; border-radius:2mm; overflow:hidden; min-height:42mm; display:flex; flex-direction:column; background:#fff; page-break-inside:avoid; break-inside:avoid; }
-    ${s}.label.empty { border-style:dashed; border-color:#e5e7eb; }
-    ${s}.lname { font-size:8pt; font-weight:700; line-height:1.2; color:#111; padding:2.5mm 3mm 2mm; word-break:break-word; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    ${s}.label { border:1px solid #ececea; border-radius:2mm; overflow:hidden; min-height:42mm; display:flex; flex-direction:column; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.05); page-break-inside:avoid; break-inside:avoid; }
+    ${s}.label.empty { border-style:dashed; border-color:#f0f0ee; box-shadow:none; }
+    ${s}.lname { font-size:8pt; font-weight:600; line-height:1.2; color:#111; padding:1.8mm 3mm 1.6mm; word-break:break-word; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
     ${s}.lmain { flex:1; display:flex; border-top:1px solid #e5e7eb; overflow:hidden; }
     ${s}.lmain-price { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:2mm 1.5mm; background:#f9fafb; overflow:hidden; }
     ${s}.lbarcode { border-top:1px solid #e5e7eb; padding:1.3mm 2mm; display:flex; align-items:center; justify-content:center; background:#fff; }
@@ -226,15 +219,16 @@ function labelStyles(scope = '', columns = 4): string {
     ${s}.label.compact .lname { padding:2mm 3mm 1.5mm; }
     ${s}.label.compact .lmain-price { padding:1.2mm 1.5mm; }
     ${s}.label.compact .lbarcode { padding:1mm 2mm; }
-    ${s}.lqty { font-size:5.5pt; font-weight:600; letter-spacing:0.08em; text-transform:uppercase; color:#9ca3af; margin-bottom:0.6mm; }
-    ${s}.lprice { font-size:22pt; font-weight:900; color:#111; line-height:1; letter-spacing:-0.8pt; white-space:nowrap; font-variant-numeric:tabular-nums; max-width:100%; }
+    ${s}.lqty { font-size:5.5pt; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#6b7280; margin-bottom:0.6mm; }
+    ${s}.lprice { font-size:22pt; font-weight:800; color:#111; line-height:1; letter-spacing:-0.8pt; white-space:nowrap; font-variant-numeric:tabular-nums; max-width:100%; margin-left:-0.28em; }
+    ${s}.lcurr { font-size:0.72em; font-weight:700; color:#374151; margin-right:0.04em; letter-spacing:0; }
     ${s}.lmain-cu { font-size:5.5pt; font-weight:600; color:#9ca3af; margin-top:0.5mm; letter-spacing:0.04em; }
     ${s}.ltiers { display:flex; flex-direction:column; border-top:1px solid #e5e7eb; }
     ${s}.ltier-row { display:flex; align-items:baseline; gap:1.5mm; padding:0.9mm 3mm; }
     ${s}.ltier-row:not(:last-child) { border-bottom:1px solid #f1f1f0; }
     ${s}.ltier-qty { font-size:7pt; font-weight:700; color:#6b7280; flex-shrink:0; min-width:4mm; }
     ${s}.ltier-price { flex:1; font-size:9.5pt; font-weight:800; color:#111; line-height:1; letter-spacing:-0.4pt; white-space:nowrap; font-variant-numeric:tabular-nums; }
-    ${s}.ltier-off { font-size:6pt; font-weight:700; color:#059669; flex-shrink:0; white-space:nowrap; }
+    ${s}.ltier-cu { font-size:6pt; font-weight:600; color:#9ca3af; flex-shrink:0; white-space:nowrap; letter-spacing:0.04em; }
   `
 }
 
@@ -262,6 +256,8 @@ function buildLabelHtml(
   const colContentMm = barcodeMaxWidthMm(columns) // ancho útil de la columna
   const mainPrice = getListPrice(p, mainList)
   const mainPriceStr = formatPrice(mainPrice)
+  // El "$" va en su propio span (más chico y tenue) para que el ojo vaya al número
+  const mainPriceHtml = mainPriceStr.replace(/^\$/, '<span class="lcurr">$</span>')
   const code = getProductCode(p)
   const tiers = (!p.use_fixed_sell_price && showTiers) ? otherLists : []
   const compact = tiers.length === 0
@@ -272,8 +268,7 @@ function buildLabelHtml(
   const tiersHtml = tiers.length > 0
     ? `<div class="ltiers">${tiers.map(l => {
         const tierPrice = getListPrice(p, l)
-        const { pct } = calcSaving(mainPrice, tierPrice)
-        return `<div class="ltier-row"><span class="ltier-qty">${l.min_quantity ?? 1}x</span><span class="ltier-price">${formatPrice(tierPrice)}</span>${pct > 0 ? `<span class="ltier-off">-${pct}%</span>` : ''}</div>`
+        return `<div class="ltier-row"><span class="ltier-qty">${l.min_quantity ?? 1}x</span><span class="ltier-price">${formatPrice(tierPrice)}</span><span class="ltier-cu">c/u</span></div>`
       }).join('')}</div>`
     : ''
 
@@ -284,7 +279,7 @@ function buildLabelHtml(
 
   const qtyHtml = showQty ? `<p class="lqty">${qtyLabel(mainQty)}</p>` : ''
 
-  return `<div class="label${compact ? ' compact' : ''}"><p class="lname">${escapeHtml(p.name)}</p><div class="lmain"><div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr, colContentMm)}pt">${mainPriceStr}</p>${mainQty > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div></div>${tiersHtml}${barcodeHtml}</div>`
+  return `<div class="label${compact ? ' compact' : ''}"><p class="lname">${escapeHtml(p.name)}</p><div class="lmain"><div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr, colContentMm)}pt">${mainPriceHtml}</p>${mainQty > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div></div>${tiersHtml}${barcodeHtml}</div>`
 }
 
 const selectClass =
