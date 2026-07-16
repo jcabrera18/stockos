@@ -23,6 +23,10 @@ interface ProductFormProps {
   onSaved: () => void
   onClose: () => void
   onNavigateToProduct: (id: string) => void
+  // Qué hacer tras crear un producto nuevo. En desktop (master-detail) se navega
+  // al detalle recién creado; en mobile el panel es full-screen y conviene cerrarlo
+  // para volver al listado. La página decide según el viewport.
+  onCreated?: (id: string) => void
 }
 
 const UNITS = [
@@ -115,7 +119,7 @@ function SectionLabel({ children }: { children: string }) {
   )
 }
 
-export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigateToProduct }: ProductFormProps) {
+export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigateToProduct, onCreated }: ProductFormProps) {
   const [form, setForm] = useState(emptyForm)
   const [barcodes, setBarcodes] = useState<string[]>([])
   const [newBarcode, setNewBarcode] = useState('')
@@ -567,7 +571,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         }
         toast.success('Producto creado')
         onSaved()
-        onNavigateToProduct(created.id)
+        ;(onCreated ?? onNavigateToProduct)(created.id)
       }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')

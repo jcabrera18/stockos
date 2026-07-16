@@ -493,6 +493,15 @@ export default function ProductsPage() {
   const handleNavigateToProduct = (id: string) =>
     loadProduct(id, data.find(d => d.id === id)?.stock_current)
 
+  // Tras crear un producto nuevo: en desktop es master-detail, así que navegamos
+  // al detalle recién creado; en mobile el panel ocupa toda la pantalla (breakpoint
+  // md), así que lo cerramos para devolver al usuario al listado.
+  const handleProductCreated = (id: string) => {
+    const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches
+    if (isMobile) closePanel()
+    else handleNavigateToProduct(id)
+  }
+
   const handleDelete = async () => {
     if (!deleteProduct) return
     setDeleting(true)
@@ -834,6 +843,7 @@ export default function ProductsPage() {
                   }}
                   onClose={closePanel}
                   onNavigateToProduct={handleNavigateToProduct}
+                  onCreated={handleProductCreated}
                 />
               </div>
             )}

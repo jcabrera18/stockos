@@ -14,10 +14,14 @@ interface QuickCustomerModalProps {
   onClose: () => void
   onCreated: (customer: CustomerSummary) => void
   initialName?: string  // pre-carga el nombre que escribió el cajero
+  // Se abre a veces desde adentro de un Drawer (ej. el drawer "Cobrar" del POS).
+  // Como Drawer y Modal comparten z-index por defecto y el Drawer va después en el
+  // DOM, el modal quedaba detrás. Permitimos elevarlo por encima del Drawer.
+  zIndex?: number
 }
 
 export function QuickCustomerModal({
-  open, onClose, onCreated, initialName = ''
+  open, onClose, onCreated, initialName = '', zIndex
 }: QuickCustomerModalProps) {
   const [form, setForm] = useState({ full_name: initialName, document: '', phone: '', credit_limit: '' })
   const [saving, setSaving] = useState(false)
@@ -62,7 +66,7 @@ export function QuickCustomerModal({
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Nuevo cliente" size="sm">
+    <Modal open={open} onClose={onClose} title="Nuevo cliente" size="sm" zIndex={zIndex}>
       <div className="space-y-4">
 
         <div className="px-3 py-2 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)] text-xs text-[var(--accent)]">

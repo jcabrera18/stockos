@@ -121,8 +121,6 @@ export default function AccountsPage() {
           <p>Vista rápida de los saldos de tus clientes: quién debe, el estado del crédito y la antigüedad de la deuda. Registrá cobros al instante sin entrar al detalle de cada cliente.</p>
         </HelpBanner>
 
-        {isAdmin && <CCPortfolioTop kpis={kpis} loading={kpisLoading} />}
-
         <div className="flex flex-wrap items-center gap-2">
           {tabs.map(t => (
             <button key={t.key} onClick={() => setFilter(t.key)}
@@ -227,6 +225,8 @@ export default function AccountsPage() {
             <Pagination pagination={pagination} onPageChange={handlePageChange} />
           </div>
         )}
+
+        {isAdmin && <CCPortfolioTop kpis={kpis} loading={kpisLoading} />}
 
         {isAdmin && <CCPortfolioBottom kpis={kpis} onSelectDebtor={openDebtorDetail} />}
       </div>

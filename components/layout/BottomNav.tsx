@@ -23,9 +23,12 @@ export function BottomNav() {
   // ── Nav principal (barra inferior) ───────────────────────
   const ALL_NAV_ITEMS = [
     { href: '/dashboard', label: 'Inicio', icon: LayoutDashboard, roles: ['owner', 'admin'] },
-    { href: '/orders', label: 'Pedidos', icon: ClipboardList, roles: ['owner', 'admin', 'cashier', 'stocker', 'seller'] },
+    { href: '/products', label: 'Productos', icon: Package, roles: ['owner', 'admin'] },
+    { href: '/pos', label: 'Cobrar', icon: Zap, roles: ['owner', 'admin', 'cashier'] },
+    { href: '/accounts', label: 'Cuentas', icon: Wallet, roles: ['owner', 'admin', 'cashier'] },
     { href: '/cash-register', label: 'Caja', icon: CreditCard, roles: ['owner', 'admin', 'cashier'] },
     { href: '/sales', label: 'Ventas', icon: ShoppingCart, roles: ['owner', 'admin', 'cashier'] },
+    { href: '/orders', label: 'Pedidos', icon: ClipboardList, roles: ['owner', 'admin', 'cashier', 'stocker', 'seller'] },
   ]
 
   const NAV_ITEMS = ALL_NAV_ITEMS.filter(item => item.roles.includes(role))

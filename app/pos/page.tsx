@@ -1713,6 +1713,9 @@ export default function POSPage() {
         <QuickCustomerModal open={quickCustomerModal} onClose={() => setQuickCustomerModal(false)}
           onCreated={(customer) => { setSelectedCustomer(customer); setCustomerQuery(''); setCustomerResults([]) }}
           initialName={customerQuery}
+          // Se abre tanto desde el carrito como desde adentro del Drawer "Cobrar"
+          // (z-index 50/51). Lo elevamos por encima para que no quede detrás.
+          zIndex={60}
         />
 
         {/* Header carrito */}

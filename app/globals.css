@@ -92,6 +92,20 @@ button, a, [role="button"] {
   touch-action: manipulation;
 }
 
+/* ─── Anti-zoom iOS al enfocar inputs ────────────────────────
+   Safari en iOS hace auto-zoom cuando el campo enfocado tiene
+   font-size < 16px. Nuestros inputs usan text-sm (14px), así que
+   en mobile forzamos 16px para evitar el salto de zoom. En ≥768px
+   volvemos a heredar el tamaño del componente (densidad desktop).
+   No usamos maximum-scale para no matar el pinch-zoom del usuario. */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
 /* Tailwind v4 quita cursor:pointer por defecto en botones */
 button:not(:disabled), [role="button"]:not([aria-disabled="true"]) {
   cursor: pointer;

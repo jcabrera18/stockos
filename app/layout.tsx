@@ -83,6 +83,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </Suspense>
         <Toaster
           position="bottom-right"
+          // En mobile los toasts iban a bottom:0 y tapaban la barra inferior
+          // (BottomNav global y las tabs Buscar/Carrito del POS). Los levantamos
+          // por encima de esa barra (~56px + safe-area).
+          mobileOffset={{ bottom: 'calc(72px + env(safe-area-inset-bottom, 0px))' }}
           toastOptions={{
             style: {
               background: 'var(--surface)',

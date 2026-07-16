@@ -326,6 +326,15 @@ export async function cacheProductFromScan(product: Product): Promise<void> {
 
 // ── Sync con backend ──────────────────────────────────────────────────────────
 
+// Ventana de solape para el sync incremental. El cursor `updated_since` se compara
+// contra `products.updated_at` que setea el SERVIDOR, pero el timestamp del cursor lo
+// generaba la PC del POS. Si el reloj de la caja va adelantado (desfase típico de
+// varios segundos/minutos), un producto recién creado tiene un `updated_at` de servidor
+// POR DEBAJO del cursor y ningún sync incremental lo trae — recién aparece al re-entrar
+// al POS (full sync). Reconsultamos una ventana hacia atrás para tolerar ese desfase.
+// bulkPut es idempotente, así que reprocesar unas filas recientes no cuesta nada.
+const SYNC_OVERLAP_MS = 5 * 60 * 1000 // 5 minutos
+
 async function fetchAllProducts(warehouseId?: string | null, since?: string): Promise<Product[]> {
   const params = {
     limit: 500,
@@ -369,17 +378,35 @@ export async function syncProducts(
   opts: { full?: boolean } = {},
 ): Promise<void> {
   const meta = await posDB.syncMeta.get('products')
-  const now = new Date().toISOString()
+  const runAt = new Date().toISOString() // reloj local — sólo para el indicador de UI
 
   const cachedCount = await posDB.products.count()
   const fullFetch = opts.full || cachedCount === 0
-  const since = fullFetch ? undefined : meta?.synced_at
+  // Cursor con solape hacia atrás → tolera desfase de reloj cliente↔servidor.
+  const since = fullFetch || !meta?.synced_at
+    ? undefined
+    : new Date(new Date(meta.synced_at).getTime() - SYNC_OVERLAP_MS).toISOString()
 
   const products = await fetchAllProducts(warehouseId, since)
 
+  // Nuevo cursor anclado al reloj del SERVIDOR (máximo updated_at de lo traído), nunca
+  // al reloj del cliente. Así el cursor no se "envenena" con un reloj local adelantado.
+  // Si no vino nada, conservamos el cursor previo (o now sólo si nunca hubo cursor).
+  const serverMaxMs = products.reduce((m, p) => {
+    const t = p.updated_at ? Date.parse(p.updated_at) : NaN
+    return Number.isFinite(t) && t > m ? t : m
+  }, -Infinity)
+  const nextCursor = serverMaxMs > -Infinity
+    ? new Date(serverMaxMs).toISOString()
+    : (meta?.synced_at ?? new Date().toISOString())
+
   if (!fullFetch && products.length === 0) {
-    // Sin cambios desde el último sync — solo actualizar el timestamp
-    await posDB.syncMeta.put({ key: 'products', synced_at: now })
+    // Sin cambios desde el último sync — conservamos el cursor de servidor y
+    // registramos el momento del chequeo para el indicador "última sync".
+    await posDB.syncMeta.bulkPut([
+      { key: 'products', synced_at: nextCursor },
+      { key: 'products_last_run', synced_at: runAt },
+    ])
     return
   }
 
@@ -409,7 +436,10 @@ export async function syncProducts(
     }
     if (active.length > 0) await posDB.products.bulkPut(active)
     if (barcodeEntries.length > 0) await posDB.barcodes.bulkPut(barcodeEntries)
-    await posDB.syncMeta.put({ key: 'products', synced_at: now })
+    await posDB.syncMeta.bulkPut([
+      { key: 'products', synced_at: nextCursor },
+      { key: 'products_last_run', synced_at: runAt },
+    ])
   })
 }
 
@@ -537,7 +567,11 @@ async function syncPriceRules(): Promise<void> {
 
 export async function getLastSyncTime(): Promise<Date | null> {
   try {
-    const meta = await posDB.syncMeta.get('products')
+    // `products_last_run` es el reloj de pared del último sync (para el indicador de UI).
+    // `products` guarda el cursor incremental anclado al reloj del servidor, que puede
+    // ser mucho más viejo (el último cambio real) → no sirve para "hace cuánto sincronicé".
+    const meta = (await posDB.syncMeta.get('products_last_run'))
+      ?? (await posDB.syncMeta.get('products'))
     return meta ? new Date(meta.synced_at) : null
   } catch {
     return null
