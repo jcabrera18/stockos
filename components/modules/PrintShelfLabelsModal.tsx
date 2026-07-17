@@ -188,8 +188,8 @@ const FALLBACK_LIST: PriceList = {
 function labelsPerPage(showTiers: boolean, showCode: boolean, columns: number): number {
   const usableMm = 277 // A4 297mm − 2×10mm de margen
   const gapMm = 3
-  // alto aprox. de fila: con escalas ~46mm; compacto ~23/17mm según barcode
-  const rowMm = showTiers ? 46 : (showCode ? 23 : 17)
+  // alto aprox. de fila (escalado por columnas): con escalas ~46mm; compacto ~23/17mm según barcode
+  const rowMm = (showTiers ? 46 : (showCode ? 23 : 17)) * colScale(columns)
   const rows = Math.max(1, Math.floor((usableMm + gapMm) / (rowMm + gapMm)))
   return rows * columns
 }
@@ -201,42 +201,55 @@ function escapeHtml(s: string): string {
 
 // ─── HTML + CSS compartidos entre preview y print (WYSIWYG) ────────────────────
 
+/**
+ * Factor de escala según columnas: menos columnas = etiqueta más ancha = todo
+ * más grande (fuentes, altos, paddings, techo del precio). Así una etiqueta de
+ * góndola en 1-2 columnas se lee a 1-2 metros y no queda el precio "colgado",
+ * mientras que en 4-5 columnas queda densa para imprimir muchas por hoja.
+ */
+function colScale(columns: number): number {
+  return columns <= 1 ? 2.2 : columns === 2 ? 1.6 : columns === 3 ? 1.25 : columns === 4 ? 1 : 0.88
+}
+
 /** Reglas de la etiqueta. `scope` permite aislarlas dentro del preview. */
 function labelStyles(scope = '', columns = 4): string {
   const s = scope ? scope + ' ' : ''
+  const k = colScale(columns)
+  const pt = (v: number) => +(v * k).toFixed(2) // tamaños de fuente escalados
+  const mm = (v: number) => +(v * k).toFixed(2) // paddings/altos escalados
   return `
     ${s}.grid { display:grid; grid-template-columns:repeat(${columns}, minmax(0, 1fr)); gap:3mm; align-content:start; }
     /* Sin overflow:hidden — con border-radius, Chrome recorta el borde derecho/inferior al exportar PDF y quedan finos */
-    ${s}.label { border:1.5px solid #e0e0db; border-radius:2mm; min-height:42mm; display:flex; flex-direction:column; background:#fff; page-break-inside:avoid; break-inside:avoid; }
+    ${s}.label { border:1.5px solid #e0e0db; border-radius:2mm; min-height:${mm(42)}mm; display:flex; flex-direction:column; background:#fff; page-break-inside:avoid; break-inside:avoid; }
     ${s}.label.empty { border-style:dashed; border-color:#efefec; }
     /* Nombre: una sola línea, semibold, poco alto, ellipsis si desborda */
-    ${s}.lname { font-size:7.5pt; font-weight:600; line-height:1.15; color:#3a3a36; padding:1.6mm 3mm 1.2mm; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-transform:uppercase; letter-spacing:0.02em; }
+    ${s}.lname { font-size:${pt(7.5)}pt; font-weight:600; line-height:1.15; color:#3a3a36; padding:${mm(1.6)}mm ${mm(3)}mm ${mm(1.2)}mm; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-transform:uppercase; letter-spacing:0.02em; }
     /* Bloque del precio: ocupa el alto disponible, sin líneas ni fondo que lo dividan */
-    ${s}.lmain-price { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0.5mm 2mm 2mm; overflow:hidden; }
-    ${s}.lqty { font-size:6pt; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:#4a4a44; margin-bottom:0.4mm; }
+    ${s}.lmain-price { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:${mm(0.5)}mm ${mm(2)}mm ${mm(2)}mm; overflow:hidden; }
+    ${s}.lqty { font-size:${pt(6)}pt; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:#4a4a44; margin-bottom:${mm(0.4)}mm; }
     ${s}.lprice { font-weight:700; color:#111; line-height:0.92; letter-spacing:-0.6pt; white-space:nowrap; font-variant-numeric:tabular-nums; max-width:100%; margin-left:-0.22em; }
     ${s}.lcurr { font-size:0.6em; font-weight:600; color:#6a6a64; margin-right:0.08em; }
-    ${s}.lmain-cu { font-size:6pt; font-weight:600; color:#9a9a94; margin-top:0.6mm; letter-spacing:0.04em; }
-    ${s}.lbarcode { border-top:1px solid #efefec; padding:1.3mm 2mm; display:flex; align-items:center; justify-content:center; background:#fff; }
+    ${s}.lmain-cu { font-size:${pt(6)}pt; font-weight:600; color:#9a9a94; margin-top:${mm(0.6)}mm; letter-spacing:0.04em; }
+    ${s}.lbarcode { border-top:1px solid #efefec; padding:${mm(1.3)}mm ${mm(2)}mm; display:flex; align-items:center; justify-content:center; background:#fff; }
     ${s}.lbarcode svg { display:block; max-width:100%; height:auto; shape-rendering:crispEdges; }
-    ${s}.lbarcode-fallback { font-family:'Courier New',monospace; font-size:8pt; font-weight:700; letter-spacing:0.06em; color:#111; word-break:break-all; text-align:center; }
+    ${s}.lbarcode-fallback { font-family:'Courier New',monospace; font-size:${pt(8)}pt; font-weight:700; letter-spacing:0.06em; color:#111; word-break:break-all; text-align:center; }
     /* Modo compacto: etiquetas sin escalas — más bajas */
-    ${s}.label.compact { min-height:23mm; }
-    ${s}.label.compact .lname { padding:1.4mm 3mm 1mm; }
-    ${s}.label.compact .lmain-price { padding:0.5mm 2mm 1.4mm; }
-    ${s}.label.compact .lbarcode { padding:1mm 2mm; }
+    ${s}.label.compact { min-height:${mm(23)}mm; }
+    ${s}.label.compact .lname { padding:${mm(1.4)}mm ${mm(3)}mm ${mm(1)}mm; }
+    ${s}.label.compact .lmain-price { padding:${mm(0.5)}mm ${mm(2)}mm ${mm(1.4)}mm; }
+    ${s}.label.compact .lbarcode { padding:${mm(1)}mm ${mm(2)}mm; }
     /* Promociones por cantidad: único separador arriba, jerarquía clara y precio con presencia */
     ${s}.ltiers { display:grid; grid-template-columns:minmax(0, 1fr); border-top:1.5px solid #e6e6e2; background:#fafaf8; }
     ${s}.ltiers:last-child { border-radius:0 0 calc(2mm - 1.5px) calc(2mm - 1.5px); }
     ${s}.lbarcode:last-child { border-radius:0 0 calc(2mm - 1.5px) calc(2mm - 1.5px); }
     ${s}.ltiers.two { grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); }
     ${s}.ltiers.two .ltier-row:nth-child(odd) { border-right:1px solid #ececea; }
-    ${s}.ltiers.two .ltier-price { font-size:11.5pt; }
-    ${s}.ltier-row { display:flex; flex-direction:column; align-items:flex-start; padding:1.4mm 3mm 1.3mm; }
-    ${s}.ltier-lead { font-size:6pt; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#5a5a54; margin-bottom:0.2mm; }
-    ${s}.ltier-main { display:flex; align-items:baseline; gap:1.2mm; }
-    ${s}.ltier-price { font-size:13pt; font-weight:700; color:#111; line-height:1; letter-spacing:-0.4pt; white-space:nowrap; font-variant-numeric:tabular-nums; }
-    ${s}.ltier-cu { font-size:5.5pt; font-weight:600; color:#9a9a94; letter-spacing:0.02em; }
+    ${s}.ltiers.two .ltier-price { font-size:${pt(11.5)}pt; }
+    ${s}.ltier-row { display:flex; flex-direction:column; align-items:flex-start; padding:${mm(1.4)}mm ${mm(3)}mm ${mm(1.3)}mm; }
+    ${s}.ltier-lead { font-size:${pt(8.5)}pt; font-weight:800; letter-spacing:0.04em; text-transform:uppercase; color:#2a2a26; margin-bottom:${mm(0.5)}mm; }
+    ${s}.ltier-main { display:flex; align-items:baseline; gap:${mm(1.2)}mm; }
+    ${s}.ltier-price { font-size:${pt(13)}pt; font-weight:700; color:#111; line-height:1; letter-spacing:-0.4pt; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    ${s}.ltier-cu { font-size:${pt(5.5)}pt; font-weight:600; color:#9a9a94; letter-spacing:0.02em; }
   `
 }
 
@@ -246,13 +259,13 @@ function labelStyles(scope = '', columns = 4): string {
  * muchos dígitos. El "$" es ~0.6em, así que pesa menos que un carácter pleno.
  * Cases probados: $999, $12.450, $145.990, $1.250.000.
  */
-function mainPriceFontPt(formatted: string, usableMm: number): number {
+function mainPriceFontPt(formatted: string, usableMm: number, maxPt: number): number {
   // Ancho efectivo en "caracteres plenos": el "$" cuenta ~0.6
   const nEff = (formatted.length - 1) + 0.6
   const charMm = 0.20 // ancho aprox. por carácter ≈ fontPt × 0.20mm (bold 700)
   const fit = usableMm / (nEff * charMm)
-  // Techo alto para que precios cortos ($999) llenen el cartel; piso legible a 1-2m
-  return Math.max(15, Math.min(48, Math.floor(fit)))
+  // Techo (escalado por columnas) para que precios cortos llenen el cartel; piso legible a 1-2m
+  return Math.max(15, Math.min(maxPt, Math.floor(fit)))
 }
 
 /** Genera el HTML de una etiqueta. Idéntico en preview y en print. */
@@ -298,7 +311,11 @@ function buildLabelHtml(
 
   const qtyHtml = showQty ? `<p class="lqty">${qtyLabel(mainQty)}</p>` : ''
 
-  return `<div class="label${compact ? ' compact' : ''}"><p class="lname">${escapeHtml(p.name)}</p><div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr, colContentMm)}pt">${mainPriceHtml}</p>${mainQty > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div>${tiersHtml}${barcodeHtml}</div>`
+  // Techo del precio escalado por columnas (base 44pt a 4 col) para que en 1-2
+  // columnas el precio crezca de verdad y no quede "colgado".
+  const priceMaxPt = Math.round(44 * colScale(columns))
+
+  return `<div class="label${compact ? ' compact' : ''}"><p class="lname">${escapeHtml(p.name)}</p><div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr, colContentMm, priceMaxPt)}pt">${mainPriceHtml}</p>${mainQty > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div>${tiersHtml}${barcodeHtml}</div>`
 }
 
 const selectClass =
@@ -616,6 +633,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-[var(--text2)]">Columnas por hoja</label>
             <select value={columns} onChange={e => setColumns(Number(e.target.value))} className={selectClass}>
+              <option value={1}>1 columna — cartel de góndola</option>
               <option value={2}>2 columnas — etiquetas muy grandes</option>
               <option value={3}>3 columnas — etiquetas grandes</option>
               <option value={4}>4 columnas — estándar</option>
