@@ -188,8 +188,8 @@ const FALLBACK_LIST: PriceList = {
 function labelsPerPage(showTiers: boolean, showCode: boolean, columns: number): number {
   const usableMm = 277 // A4 297mm − 2×10mm de margen
   const gapMm = 3
-  // alto aprox. de fila: con escalas ~42mm; compacto ~23/17mm según barcode
-  const rowMm = showTiers ? 42 : (showCode ? 23 : 17)
+  // alto aprox. de fila: con escalas ~46mm; compacto ~23/17mm según barcode
+  const rowMm = showTiers ? 46 : (showCode ? 23 : 17)
   const rows = Math.max(1, Math.floor((usableMm + gapMm) / (rowMm + gapMm)))
   return rows * columns
 }
@@ -205,43 +205,54 @@ function escapeHtml(s: string): string {
 function labelStyles(scope = '', columns = 4): string {
   const s = scope ? scope + ' ' : ''
   return `
-    ${s}.grid { display:grid; grid-template-columns:repeat(${columns}, 1fr); gap:3mm; align-content:start; }
-    ${s}.label { border:1px solid #ececea; border-radius:2mm; overflow:hidden; min-height:42mm; display:flex; flex-direction:column; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.05); page-break-inside:avoid; break-inside:avoid; }
-    ${s}.label.empty { border-style:dashed; border-color:#f0f0ee; box-shadow:none; }
-    ${s}.lname { font-size:8pt; font-weight:600; line-height:1.2; color:#111; padding:1.8mm 3mm 1.6mm; word-break:break-word; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-    ${s}.lmain { flex:1; display:flex; border-top:1px solid #e5e7eb; overflow:hidden; }
-    ${s}.lmain-price { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:2mm 1.5mm; background:#f9fafb; overflow:hidden; }
-    ${s}.lbarcode { border-top:1px solid #e5e7eb; padding:1.3mm 2mm; display:flex; align-items:center; justify-content:center; background:#fff; }
+    ${s}.grid { display:grid; grid-template-columns:repeat(${columns}, minmax(0, 1fr)); gap:3mm; align-content:start; }
+    /* Sin overflow:hidden — con border-radius, Chrome recorta el borde derecho/inferior al exportar PDF y quedan finos */
+    ${s}.label { border:1.5px solid #e0e0db; border-radius:2mm; min-height:42mm; display:flex; flex-direction:column; background:#fff; page-break-inside:avoid; break-inside:avoid; }
+    ${s}.label.empty { border-style:dashed; border-color:#efefec; }
+    /* Nombre: una sola línea, semibold, poco alto, ellipsis si desborda */
+    ${s}.lname { font-size:7.5pt; font-weight:600; line-height:1.15; color:#3a3a36; padding:1.6mm 3mm 1.2mm; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-transform:uppercase; letter-spacing:0.02em; }
+    /* Bloque del precio: ocupa el alto disponible, sin líneas ni fondo que lo dividan */
+    ${s}.lmain-price { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0.5mm 2mm 2mm; overflow:hidden; }
+    ${s}.lqty { font-size:6pt; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:#4a4a44; margin-bottom:0.4mm; }
+    ${s}.lprice { font-weight:700; color:#111; line-height:0.92; letter-spacing:-0.6pt; white-space:nowrap; font-variant-numeric:tabular-nums; max-width:100%; margin-left:-0.22em; }
+    ${s}.lcurr { font-size:0.6em; font-weight:600; color:#6a6a64; margin-right:0.08em; }
+    ${s}.lmain-cu { font-size:6pt; font-weight:600; color:#9a9a94; margin-top:0.6mm; letter-spacing:0.04em; }
+    ${s}.lbarcode { border-top:1px solid #efefec; padding:1.3mm 2mm; display:flex; align-items:center; justify-content:center; background:#fff; }
     ${s}.lbarcode svg { display:block; max-width:100%; height:auto; shape-rendering:crispEdges; }
     ${s}.lbarcode-fallback { font-family:'Courier New',monospace; font-size:8pt; font-weight:700; letter-spacing:0.06em; color:#111; word-break:break-all; text-align:center; }
-    /* Modo compacto: etiquetas sin escalas — sin "1 UNIDAD", más bajas */
+    /* Modo compacto: etiquetas sin escalas — más bajas */
     ${s}.label.compact { min-height:23mm; }
-    ${s}.label.compact .lname { padding:2mm 3mm 1.5mm; }
-    ${s}.label.compact .lmain-price { padding:1.2mm 1.5mm; }
+    ${s}.label.compact .lname { padding:1.4mm 3mm 1mm; }
+    ${s}.label.compact .lmain-price { padding:0.5mm 2mm 1.4mm; }
     ${s}.label.compact .lbarcode { padding:1mm 2mm; }
-    ${s}.lqty { font-size:5.5pt; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; color:#6b7280; margin-bottom:0.6mm; }
-    ${s}.lprice { font-size:22pt; font-weight:800; color:#111; line-height:1; letter-spacing:-0.8pt; white-space:nowrap; font-variant-numeric:tabular-nums; max-width:100%; margin-left:-0.28em; }
-    ${s}.lcurr { font-size:0.72em; font-weight:700; color:#374151; margin-right:0.04em; letter-spacing:0; }
-    ${s}.lmain-cu { font-size:5.5pt; font-weight:600; color:#9ca3af; margin-top:0.5mm; letter-spacing:0.04em; }
-    ${s}.ltiers { display:flex; flex-direction:column; border-top:1px solid #e5e7eb; }
-    ${s}.ltier-row { display:flex; align-items:baseline; gap:1.5mm; padding:0.9mm 3mm; }
-    ${s}.ltier-row:not(:last-child) { border-bottom:1px solid #f1f1f0; }
-    ${s}.ltier-qty { font-size:7pt; font-weight:700; color:#6b7280; flex-shrink:0; min-width:4mm; }
-    ${s}.ltier-price { flex:1; font-size:9.5pt; font-weight:800; color:#111; line-height:1; letter-spacing:-0.4pt; white-space:nowrap; font-variant-numeric:tabular-nums; }
-    ${s}.ltier-cu { font-size:6pt; font-weight:600; color:#9ca3af; flex-shrink:0; white-space:nowrap; letter-spacing:0.04em; }
+    /* Promociones por cantidad: único separador arriba, jerarquía clara y precio con presencia */
+    ${s}.ltiers { display:grid; grid-template-columns:minmax(0, 1fr); border-top:1.5px solid #e6e6e2; background:#fafaf8; }
+    ${s}.ltiers:last-child { border-radius:0 0 calc(2mm - 1.5px) calc(2mm - 1.5px); }
+    ${s}.lbarcode:last-child { border-radius:0 0 calc(2mm - 1.5px) calc(2mm - 1.5px); }
+    ${s}.ltiers.two { grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); }
+    ${s}.ltiers.two .ltier-row:nth-child(odd) { border-right:1px solid #ececea; }
+    ${s}.ltiers.two .ltier-price { font-size:11.5pt; }
+    ${s}.ltier-row { display:flex; flex-direction:column; align-items:flex-start; padding:1.4mm 3mm 1.3mm; }
+    ${s}.ltier-lead { font-size:6pt; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:#5a5a54; margin-bottom:0.2mm; }
+    ${s}.ltier-main { display:flex; align-items:baseline; gap:1.2mm; }
+    ${s}.ltier-price { font-size:13pt; font-weight:700; color:#111; line-height:1; letter-spacing:-0.4pt; white-space:nowrap; font-variant-numeric:tabular-nums; }
+    ${s}.ltier-cu { font-size:5.5pt; font-weight:600; color:#9a9a94; letter-spacing:0.02em; }
   `
 }
 
 /**
- * Tamaño del precio principal calculado para llenar el ancho disponible sin
- * desbordar. Aprovecha todo el espacio (precios cortos quedan grandes) y se
- * achica solo lo necesario en precios largos.
+ * Tamaño del precio principal. Llena el ancho disponible para que domine la
+ * etiqueta (~60% del alto útil) y se achica solo lo necesario en precios de
+ * muchos dígitos. El "$" es ~0.6em, así que pesa menos que un carácter pleno.
+ * Cases probados: $999, $12.450, $145.990, $1.250.000.
  */
 function mainPriceFontPt(formatted: string, usableMm: number): number {
-  const n = formatted.length // incluye "$" y separadores de miles
-  const charMm = 0.212 // ancho aprox. por carácter ≈ fontPt × 0.212mm (bold)
-  const fit = usableMm / (n * charMm)
-  return Math.max(11, Math.min(28, Math.floor(fit)))
+  // Ancho efectivo en "caracteres plenos": el "$" cuenta ~0.6
+  const nEff = (formatted.length - 1) + 0.6
+  const charMm = 0.20 // ancho aprox. por carácter ≈ fontPt × 0.20mm (bold 700)
+  const fit = usableMm / (nEff * charMm)
+  // Techo alto para que precios cortos ($999) llenen el cartel; piso legible a 1-2m
+  return Math.max(15, Math.min(48, Math.floor(fit)))
 }
 
 /** Genera el HTML de una etiqueta. Idéntico en preview y en print. */
@@ -265,10 +276,18 @@ function buildLabelHtml(
   const mainQty = mainList.min_quantity ?? 1
   const showQty = !compact || mainQty > 1
 
+  // Escalas en 2 columnas cuando hay 2+ y el cartel es ancho (3-4 col/hoja):
+  // aprovecha el blanco de la derecha. En 5 col/hoja o precios largos → 1 columna.
+  const maxTierLen = tiers.length
+    ? Math.max(...tiers.map(l => formatPrice(getListPrice(p, l)).length))
+    : 0
+  const twoColTiers = tiers.length >= 2 && columns <= 4 && maxTierLen <= 8
+
   const tiersHtml = tiers.length > 0
-    ? `<div class="ltiers">${tiers.map(l => {
+    ? `<div class="ltiers${twoColTiers ? ' two' : ''}">${tiers.map(l => {
+        const q = l.min_quantity ?? 1
         const tierPrice = getListPrice(p, l)
-        return `<div class="ltier-row"><span class="ltier-qty">${l.min_quantity ?? 1}x</span><span class="ltier-price">${formatPrice(tierPrice)}</span><span class="ltier-cu">c/u</span></div>`
+        return `<div class="ltier-row"><span class="ltier-lead">Llevando ${q}</span><span class="ltier-main"><span class="ltier-price">${formatPrice(tierPrice)}</span><span class="ltier-cu">c/u</span></span></div>`
       }).join('')}</div>`
     : ''
 
@@ -279,7 +298,7 @@ function buildLabelHtml(
 
   const qtyHtml = showQty ? `<p class="lqty">${qtyLabel(mainQty)}</p>` : ''
 
-  return `<div class="label${compact ? ' compact' : ''}"><p class="lname">${escapeHtml(p.name)}</p><div class="lmain"><div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr, colContentMm)}pt">${mainPriceHtml}</p>${mainQty > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div></div>${tiersHtml}${barcodeHtml}</div>`
+  return `<div class="label${compact ? ' compact' : ''}"><p class="lname">${escapeHtml(p.name)}</p><div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr, colContentMm)}pt">${mainPriceHtml}</p>${mainQty > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div>${tiersHtml}${barcodeHtml}</div>`
 }
 
 const selectClass =
@@ -597,6 +616,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-[var(--text2)]">Columnas por hoja</label>
             <select value={columns} onChange={e => setColumns(Number(e.target.value))} className={selectClass}>
+              <option value={2}>2 columnas — etiquetas muy grandes</option>
               <option value={3}>3 columnas — etiquetas grandes</option>
               <option value={4}>4 columnas — estándar</option>
               <option value={5}>5 columnas — etiquetas chicas (más por hoja)</option>
