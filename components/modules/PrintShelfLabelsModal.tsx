@@ -250,6 +250,10 @@ function labelStyles(scope = '', columns = 4): string {
     ${s}.ltier-main { display:flex; align-items:baseline; gap:${mm(1.2)}mm; }
     ${s}.ltier-price { font-size:${pt(13)}pt; font-weight:700; color:#111; line-height:1; letter-spacing:-0.4pt; white-space:nowrap; font-variant-numeric:tabular-nums; }
     ${s}.ltier-cu { font-size:${pt(5.5)}pt; font-weight:600; color:#9a9a94; letter-spacing:0.02em; }
+    /* 1 columna (cartel apaisado): precio a la izquierda, listas apiladas a la derecha */
+    ${s}.label.wide .lbody { flex:1; display:flex; align-items:stretch; }
+    ${s}.label.wide .lmain-price { flex:1; }
+    ${s}.label.wide .ltiers { flex:0 0 34%; border-top:none; border-left:1.5px solid #e6e6e2; align-content:center; border-radius:0 0 calc(2mm - 1.5px) 0; }
   `
 }
 
@@ -289,12 +293,16 @@ function buildLabelHtml(
   const mainQty = mainList.min_quantity ?? 1
   const showQty = !compact || mainQty > 1
 
+  // 1 columna = cartel apaisado: precio a la izquierda, listas apiladas a la derecha
+  const wide = columns === 1
+
   // Escalas en 2 columnas cuando hay 2+ y el cartel es ancho (3-4 col/hoja):
   // aprovecha el blanco de la derecha. En 5 col/hoja o precios largos → 1 columna.
+  // En modo wide (1 col) las listas ya van a la derecha, siempre apiladas.
   const maxTierLen = tiers.length
     ? Math.max(...tiers.map(l => formatPrice(getListPrice(p, l)).length))
     : 0
-  const twoColTiers = tiers.length >= 2 && columns <= 4 && maxTierLen <= 8
+  const twoColTiers = !wide && tiers.length >= 2 && columns <= 4 && maxTierLen <= 8
 
   const tiersHtml = tiers.length > 0
     ? `<div class="ltiers${twoColTiers ? ' two' : ''}">${tiers.map(l => {
@@ -312,10 +320,19 @@ function buildLabelHtml(
   const qtyHtml = showQty ? `<p class="lqty">${qtyLabel(mainQty)}</p>` : ''
 
   // Techo del precio escalado por columnas (base 44pt a 4 col) para que en 1-2
-  // columnas el precio crezca de verdad y no quede "colgado".
-  const priceMaxPt = Math.round(44 * colScale(columns))
+  // columnas el precio crezca de verdad y no quede "colgado". En wide el precio
+  // comparte el ancho con las listas de la derecha, así que se achica un poco.
+  const priceMaxPt = wide ? 72 : Math.round(44 * colScale(columns))
+  const priceUsableMm = wide && tiers.length > 0 ? colContentMm * 0.6 : colContentMm
 
-  return `<div class="label${compact ? ' compact' : ''}"><p class="lname">${escapeHtml(p.name)}</p><div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr, colContentMm, priceMaxPt)}pt">${mainPriceHtml}</p>${mainQty > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div>${tiersHtml}${barcodeHtml}</div>`
+  const priceBlock = `<div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr, priceUsableMm, priceMaxPt)}pt">${mainPriceHtml}</p>${mainQty > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div>`
+
+  // En wide, precio + listas van en una fila (izquierda/derecha); si no, apilados
+  const body = wide && tiers.length > 0
+    ? `<div class="lbody">${priceBlock}${tiersHtml}</div>`
+    : `${priceBlock}${tiersHtml}`
+
+  return `<div class="label${compact ? ' compact' : ''}${wide ? ' wide' : ''}"><p class="lname">${escapeHtml(p.name)}</p>${body}${barcodeHtml}</div>`
 }
 
 const selectClass =
