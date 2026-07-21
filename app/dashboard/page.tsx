@@ -6,6 +6,7 @@ import { HelpBanner } from '@/components/ui/HelpBanner'
 import { StatCard } from '@/components/ui/StatCard'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
+import { Modal } from '@/components/ui/Modal'
 import { StatCardSkeleton, CardListSkeleton } from '@/components/ui/Skeleton'
 import { SmartInsightsCard } from '@/components/modules/SmartInsightsCard'
 // import { OnboardingCard } from '@/components/onboarding/OnboardingCard' // WIP oculto
@@ -24,8 +25,10 @@ interface SalesByHour   { hour: number; label: string; total_sales: number; tota
 interface PaymentMethod { method: string; total: number }
 interface RecentSale    { id: string; total: number; payment_method: string; created_at: string }
 interface CriticalItem  { id: string; name: string; stock_current: number; stock_min: number; supplier_name: string | null }
+interface StockAlert    { id: string; name: string; stock_current: number; stock_min: number; stock_status: 'ok' | 'bajo' | 'critico' | 'sin_stock'; supplier_name: string | null; category_name: string | null }
 interface WeekComp      { this_week: number; prev_week: number; diff_pct: number; this_count: number; prev_count: number }
 interface DailySale     { sale_date: string; total_sales: number; total_revenue: number; gross_margin: number }
+interface MonthlySale   { month: string; total_sales: number; total_revenue: number }
 interface TopProduct    { name: string; revenue: number; units: number }
 interface TopCategory   { label: string; revenue: number }
 interface BranchSale    { branch_id: string; branch_name: string; revenue_today: number; sales_today: number }
@@ -112,22 +115,40 @@ export default function DashboardPage() {
 
   const [data,        setData]        = useState<DashboardData | null>(null)
   const [salesLast30, setSalesLast30] = useState<DailySale[]>([])
+  const [salesByMonth, setSalesByMonth] = useState<MonthlySale[]>([])
   const [loading,     setLoading]     = useState(true)
   const [refreshing,  setRefreshing]  = useState(false)
+
+  // Modal listado completo de alertas de stock
+  const [alertsOpen,    setAlertsOpen]    = useState(false)
+  const [alerts,        setAlerts]        = useState<StockAlert[]>([])
+  const [alertsLoading, setAlertsLoading] = useState(false)
+
+  const openAlerts = useCallback(async () => {
+    setAlertsOpen(true)
+    setAlertsLoading(true)
+    try {
+      const rows = await api.get<StockAlert[]>('/api/stock/alerts')
+      setAlerts(rows ?? [])
+    } catch (err) { console.error(err) }
+    finally { setAlertsLoading(false) }
+  }, [])
 
   const fetchAll = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
     else setRefreshing(true)
     try {
-      const [result, last30] = await Promise.all([
+      const [result, last30, byMonth] = await Promise.all([
         api.get<DashboardData>('/api/dashboard/all', {
           today_from: getPeriodDates('today').from,
           week_from:  getLocalWeekStart(),
         }),
         api.get<DailySale[]>('/api/dashboard/sales-last-30'),
+        api.get<MonthlySale[]>('/api/dashboard/sales-by-month'),
       ])
       setData(result)
       setSalesLast30(last30 ?? [])
+      setSalesByMonth(byMonth ?? [])
     } catch (err) { console.error(err) }
     finally { setLoading(false); setRefreshing(false) }
   }, [])
@@ -158,6 +179,11 @@ export default function DashboardPage() {
     ...d,
     label: d.sale_date.slice(5).replace('-', '/'),
   })), [salesLast30])
+  const MONTH_ABBR = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+  const monthlyData = useMemo(() => salesByMonth.map(m => {
+    const [y, mm] = m.month.split('-')
+    return { ...m, label: `${MONTH_ABBR[Number(mm) - 1]} '${y.slice(2)}` }
+  }), [salesByMonth])
   const paymentColorMap = useMemo(() =>
     Object.fromEntries(paymentData.map((pm, i) => [pm.method, CHART_COLORS[i % CHART_COLORS.length]])),
   [paymentData])
@@ -189,8 +215,8 @@ export default function DashboardPage() {
         <HelpBanner id="dashboard" title="Tu panel de control">
           <p>Acá ves de un vistazo cómo va el negocio: ventas del día, productos con bajo stock y la evolución en gráficos. Los datos se actualizan en tiempo real.</p>
         </HelpBanner>
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
-          {Array.from({ length: 5 }).map((_, i) => <StatCardSkeleton key={i} />)}
+        <div className={`grid gap-3 ${stockEnabled ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}>
+          {Array.from({ length: stockEnabled ? 5 : 4 }).map((_, i) => <StatCardSkeleton key={i} />)}
         </div>
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
           <div className="xl:col-span-2 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4">
@@ -237,7 +263,7 @@ export default function DashboardPage() {
         {/* {(role === 'owner' || role === 'admin') && <OnboardingCard />} */}
 
         {/* ══ KPIs ═══════════════════════════════════════════════ */}
-        <div className={`grid grid-cols-2 md:grid-cols-3 ${stockEnabled ? 'xl:grid-cols-5' : 'xl:grid-cols-4'} gap-3`}>
+        <div className={`grid gap-3 ${stockEnabled ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-5' : 'grid-cols-2 lg:grid-cols-4'}`}>
           <StatCard
             title="Ventas hoy"
             value={formatIntCurrency(data?.today_revenue ?? 0)}
@@ -265,13 +291,20 @@ export default function DashboardPage() {
             icon={Receipt}
           />
           {stockEnabled && (
-            <StatCard
-              title="Alertas stock"
-              value={data?.low_stock_alerts ?? 0}
-              subtitle="Productos bajo mínimo"
-              icon={AlertTriangle}
-              className={(data?.low_stock_alerts ?? 0) > 0 ? 'border-[var(--danger)] bg-[var(--danger-subtle)]' : ''}
-            />
+            <button
+              type="button"
+              onClick={openAlerts}
+              className="text-left rounded-[var(--radius-lg)] transition-transform hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              title="Ver listado completo"
+            >
+              <StatCard
+                title="Alertas stock"
+                value={data?.low_stock_alerts ?? 0}
+                subtitle="Ver listado completo →"
+                icon={AlertTriangle}
+                className={`h-full ${(data?.low_stock_alerts ?? 0) > 0 ? 'border-[var(--danger)] bg-[var(--danger-subtle)]' : ''}`}
+              />
+            </button>
           )}
           <StatCard
             title="Cuentas corrientes"
@@ -358,6 +391,42 @@ export default function DashboardPage() {
             </div>
           </Card>
         </div>
+
+        {/* ══ Facturación mensual — últimos 6 meses ═══════════════ */}
+        <Card className="flex flex-col">
+          <CardHeader>
+            <CardTitle>Ventas mensuales · últimos 6 meses</CardTitle>
+            <span className="text-xs text-[var(--text3)]">Total vendido por mes</span>
+          </CardHeader>
+          {monthlyData.every(m => m.total_revenue === 0) ? (
+            <p className="text-sm text-[var(--text3)] text-center py-12">Sin ventas en el período</p>
+          ) : (
+            <div style={{ height: 260 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={[...monthlyData]} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: 'var(--text3)' }} />
+                  <YAxis tick={{ fontSize: 9, fill: 'var(--text3)' }} tickFormatter={v => formatAxisCurrency(v)} width={44} />
+                  <Tooltip
+                    cursor={{ fill: 'var(--surface2)', opacity: 0.4 }}
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null
+                      const row = payload[0]?.payload as MonthlySale
+                      return (
+                        <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 shadow-xl text-xs space-y-1">
+                          <p className="text-[var(--text3)] mb-1">{label}</p>
+                          <p className="font-semibold text-[var(--accent)]">{formatCurrency(Number(payload[0]?.value ?? 0))}</p>
+                          <p className="text-[var(--text3)]">{formatNumber(row?.total_sales ?? 0)} ventas</p>
+                        </div>
+                      )
+                    }}
+                  />
+                  <Bar dataKey="total_revenue" fill="#16a34a" radius={[4, 4, 0, 0]} maxBarSize={64} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Card>
 
         {/* ══ Qué se vende: top productos / categorías / pagos ════ */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
@@ -518,6 +587,15 @@ export default function DashboardPage() {
                   </div>
                 ))}
               </div>
+              {(data?.low_stock_alerts ?? 0) > 0 && (
+                <button
+                  type="button"
+                  onClick={openAlerts}
+                  className="px-4 py-2.5 border-t border-[var(--border)] text-xs font-medium text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors text-center"
+                >
+                  Ver todos ({data?.low_stock_alerts}) →
+                </button>
+              )}
               <div className="px-4 py-3 border-t border-[var(--border)] flex items-center justify-between">
                 <span className="flex items-center gap-1.5 text-xs text-[var(--text3)]">
                   <Package size={13} /> Capital en stock
@@ -530,6 +608,52 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* Listado completo de productos bajo mínimo */}
+      <Modal
+        open={alertsOpen}
+        onClose={() => setAlertsOpen(false)}
+        title="Productos bajo mínimo"
+        size="lg"
+        headerActions={
+          <Link
+            href="/warehouses"
+            onClick={() => setAlertsOpen(false)}
+            className="text-xs font-medium text-[var(--accent)] hover:underline mr-1"
+          >
+            Ir a depósitos →
+          </Link>
+        }
+      >
+        {alertsLoading ? (
+          <p className="text-sm text-[var(--text3)] text-center py-8">Cargando…</p>
+        ) : alerts.length === 0 ? (
+          <p className="text-sm text-[var(--text3)] text-center py-8">Todo el stock en orden ✓</p>
+        ) : (
+          <div className="divide-y divide-[var(--border)] -my-1">
+            {alerts.map(item => (
+              <div key={item.id} className="flex items-center justify-between py-2.5 gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--text)] truncate">{item.name}</p>
+                  <p className="text-xs text-[var(--text3)] truncate">
+                    {item.supplier_name ?? 'Sin proveedor'}
+                    {item.category_name ? ` · ${item.category_name}` : ''}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <div className="text-right">
+                    <p className={`text-sm font-bold mono ${item.stock_current <= 0 ? 'text-[var(--danger)]' : 'text-[var(--warning)]'}`}>{item.stock_current}</p>
+                    <p className="text-xs text-[var(--text3)]">mín: {item.stock_min}</p>
+                  </div>
+                  <Badge variant={item.stock_status === 'sin_stock' ? 'danger' : item.stock_status === 'critico' ? 'danger' : 'warning'}>
+                    {item.stock_status === 'sin_stock' ? 'Sin stock' : item.stock_status === 'critico' ? 'Crítico' : 'Bajo'}
+                  </Badge>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
     </AppShell>
   )
 }

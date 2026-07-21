@@ -4,7 +4,7 @@ import { StatCard } from '@/components/ui/StatCard'
 import { AgingBar } from '@/components/ui/AgingBar'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { api } from '@/lib/api'
-import { formatCurrency } from '@/lib/utils'
+import { formatCurrency, formatIntCurrency } from '@/lib/utils'
 import { BUCKET_STYLE, formatDebtAge, type CcPortfolioKpis } from '@/lib/cc-aging'
 import { buildCcInsights, type CcInsightTone } from '@/lib/cc-insights'
 import {
@@ -70,7 +70,8 @@ export function CCPortfolioTop({ kpis, loading }: { kpis: CcPortfolioKpis | null
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
           title="Saldo pendiente"
-          value={formatCurrency(kpis.total_pending)}
+          value={formatIntCurrency(kpis.total_pending)}
+          valueClassName="text-[clamp(1rem,1.6vw,1.5rem)] tracking-tight"
           valueTitle={formatCurrency(kpis.total_pending)}
           icon={Wallet}
           subtitle={trendPct === null
@@ -80,6 +81,7 @@ export function CCPortfolioTop({ kpis, loading }: { kpis: CcPortfolioKpis | null
         <StatCard
           title="Clientes con deuda"
           value={kpis.customers_with_debt}
+          valueClassName="text-[clamp(1rem,1.6vw,1.5rem)] tracking-tight"
           icon={Users}
           subtitle={kpis.overdue_customers > 0
             ? `${kpis.overdue_customers} con deuda >30 días`
@@ -87,7 +89,8 @@ export function CCPortfolioTop({ kpis, loading }: { kpis: CcPortfolioKpis | null
         />
         <StatCard
           title="Cobrado este mes"
-          value={formatCurrency(kpis.collected_this_month)}
+          value={formatIntCurrency(kpis.collected_this_month)}
+          valueClassName="text-[clamp(1rem,1.6vw,1.5rem)] tracking-tight"
           valueTitle={formatCurrency(kpis.collected_this_month)}
           icon={HandCoins}
           accent={recoveryPct !== null && recoveryPct >= 80}
@@ -97,7 +100,8 @@ export function CCPortfolioTop({ kpis, loading }: { kpis: CcPortfolioKpis | null
         />
         <StatCard
           title="Deuda vencida (>30 días)"
-          value={formatCurrency(kpis.overdue_total)}
+          value={formatIntCurrency(kpis.overdue_total)}
+          valueClassName="text-[clamp(1rem,1.6vw,1.5rem)] tracking-tight"
           valueTitle={formatCurrency(kpis.overdue_total)}
           icon={AlertTriangle}
           accent={overdueTone === 'accent'}

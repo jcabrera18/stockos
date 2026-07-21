@@ -19,6 +19,35 @@ export interface PlanLimits {
   maxWarehouses: number | null
 }
 
+/** Planes cobrables por Nave (excluye trial). Precio MENSUAL en ARS. */
+export type PaidPlan = 'local' | 'negocio' | 'empresa'
+
+/**
+ * Precio mensual por plan (ARS). Fuente única compartida con la landing
+ * (app/home/components/Pricing.tsx) y el backend (stockos-api PLAN_CONFIG).
+ * El ciclo anual cobra 10 meses (2 gratis): total = precio × 10.
+ */
+export const PLAN_PRICES: Record<PaidPlan, number> = {
+  local:   45000,
+  negocio: 90000,
+  empresa: 180000,
+}
+
+/** Meses que se cobran en el ciclo anual (2 gratis). Igual que la landing. */
+export const ANNUAL_PAID_MONTHS = 10
+
+/** Total a pagar según plan y ciclo de facturación. */
+export function planTotal(plan: PaidPlan, billing: 'monthly' | 'annual'): number {
+  return billing === 'annual' ? PLAN_PRICES[plan] * ANNUAL_PAID_MONTHS : PLAN_PRICES[plan]
+}
+
+export const PAID_PLAN_ORDER: PaidPlan[] = ['local', 'negocio', 'empresa']
+
+/** Jerarquía de planes (para distinguir upgrade de downgrade). Debe coincidir con el backend. */
+export const PLAN_RANK: Record<string, number> = {
+  trial: 0, local: 1, negocio: 2, empresa: 3,
+}
+
 export const PLAN_LIMITS: Record<string, PlanLimits> = {
   trial:   { label: 'Prueba gratuita', maxUsers: 10,   maxBranches: 1,    maxRegisters: 3,    maxWarehouses: 1    },
   local:   { label: 'Local',           maxUsers: 2,    maxBranches: 1,    maxRegisters: 1,    maxWarehouses: 1    },

@@ -1,9 +1,8 @@
 'use client'
 import { useAuth } from '@/hooks/useAuth'
+import { usePlansPayment } from '@/contexts/PlansPaymentContext'
 import { Clock, AlertTriangle } from 'lucide-react'
 import { cn } from '@/lib/utils'
-
-const WA_LINK = 'https://wa.me/5493438558913'
 
 function daysUntil(dateStr: string | null): number {
   if (!dateStr) return 0
@@ -33,6 +32,7 @@ const TONE: Record<Tone, { box: string; text: string; dot: string }> = {
  */
 export function SidebarSubscriptionCard({ collapsed = false, variant = 'sidebar' }: { collapsed?: boolean; variant?: 'sidebar' | 'mobile' }) {
   const { user } = useAuth()
+  const { openPlansModal } = usePlansPayment()
   const sub = user?.business?.subscription
   if (!sub) return null
 
@@ -64,48 +64,42 @@ export function SidebarSubscriptionCard({ collapsed = false, variant = 'sidebar'
   // Variante mobile: franja superior persistente (no descartable).
   if (variant === 'mobile') {
     return (
-      <a
-        href={WA_LINK}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={cn('flex items-center justify-center gap-2 px-4 py-2 border-b text-xs font-semibold', t.box, t.text)}
+      <button
+        onClick={() => openPlansModal()}
+        className={cn('flex w-full items-center justify-center gap-2 px-4 py-2 border-b text-xs font-semibold', t.box, t.text)}
       >
         <Icon size={14} className="flex-shrink-0" />
         <span>{title}</span>
         <span className="underline opacity-80">Renovar</span>
-      </a>
+      </button>
     )
   }
 
   if (collapsed) {
     return (
-      <a
-        href={WA_LINK}
-        target="_blank"
-        rel="noopener noreferrer"
+      <button
+        onClick={() => openPlansModal()}
         title={title}
         className={cn('relative flex items-center justify-center w-full py-2.5 rounded-[var(--radius-md)] border transition-colors', t.box, t.text)}
       >
         <Icon size={16} />
         <span className={cn('absolute top-1 right-1 w-2 h-2 rounded-full', t.dot)} />
-      </a>
+      </button>
     )
   }
 
   return (
-    <a
-      href={WA_LINK}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={cn('block px-3 py-2.5 rounded-[var(--radius-md)] border transition-colors hover:opacity-90', t.box)}
+    <button
+      onClick={() => openPlansModal()}
+      className={cn('block w-full text-left px-3 py-2.5 rounded-[var(--radius-md)] border transition-colors hover:opacity-90', t.box)}
     >
       <div className={cn('flex items-center gap-2 text-xs font-semibold', t.text)}>
         <Icon size={14} className="flex-shrink-0" />
         <span className="leading-tight">{title}</span>
       </div>
       <p className="mt-1 text-[11px] text-[var(--text3)] leading-snug">
-        Tocá para renovar por WhatsApp
+        Tocá para renovar tu suscripción
       </p>
-    </a>
+    </button>
   )
 }

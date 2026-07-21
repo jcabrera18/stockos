@@ -1,11 +1,10 @@
 'use client'
-import { Crown, MessageCircle } from 'lucide-react'
-import { useAuth } from '@/hooks/useAuth'
-import { upgradeWhatsappLink } from '@/lib/plans'
+import { Crown } from 'lucide-react'
+import { usePlansPayment } from '@/contexts/PlansPaymentContext'
 
 /**
- * Banner que avisa que el negocio llegó al límite de su plan y enlaza a WhatsApp
- * con un mensaje predefinido (nombre + ID del negocio) para pedir el upgrade.
+ * Banner que avisa que el negocio llegó al límite de su plan y abre el modal de
+ * planes (selector) para invitar a contratar un plan superior.
  */
 export function PlanLimitBanner({
   title,
@@ -14,8 +13,7 @@ export function PlanLimitBanner({
   title: string
   subtitle?: string
 }) {
-  const { user } = useAuth()
-  const link = upgradeWhatsappLink(user?.business?.name, user?.business_id)
+  const { openPlansModal } = usePlansPayment()
 
   return (
     <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-[var(--radius-md)] border border-[var(--accent)]/25 bg-[var(--accent)]/8 px-4 py-3">
@@ -26,15 +24,13 @@ export function PlanLimitBanner({
           <p className="text-xs text-[var(--text3)] mt-0.5">{subtitle}</p>
         </div>
       </div>
-      <a
-        href={link}
-        target="_blank"
-        rel="noopener noreferrer"
+      <button
+        onClick={() => openPlansModal(null, { forceSelector: true })}
         className="flex items-center justify-center gap-2 shrink-0 px-4 py-2 rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold transition-colors"
       >
-        <MessageCircle size={14} />
+        <Crown size={14} />
         Actualizá tu plan
-      </a>
+      </button>
     </div>
   )
 }

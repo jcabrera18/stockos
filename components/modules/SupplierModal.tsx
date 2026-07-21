@@ -10,7 +10,7 @@ import { toast } from 'sonner'
 interface SupplierModalProps {
   open: boolean
   onClose: () => void
-  onSaved: () => void
+  onSaved: (created?: Supplier) => void
   supplier?: Supplier | null
   zIndex?: number
 }
@@ -59,11 +59,12 @@ export function SupplierModal({ open, onClose, onSaved, supplier, zIndex }: Supp
       if (isEdit) {
         await api.patch(`/api/purchases/suppliers/${supplier!.id}`, payload)
         toast.success('Proveedor actualizado')
+        onSaved()
       } else {
-        await api.post('/api/purchases/suppliers', payload)
+        const created = await api.post<Supplier>('/api/purchases/suppliers', payload)
         toast.success('Proveedor creado')
+        onSaved(created)
       }
-      onSaved()
       onClose()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')

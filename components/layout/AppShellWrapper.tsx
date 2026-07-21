@@ -9,6 +9,7 @@ import { SubscriptionBanner } from './SubscriptionBanner'
 import { SidebarSubscriptionCard } from './SidebarSubscriptionCard'
 import { EmailConfirmBanner } from './EmailConfirmBanner'
 import { SidePanelProvider } from '@/contexts/SidePanelContext'
+import { PlansPaymentProvider } from '@/contexts/PlansPaymentContext'
 
 // Rutas que manejan su propio layout full-screen (no necesitan shell)
 const NO_SHELL = ['/login', '/register', '/forgot-password', '/reset-password', '/pos', '/home', '/c']
@@ -71,20 +72,22 @@ function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <SidePanelProvider>
-      <div className="flex h-screen bg-[var(--bg)] overflow-hidden">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
-          {/* Aviso de suscripción persistente en mobile (en desktop vive en el sidebar) */}
-          <div className="md:hidden sticky top-0 z-30">
-            <SidebarSubscriptionCard variant="mobile" />
-          </div>
-          {children}
-        </main>
-        <BottomNav />
-        <POSBadge />
-        <SubscriptionBanner />
-        <EmailConfirmBanner />
-      </div>
+      <PlansPaymentProvider>
+        <div className="flex h-screen bg-[var(--bg)] overflow-hidden">
+          <Sidebar />
+          <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
+            {/* Aviso de suscripción persistente en mobile (en desktop vive en el sidebar) */}
+            <div className="md:hidden sticky top-0 z-30">
+              <SidebarSubscriptionCard variant="mobile" />
+            </div>
+            {children}
+          </main>
+          <BottomNav />
+          <POSBadge />
+          <SubscriptionBanner />
+          <EmailConfirmBanner />
+        </div>
+      </PlansPaymentProvider>
     </SidePanelProvider>
   )
 }

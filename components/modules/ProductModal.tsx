@@ -418,11 +418,18 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const supplierOptions = suppliers.map(s => ({ value: s.id, label: s.name }))
   const brandOptions = brands.map(b => ({ value: b.id, label: b.name }))
 
-  const handleSupplierSaved = async () => {
+  const handleSupplierSaved = async (created?: Supplier) => {
     const prevIds = new Set(suppliers.map(s => s.id))
-    const updated = await api.get<Supplier[]>('/api/purchases/suppliers').catch(() => suppliers)
+    const refetched = await api.get<Supplier[]>('/api/purchases/suppliers').catch(() => suppliers)
+    // El refetch puede venir de una réplica con lag y no incluir el proveedor recién
+    // creado. Lo sembramos optimistamente para que aparezca en el dropdown y quede
+    // seleccionado, igual que hacen marca y categoría.
+    const updated = created && !refetched.some(s => s.id === created.id)
+      ? [...refetched, created]
+      : refetched
+    _refCache.suppliers = updated
     setSuppliers(updated)
-    const newOne = updated.find(s => !prevIds.has(s.id))
+    const newOne = created ?? updated.find(s => !prevIds.has(s.id))
     if (newOne) setForm(f => ({ ...f, supplier_id: newOne.id }))
     setSupplierSubModal(false)
   }
@@ -1049,6 +1056,18 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
                       </div>
                     )
                   })}
+                </div>
+              )}
+
+              {currentPriceMode === 'list' && costWithVat <= 0 && (
+                <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface2)]/35 p-3 text-center">
+                  <p className="text-xs text-[var(--text3)]">Ingresá el costo para ver los precios de la lista</p>
+                </div>
+              )}
+
+              {currentPriceMode === 'list' && costWithVat > 0 && priceLists.length === 0 && (
+                <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface2)]/35 p-3 text-center">
+                  <p className="text-xs text-[var(--text3)]">No hay listas de precio configuradas</p>
                 </div>
               )}
 

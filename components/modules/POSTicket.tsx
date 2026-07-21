@@ -3,7 +3,7 @@ import { useRef, useState, useEffect } from 'react'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
 import { Printer, Plus, X, CheckCircle, CreditCard, MessageCircle, Loader2 } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
-import html2canvas from 'html2canvas'
+import { toBlob } from 'html-to-image'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import QRCode from 'qrcode'
@@ -126,6 +126,7 @@ export function POSTicket({
 }: POSTicketProps) {
   const printRef = useRef<HTMLDivElement>(null)
   const autoPrintedRef = useRef<string | null>(null)
+  const sharingRef = useRef(false)
   const [sharing, setSharing] = useState(false)
   const [invoice, setInvoice] = useState<InvoiceInfo | null>(null)
   const [qrDataUrl, setQrDataUrl] = useState<string>('')
@@ -298,33 +299,67 @@ export function POSTicket({
 
   const handleShareWhatsApp = async () => {
     if (!printRef.current) return
+    // Guard reentrante: el botón (onClick) y el atajo 'W' podrían dispararse
+    // casi simultáneamente; sin esto se generaban dos shares → imagen duplicada.
+    if (sharingRef.current) return
+    sharingRef.current = true
     setSharing(true)
     try {
-      const canvas = await html2canvas(printRef.current, {
-        backgroundColor: '#ffffff',
-        scale: 2,
-        useCORS: true,
-        logging: false,
-      })
-      const blob = await new Promise<Blob>((resolve, reject) =>
-        canvas.toBlob(b => b ? resolve(b) : reject(new Error('No se pudo generar la imagen')), 'image/png')
-      )
-      if (navigator.canShare?.({ files: [new File([blob], 'ticket.png', { type: 'image/png' })] })) {
-        await navigator.share({
-          files: [new File([blob], `ticket-${sale.id.slice(-8)}.png`, { type: 'image/png' })],
-          title: 'Comprobante de compra',
-        })
-        return
+      // Esperar a que las fuentes terminen de cargar para que el texto no salga
+      // en blanco o con fallback en el render (Safari/mobile sobre todo).
+      if (document.fonts?.ready) {
+        try { await document.fonts.ready } catch { /* noop */ }
       }
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+
+      // html-to-image clona SOLO el ticket (no todo el documento) y respeta
+      // colores modernos como oklch de Tailwind v4 — html2canvas fallaba acá.
+      const blob = await toBlob(printRef.current, {
+        backgroundColor: '#ffffff',
+        pixelRatio: 2,
+        cacheBust: true,
+      })
+      if (!blob) throw new Error('No se pudo generar la imagen')
+
+      const fileName = `ticket-${sale.id.slice(-8)}.png`
+      const file = new File([blob], fileName, { type: 'image/png' })
+
+      // 1) Compartir nativo (mobile y Mac con Web Share): adjunta la imagen
+      // directo al chat elegido. Es el único camino "compartir": si funciona
+      // salimos acá para no duplicar la imagen (el flujo de copiar+pegar en
+      // WhatsApp Web terminaba adjuntándola dos veces).
+      if (navigator.canShare?.({ files: [file] })) {
+        try {
+          // Compartir SOLO el archivo. Adjuntar title/text junto a files hace
+          // que WhatsApp en macOS duplique la imagen en el compositor.
+          await navigator.share({ files: [file] })
+          return
+        } catch (err) {
+          // Cancelar el share sheet no es un error: no seguimos con el fallback.
+          if (err instanceof Error && err.name === 'AbortError') return
+          // Cualquier otro error real → caemos a la descarga.
+        }
+      }
+
+      // 2) Escritorio (Windows/Firefox sin Web Share): descargar el PNG y abrir
+      // WhatsApp para adjuntarlo. Determinístico: nunca duplica ni depende del
+      // portapapeles (que en Windows suele estar bloqueado).
       const phone = customerPhone?.replace(/\D/g, '')
-      const url = phone ? `https://web.whatsapp.com/send?phone=${phone}` : 'https://web.whatsapp.com/'
-      window.open(url, '_blank')
-      toast.success('Imagen copiada — pegala en el chat con Ctrl+V', { duration: 6000 })
+      const waUrl = phone ? `https://wa.me/${phone}` : 'https://web.whatsapp.com/'
+      const objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10000)
+      window.open(waUrl, '_blank')
+      toast.success('Ticket descargado — adjuntalo en el chat de WhatsApp', { duration: 6000 })
     } catch (err) {
       toast.error('No se pudo generar la imagen')
       console.error(err)
     } finally {
+      sharingRef.current = false
       setSharing(false)
     }
   }

@@ -1241,6 +1241,18 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
                 </div>
               )}
 
+              {currentPriceMode === 'list' && costWithVat <= 0 && (
+                <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface2)]/35 p-3 text-center">
+                  <p className="text-xs text-[var(--text3)]">Ingresá el costo para ver los precios de la lista</p>
+                </div>
+              )}
+
+              {currentPriceMode === 'list' && costWithVat > 0 && priceLists.length === 0 && (
+                <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface2)]/35 p-3 text-center">
+                  <p className="text-xs text-[var(--text3)]">No hay listas de precio configuradas</p>
+                </div>
+              )}
+
               <div className="pt-2"><SectionLabel>Stock</SectionLabel></div>
 
               <div className="grid grid-cols-3 gap-3">

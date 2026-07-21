@@ -12,7 +12,8 @@ import { Modal } from '@/components/ui/Modal'
 import { Select } from '@/components/ui/Select'
 import { useAuth } from '@/hooks/useAuth'
 import { getRoleLabel } from '@/lib/utils'
-import { getPlanLimits, canUpgradePlan, WHATSAPP_LINK, upgradeWhatsappLink } from '@/lib/plans'
+import { getPlanLimits, canUpgradePlan, upgradeWhatsappLink } from '@/lib/plans'
+import { usePlansPayment } from '@/contexts/PlansPaymentContext'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import { Shield, Truck, Building2, Receipt, CreditCard, MessageCircle, Printer, Upload } from 'lucide-react'
@@ -70,6 +71,7 @@ interface WarehouseOption {
 
 export default function SettingsPage() {
   const { user, signOut, refreshUser } = useAuth()
+  const { openPlansModal } = usePlansPayment()
   const role = user?.role ?? ''
   const { settings: printSettings, setSettings: setPrintSettings } = usePrintSettings()
 
@@ -904,29 +906,38 @@ export default function SettingsPage() {
                       </p>
                     )}
 
-                    {/* CTA */}
+                    {/* CTA — pagar/reactivar con QR de Nave */}
                     {sub.status !== 'active' && (
-                      <a
-                        href={WHATSAPP_LINK}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        onClick={() => openPlansModal()}
                         className="flex items-center justify-center gap-2 w-full py-2.5 rounded-[var(--radius-md)] bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white text-sm font-semibold transition-colors"
                       >
-                        <MessageCircle size={14} />
+                        <CreditCard size={14} />
                         {sub.status === 'past_due' ? 'Reactivar cuenta' : 'Contratar plan'}
-                      </a>
+                      </button>
                     )}
 
                     {/* Mejorar plan — solo si está activa y no es el plan tope */}
                     {sub.status === 'active' && canUpgradePlan(sub.plan) && (
+                      <button
+                        onClick={() => openPlansModal(null, { forceSelector: true })}
+                        className="flex items-center justify-center gap-2 w-full py-2.5 rounded-[var(--radius-md)] border border-[var(--accent)]/30 bg-[var(--accent)]/8 hover:bg-[var(--accent)]/15 text-[var(--accent)] text-sm font-semibold transition-colors"
+                      >
+                        <CreditCard size={14} />
+                        ¿Querés actualizar tu plan?
+                      </button>
+                    )}
+
+                    {/* Renovar plan actual antes del vencimiento */}
+                    {sub.status === 'active' && (
                       <a
                         href={upgradeLink}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center justify-center gap-2 w-full py-2.5 rounded-[var(--radius-md)] border border-[var(--accent)]/30 bg-[var(--accent)]/8 hover:bg-[var(--accent)]/15 text-[var(--accent)] text-sm font-semibold transition-colors"
+                        className="flex items-center justify-center gap-2 w-full py-2 text-[var(--text3)] hover:text-[var(--text)] text-xs font-medium transition-colors"
                       >
-                        <MessageCircle size={14} />
-                        ¿Querés actualizar tu plan?
+                        <MessageCircle size={13} />
+                        ¿Dudas? Escribinos por WhatsApp
                       </a>
                     )}
 
