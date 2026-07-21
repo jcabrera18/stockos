@@ -184,12 +184,21 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
 
   useEffect(() => {
     if (!open) return
-    const load = async () => {
+    // Pintura inmediata desde el cache de sesión (si existe) para que el modal no
+    // parpadee. Luego SIEMPRE revalidamos contra el server en segundo plano: el
+    // cache es a nivel de módulo y vive toda la sesión, así que proveedores/marcas/
+    // categorías/listas creados en otra pantalla no aparecían hasta recargar la página.
+    if (_refCache.categories) setCategories(_refCache.categories)
+    if (_refCache.suppliers)  setSuppliers(_refCache.suppliers)
+    if (_refCache.priceLists) setPriceLists(_refCache.priceLists)
+    if (_refCache.brands)     setBrands(_refCache.brands)
+
+    const revalidate = async () => {
       const [cats, sups, lists, brnds] = await Promise.all([
-        _refCache.categories ?? api.get<Category[]>('/api/products/categories'),
-        _refCache.suppliers  ?? api.get<Supplier[]>('/api/purchases/suppliers'),
-        _refCache.priceLists ?? api.get<PriceList[]>('/api/price-lists'),
-        _refCache.brands     ?? api.get<{ id: string; name: string }[]>('/api/brands'),
+        api.get<Category[]>('/api/products/categories').catch(() => _refCache.categories ?? []),
+        api.get<Supplier[]>('/api/purchases/suppliers').catch(() => _refCache.suppliers ?? []),
+        api.get<PriceList[]>('/api/price-lists').catch(() => _refCache.priceLists ?? []),
+        api.get<{ id: string; name: string }[]>('/api/brands').catch(() => _refCache.brands ?? []),
       ])
       _refCache.categories = cats; setCategories(cats)
       _refCache.suppliers  = sups; setSuppliers(sups)
@@ -198,17 +207,8 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
       if (!product && lists.length === 0) {
         setForm(f => ({ ...f, use_fixed_sell_price: true }))
       }
-      // Al editar, refrescamos categorías sin cache (en segundo plano) para recuperar
-      // la cadena completa del breadcrumb: la lista cacheada puede venir sin la
-      // categoría del producto (recién creada, replica lag, otro dispositivo). El
-      // modal ya abrió con lo que había + el seed; esto reconcilia con el server.
-      if (product?.category_id && !cats.some(c => c.id === product.category_id)) {
-        api.get<Category[]>('/api/products/categories')
-          .then(fresh => { _refCache.categories = fresh; setCategories(fresh) })
-          .catch(() => {})
-      }
     }
-    load().catch(() => {})
+    revalidate().catch(() => {})
   }, [open])
 
   useEffect(() => {
