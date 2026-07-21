@@ -106,6 +106,11 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const [categories, setCategories] = useState<Category[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([])
+  // Proveedores creados en esta sesión desde el sub-modal. Los unimos a cualquier
+  // lista (fetch inicial o revalidación en background) para que una respuesta con
+  // lag de réplica —o deduplicada por dedupedGet a una request vieja en vuelo— no
+  // los borre del dropdown recién creados.
+  const localSuppliersRef = useRef<Supplier[]>([])
   const [saving, setSaving] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
@@ -200,8 +205,11 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
         api.get<PriceList[]>('/api/price-lists').catch(() => _refCache.priceLists ?? []),
         api.get<{ id: string; name: string }[]>('/api/brands').catch(() => _refCache.brands ?? []),
       ])
+      // Unimos los proveedores creados localmente: si este fetch se dedupeó a una
+      // request vieja en vuelo o la réplica tiene lag, no debe borrarlos del dropdown.
+      const mergedSups = mergeLocalSuppliers(sups)
       _refCache.categories = cats; setCategories(cats)
-      _refCache.suppliers  = sups; setSuppliers(sups)
+      _refCache.suppliers  = mergedSups; setSuppliers(mergedSups)
       _refCache.priceLists = lists; setPriceLists(lists)
       _refCache.brands     = brnds; setBrands(brnds)
       if (!product && lists.length === 0) {
@@ -418,20 +426,26 @@ export function ProductModal({ open, onClose, onSaved, product }: ProductModalPr
   const supplierOptions = suppliers.map(s => ({ value: s.id, label: s.name }))
   const brandOptions = brands.map(b => ({ value: b.id, label: b.name }))
 
-  const handleSupplierSaved = async (created?: Supplier) => {
-    const prevIds = new Set(suppliers.map(s => s.id))
-    const refetched = await api.get<Supplier[]>('/api/purchases/suppliers').catch(() => suppliers)
-    // El refetch puede venir de una réplica con lag y no incluir el proveedor recién
-    // creado. Lo sembramos optimistamente para que aparezca en el dropdown y quede
-    // seleccionado, igual que hacen marca y categoría.
-    const updated = created && !refetched.some(s => s.id === created.id)
-      ? [...refetched, created]
-      : refetched
-    _refCache.suppliers = updated
-    setSuppliers(updated)
-    const newOne = created ?? updated.find(s => !prevIds.has(s.id))
-    if (newOne) setForm(f => ({ ...f, supplier_id: newOne.id }))
+  // Une los proveedores creados localmente a una lista del server, deduplicando por
+  // id y ordenando por nombre (como los devuelve el backend).
+  const mergeLocalSuppliers = (list: Supplier[]): Supplier[] => {
+    if (localSuppliersRef.current.length === 0) return list
+    const byId = new Map(list.map(s => [s.id, s]))
+    for (const s of localSuppliersRef.current) if (!byId.has(s.id)) byId.set(s.id, s)
+    return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'))
+  }
+
+  const handleSupplierSaved = (created?: Supplier) => {
     setSupplierSubModal(false)
+    if (!created?.id) return
+    // Inserción puramente optimista: NO refetcheamos. Un GET post-escritura es poco
+    // confiable acá (dedupedGet puede devolver una request vieja en vuelo, y la
+    // réplica de lectura puede tener lag), así que insertamos el proveedor creado
+    // directamente y lo recordamos para que la revalidación no lo pise.
+    localSuppliersRef.current = [...localSuppliersRef.current, created]
+    setSuppliers(prev => mergeLocalSuppliers(prev.some(s => s.id === created.id) ? prev : [...prev, created]))
+    _refCache.suppliers = mergeLocalSuppliers(_refCache.suppliers ?? [])
+    setForm(f => ({ ...f, supplier_id: created.id }))
   }
 
   const handleBrandQuickSave = async () => {
