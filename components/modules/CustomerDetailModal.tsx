@@ -317,21 +317,21 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
         {/* Header con saldo y datos */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="sm:col-span-2 px-4 py-3 bg-[var(--surface2)] rounded-[var(--radius-lg)] min-w-0">
-            <p className="text-xs text-[var(--text3)] mb-1">Saldo deudor actual</p>
+            <p className="text-xs text-[var(--text3)] mb-1">{displayBalance < 0 ? 'Saldo a favor' : 'Saldo deudor actual'}</p>
             <p className={`text-2xl sm:text-3xl font-bold mono break-words leading-tight ${displayBalance > 0 ? 'text-[var(--danger)]' : 'text-[var(--accent)]'}`}>
-              {formatCurrency(displayBalance)}
+              {formatCurrency(Math.abs(displayBalance))}
             </p>
             {customer.credit_limit > 0 && (
               <div className="mt-2">
                 <div className="flex justify-between text-xs text-[var(--text3)] mb-1">
                   <span>Crédito usado</span>
-                  <span>{Math.round(displayBalance / customer.credit_limit * 100)}%</span>
+                  <span>{Math.max(0, Math.round(displayBalance / customer.credit_limit * 100))}%</span>
                 </div>
                 <div className="h-1.5 bg-[var(--surface3)] rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all"
                     style={{
-                      width: `${Math.min(displayBalance / customer.credit_limit * 100, 100)}%`,
+                      width: `${Math.max(0, Math.min(displayBalance / customer.credit_limit * 100, 100))}%`,
                       background: displayBalance >= customer.credit_limit
                         ? 'var(--danger)' : displayBalance >= customer.credit_limit * 0.8
                           ? 'var(--warning)' : 'var(--accent)',

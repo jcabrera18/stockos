@@ -68,6 +68,7 @@ interface OrderSummary {
   confirmed_at?: string
   dispatched_at?: string
   delivered_at?: string
+  sale_status?: string
 }
 
 interface OrderDetail extends OrderSummary {
@@ -92,6 +93,7 @@ interface OrderDetail extends OrderSummary {
   price_lists?: { name: string; margin_pct: number } | null
   customers?: { full_name: string; current_balance: number; document?: string; phone?: string }
   invoices?: { id: string; invoice_type: string; numero: number; afip_status: string } | null
+  sales?: { status?: string } | null
 }
 
 interface OrderDelivery {
@@ -1685,7 +1687,12 @@ function OrdersPageInner() {
                         {!sidePanelOpen && <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">{order.seller_name ?? '—'}</td>}
                         {!sidePanelOpen && <td className="px-4 py-3 text-[var(--text2)] hidden lg:table-cell">{order.warehouse_name ?? '—'}</td>}
                         <td className="px-4 py-3 text-center">
-                          <Badge variant={STATUS_VARIANTS[order.status]}>{STATUS_LABELS[order.status]}</Badge>
+                          <div className="inline-flex flex-col items-center gap-1">
+                            <Badge variant={STATUS_VARIANTS[order.status]}>{STATUS_LABELS[order.status]}</Badge>
+                            {order.sale_status === 'voided' && (
+                              <Badge variant="danger">Venta anulada</Badge>
+                            )}
+                          </div>
                         </td>
                         {!sidePanelOpen && (
                           <td className="px-4 py-3 text-center">
@@ -2058,7 +2065,12 @@ function OrdersPageInner() {
               )}
               {detail.sale_id && (
                 <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--accent-subtle)] text-[11px] text-[var(--accent)]">
-                  Venta <strong className="mono font-semibold">#{detail.sale_id.slice(0, 8).toUpperCase()}</strong>
+                  Venta <strong className="mono font-semibold">#{detail.sale_id.slice(-8).toUpperCase()}</strong>
+                </span>
+              )}
+              {detail.sales?.status === 'voided' && (
+                <span className="inline-flex items-center gap-1 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--danger-subtle)] text-[11px] text-[var(--danger)] font-semibold">
+                  Venta anulada
                 </span>
               )}
               {detailInvoice && (
@@ -3230,6 +3242,7 @@ function OrdersPageInner() {
         saleId={saleDetailId}
         orderId={detail?.id}
         autoConvert={autoConvertSale}
+        onVoided={() => { fetchOrders(); if (detail?.id) openDetail(detail.id) }}
       />
 
       <ConvertInvoiceModal

@@ -53,7 +53,7 @@ export function Navbar() {
         <div className="hidden md:flex items-center gap-2">
           <Link
             href="/login"
-            className="text-[13.5px] text-gray-500 hover:text-gray-800 transition-colors px-4 py-2"
+            className="text-[13.5px] px-4 py-2 border border-gray-300 text-gray-700 hover:border-[#16a34a] hover:text-[#16a34a] rounded-[9px] font-medium transition-all duration-200 active:scale-95"
           >
             Ingresar
           </Link>
@@ -65,14 +65,22 @@ export function Navbar() {
           </Link>
         </div>
 
-        {/* Mobile menu button */}
-        <button
-          className="md:hidden text-gray-500 hover:text-gray-800 transition-colors p-1"
-          onClick={() => setMenuOpen(!menuOpen)}
-          aria-label="Abrir menú"
-        >
-          {menuOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
+        {/* Mobile: persistent Ingresar + menu button */}
+        <div className="md:hidden flex items-center gap-2">
+          <Link
+            href="/login"
+            className="text-[13px] px-3.5 py-1.5 border border-gray-300 text-gray-700 hover:border-[#16a34a] hover:text-[#16a34a] rounded-[8px] font-medium transition-all duration-200 active:scale-95"
+          >
+            Ingresar
+          </Link>
+          <button
+            className="text-gray-500 hover:text-gray-800 transition-colors p-1"
+            onClick={() => setMenuOpen(!menuOpen)}
+            aria-label="Abrir menú"
+          >
+            {menuOpen ? <X size={20} /> : <Menu size={20} />}
+          </button>
+        </div>
       </div>
 
       {/* Mobile menu */}
@@ -92,13 +100,11 @@ export function Navbar() {
               {label}
             </a>
           ))}
-          <div className="border-t border-gray-100 mt-2 pt-4 flex flex-col gap-2">
-            <Link href="/login" className="text-sm text-gray-500 py-2">
-              Ingresar
-            </Link>
+          <div className="border-t border-gray-100 mt-2 pt-4">
             <Link
               href="/register"
-              className="text-sm px-4 py-3 bg-[#16a34a] text-white rounded-[9px] font-medium text-center"
+              className="block text-sm px-4 py-3 bg-[#16a34a] text-white rounded-[9px] font-medium text-center"
+              onClick={() => setMenuOpen(false)}
             >
               Probar gratis
             </Link>

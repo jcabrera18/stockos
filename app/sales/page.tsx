@@ -313,10 +313,15 @@ export default function SalesPage() {
                     <tr
                       key={sale.id}
                       onClick={() => { setDetailSaleId(sale.id); setDetailModal(true) }}
-                      className="hover:bg-[var(--surface2)] transition-colors cursor-pointer"
+                      className={`hover:bg-[var(--surface2)] transition-colors cursor-pointer ${sale.status === 'voided' ? 'opacity-60' : ''}`}
                     >
                       <td className="px-4 py-3 text-[var(--text2)] text-xs mono">
-                        {formatDateTime(sale.created_at)}
+                        <span className={sale.status === 'voided' ? 'line-through' : ''}>
+                          {formatDateTime(sale.created_at)}
+                        </span>
+                        {sale.status === 'voided' && (
+                          <Badge variant="danger" className="ml-2 align-middle">Anulada</Badge>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-xs mono text-[var(--text3)] hidden sm:table-cell">
                         #{sale.id.slice(-8).toUpperCase()}
@@ -356,6 +361,7 @@ export default function SalesPage() {
           open={detailModal}
           onClose={() => { setDetailModal(false); setDetailSaleId(null) }}
           saleId={detailSaleId}
+          onVoided={fetchSales}
         />
 
       </div>

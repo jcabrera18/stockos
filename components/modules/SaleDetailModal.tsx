@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
-import { Printer, CreditCard, Package, User, Calendar, Hash, FileText, Download, Receipt } from 'lucide-react'
+import { Printer, CreditCard, Package, User, Calendar, Hash, FileText, Download, Receipt, Ban } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { toast } from 'sonner'
 import { printFacturaA4 } from '@/lib/printFactura'
@@ -39,6 +39,9 @@ interface SaleDetail {
   payment_splits?: Array<{ method: string; amount: number; installments?: number }>
   notes?: string
   created_at: string
+  status?: 'completed' | 'voided' | 'partially_returned'
+  refund_method?: 'cash' | 'cuenta_corriente' | 'external'
+  void_reason?: string
   users?: { full_name: string }
   sale_items: SaleItem[]
   customer_id?: string
@@ -87,10 +90,12 @@ interface SaleDetailModalProps {
   saleId: string | null
   orderId?: string
   autoConvert?: boolean
+  /** Se llama tras anular la venta, para refrescar la lista que abrió el modal. */
+  onVoided?: () => void
 }
 
 
-export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }: SaleDetailModalProps) {
+export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, onVoided }: SaleDetailModalProps) {
   const [sale, setSale] = useState<SaleDetail | null>(null)
   const [customer, setCustomer] = useState<CustomerInfo | null>(null)
   const [invoice, setInvoice] = useState<InvoiceSummary | null>(null)
@@ -107,6 +112,18 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
   const [receptorIva, setReceptorIva] = useState('CF')
   const [converting, setConverting] = useState(false)
   const [authorizing, setAuthorizing] = useState(false)
+
+  // Anulación
+  const [voidModal, setVoidModal] = useState(false)
+  const [voidReason, setVoidReason] = useState('')
+  const [voiding, setVoiding] = useState(false)
+
+  const role = user?.role ?? 'cashier'
+  const canVoid = ['owner', 'admin', 'cashier'].includes(role)
+  // El cajero sólo puede anular ventas del día; owner/admin sin límite.
+  const isToday = sale ? new Date(sale.created_at).toDateString() === new Date().toDateString() : false
+  const withinWindow = role === 'owner' || role === 'admin' || isToday
+  const isVoided = sale?.status === 'voided'
 
   const ivaCondition = user?.business?.iva_condition ?? ''
   // MO: solo C · RI: A y B · EX: B y C · sin configurar: todos
@@ -296,17 +313,61 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
     } finally { setConverting(false) }
   }
 
+  const handleVoid = async () => {
+    if (!sale) return
+    if (!voidReason.trim()) { toast.error('Ingresá el motivo de la anulación'); return }
+    setVoiding(true)
+    try {
+      const res = await api.post<{ refund_method: string; suggest_credit_note: boolean }>(
+        `/api/sales/${sale.id}/void`,
+        { reason: voidReason.trim() },
+      )
+      const refundMsg =
+        res.refund_method === 'cash' ? 'Se registró el egreso de caja.' :
+        res.refund_method === 'cuenta_corriente' ? 'Se descontó de la cuenta corriente del cliente.' :
+        'El reintegro del medio de pago se gestiona por fuera.'
+      toast.success(`Venta anulada. ${refundMsg}`)
+      if (res.suggest_credit_note) {
+        toast.warning('Esta venta tiene factura: emití la Nota de Crédito desde Comprobantes.', { duration: 8000 })
+      }
+      setVoidModal(false)
+      setVoidReason('')
+      onVoided?.()
+      onClose()
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo anular la venta')
+    } finally { setVoiding(false) }
+  }
+
   const itemCount = sale?.sale_items.reduce((a, i) => a + i.quantity, 0) ?? 0
 
   return (
     <>
-      <Modal open={open && !convertModal} onClose={onClose} title="Detalle de venta" size="md">
+      <Modal open={open && !convertModal && !voidModal} onClose={onClose} title="Detalle de venta" size="md">
         {loading ? (
           <div className="flex justify-center py-10">
             <div className="w-6 h-6 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
           </div>
         ) : !sale ? null : (
           <div className="space-y-4">
+
+            {/* Banner de venta anulada */}
+            {isVoided && (
+              <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-[var(--radius-md)] bg-[var(--danger-subtle)] border border-[var(--danger)]/30">
+                <Ban size={15} className="text-[var(--danger)] mt-0.5 flex-shrink-0" />
+                <div className="text-xs">
+                  <p className="font-semibold text-[var(--danger)]">Venta anulada</p>
+                  {sale.void_reason && <p className="text-[var(--text2)] mt-0.5">Motivo: {sale.void_reason}</p>}
+                  {sale.refund_method && (
+                    <p className="text-[var(--text3)] mt-0.5">
+                      Reintegro: {sale.refund_method === 'cash' ? 'egreso de caja'
+                        : sale.refund_method === 'cuenta_corriente' ? 'descontado de cuenta corriente'
+                        : 'gestionado por fuera (tarjeta/transferencia)'}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Header de la venta */}
             <div className="grid grid-cols-2 gap-3">
@@ -470,28 +531,38 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
               </div>
             )}
 
-            {/* Acciones */}
+            {/* Acciones — destructiva a la izquierda, principales a la derecha */}
             <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
-              <div className="flex justify-end gap-2 flex-wrap">
-                <Button variant="secondary" onClick={handlePrint}>
-                  <Printer size={14} />
-                  Reimprimir ticket
-                  <kbd className="ml-1 text-[10px] bg-[var(--surface3)] px-1.5 py-0.5 rounded font-sans">P</kbd>
-                </Button>
-                {invoice && invoice.invoice_type === 'X' && (
-                  <Button variant="secondary" onClick={openConvertModal}>
-                    <Receipt size={15} />
-                    Facturar
-                    <kbd className="ml-1 text-[10px] bg-[var(--surface3)] px-1.5 py-0.5 rounded font-sans">F</kbd>
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div>
+                  {canVoid && withinWindow && !isVoided && (
+                    <Button variant="ghost" onClick={() => { setVoidReason(''); setVoidModal(true) }}
+                      className="text-[var(--danger)] hover:bg-[var(--danger-subtle)]">
+                      <Ban size={14} />
+                      Anular venta
+                    </Button>
+                  )}
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  <Button variant="secondary" onClick={handlePrint}>
+                    <Printer size={14} />
+                    Reimprimir
+                    <kbd className="ml-1 text-[10px] bg-[var(--surface3)] px-1.5 py-0.5 rounded font-sans">P</kbd>
                   </Button>
-                )}
-                {invoice && invoice.invoice_type !== 'X' && (invoice.afip_status === 'pending' || invoice.afip_status === 'rejected') && (
-                  <Button variant="secondary" onClick={openConvertModal}>
-                    <Receipt size={15} />
-                    Reintentar ARCA
-                  </Button>
-                )}
-                <Button variant="secondary" onClick={onClose}>Cerrar</Button>
+                  {invoice && invoice.invoice_type === 'X' && (
+                    <Button onClick={openConvertModal}>
+                      <Receipt size={15} />
+                      Facturar
+                      <kbd className="ml-1 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-sans">F</kbd>
+                    </Button>
+                  )}
+                  {invoice && invoice.invoice_type !== 'X' && (invoice.afip_status === 'pending' || invoice.afip_status === 'rejected') && (
+                    <Button variant="secondary" onClick={openConvertModal}>
+                      <Receipt size={15} />
+                      Reintentar ARCA
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -564,6 +635,38 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert }:
                 Generar Factura {convertType}
               </Button>
             </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal anular venta */}
+      <Modal open={voidModal} onClose={() => !voiding && setVoidModal(false)} title="Anular venta" size="sm">
+        <div className="space-y-4">
+          <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-[var(--radius-md)] bg-[var(--danger-subtle)] border border-[var(--danger)]/30">
+            <Ban size={15} className="text-[var(--danger)] mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-[var(--text2)]">
+              Se repondrá el stock de los productos y se reintegrará el importe según el medio de pago:
+              {sale?.payment_method === 'efectivo' && ' egreso de la caja abierta.'}
+              {sale?.payment_method === 'cuenta_corriente' && ' se descontará de la cuenta corriente del cliente.'}
+              {sale && !['efectivo', 'cuenta_corriente'].includes(sale.payment_method) && ' el reverso del cobro se gestiona por fuera (tarjeta/transferencia).'}
+              {' '}Esta acción no se puede deshacer.
+            </p>
+          </div>
+
+          <Input
+            label="Motivo *"
+            value={voidReason}
+            onChange={e => setVoidReason(e.target.value)}
+            placeholder="Ej: producto equivocado, error de carga…"
+            autoFocus
+          />
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="secondary" onClick={() => setVoidModal(false)} disabled={voiding}>Cancelar</Button>
+            <Button variant="danger" onClick={handleVoid} loading={voiding} disabled={!voidReason.trim()}>
+              <Ban size={14} />
+              Anular venta
+            </Button>
           </div>
         </div>
       </Modal>

@@ -205,7 +205,6 @@ export default function POSPage() {
 
   const [cajaWarning, setCajaWarning] = useState(false)
   const [invoiceModal, setInvoiceModal] = useState(false)
-  const [mobileView, setMobileView] = useState<'search' | 'cart'>('search')
 
   const [branches, setBranches] = useState<{ id: string; name: string; warehouse_id?: string; registers: { id: string; name: string }[] }[]>([])
   const [loadingBranches, setLoadingBranches] = useState(true)
@@ -1347,7 +1346,7 @@ export default function POSPage() {
     <div className="flex flex-col sm:flex-row h-screen bg-[var(--bg)] overflow-hidden">
 
       {/* ── Panel izquierdo — búsqueda ── */}
-      <div className={`sm:w-[380px] flex-shrink-0 flex flex-col min-w-0 border-r border-[var(--border)] pb-14 sm:pb-0 ${mobileView === 'cart' ? 'hidden sm:flex' : 'flex'}`}>
+      <div className="relative sm:w-[380px] flex-shrink-0 flex flex-col min-w-0 border-r border-[var(--border)]">
 
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[var(--border)] bg-[var(--surface)]">
@@ -1602,7 +1601,7 @@ export default function POSPage() {
             <p className="mt-1.5 text-xs text-[var(--accent)] font-medium pl-1">Próximo escaneo: ×{pendingQty} unidades</p>
           )}
           {pendingQty === 1 && (
-            <p className="mt-1 text-[10px] text-[var(--text3)] pl-1">
+            <p className="mt-1 text-[10px] text-[var(--text3)] pl-1 hidden sm:block">
               <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">Espacio</kbd> cantidad ·{' '}
               <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">↓</kbd> ir al carrito ·{' '}
               <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded text-[10px] font-mono">F2</kbd> carrito ·{' '}
@@ -1611,9 +1610,13 @@ export default function POSPage() {
           )}
         </div>
 
-        {/* Resultados */}
-        <div className="flex-1 overflow-y-auto p-4">
-          <div className="mb-3">
+        {/* Resultados — en mobile es un dropdown flotante bajo el buscador;
+            en desktop (sm+) queda inline ocupando la columna. */}
+        <div className={`overflow-y-auto p-4
+          absolute top-full left-0 right-0 z-30 max-h-[65vh] bg-[var(--surface)] border-b border-[var(--border)] shadow-xl
+          sm:static sm:z-auto sm:max-h-none sm:shadow-none sm:border-0 sm:flex-1
+          ${!query.trim() && results.length === 0 ? 'hidden sm:block' : 'block'}`}>
+          <div className="mb-3 hidden sm:block">
             <HelpBanner id="pos" title="¿Cómo cobrar en el POS?">
               <p>Escaneá el código de barras o buscá el producto para sumarlo al ticket. Aplicá descuentos y promociones, elegí la forma de pago (efectivo, tarjeta o cuenta corriente) y cobrá. Necesitás una caja abierta para registrar la venta.</p>
             </HelpBanner>
@@ -1623,7 +1626,7 @@ export default function POSPage() {
               {results.map((product, index) => (
                 <button key={product.id}
                   ref={el => { resultItemRefs.current[index] = el }}
-                  onClick={() => { addToCart(product, pendingQtyRef.current); setActiveResultIndex(-1) }}
+                  onClick={() => { addToCart(product, pendingQtyRef.current); setActiveResultIndex(-1); setQuery(''); setResults([]); searchRef.current?.focus() }}
                   disabled={stockEnabled && product.price_mode !== 'custom' && product.stock_current <= 0}
                   className={`w-full flex items-center justify-between px-4 py-3 rounded-[var(--radius-md)] bg-[var(--surface)] border transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed group ${index === activeResultIndex ? 'ring-2 ring-[var(--accent)] border-[var(--accent)]' : 'border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--accent-subtle)]'}`}>
                   <div>
@@ -1665,7 +1668,7 @@ export default function POSPage() {
       </div>
 
       {/* ── Panel derecho — carrito ── */}
-      <div className={`flex-1 flex flex-col min-h-0 bg-[var(--surface)] pb-14 sm:pb-0 ${mobileView === 'search' ? 'hidden sm:flex' : 'flex'}`}>
+      <div className="flex-1 flex flex-col min-h-0 bg-[var(--surface)]">
 
         {/* Listas de precio + botón sync */}
         <div className="px-3 py-3 border-b border-[var(--border)] flex-shrink-0 bg-[var(--surface)]">
@@ -1738,7 +1741,7 @@ export default function POSPage() {
 
         {/* Keyboard hint bar */}
         {focusedCartIndex >= 0 ? (
-          <div className="px-3 py-1.5 bg-[var(--accent-subtle)] border-b border-[var(--accent)] text-[10px] text-[var(--accent)] font-medium flex items-center gap-3 flex-shrink-0 flex-wrap">
+          <div className="px-3 py-1.5 bg-[var(--accent-subtle)] border-b border-[var(--accent)] text-[10px] text-[var(--accent)] font-medium hidden sm:flex items-center gap-3 flex-shrink-0 flex-wrap">
             <span className="font-semibold">Modo carrito</span>
             <span>↑↓ navegar</span>
             <span>+ / − cantidad</span>
@@ -1747,7 +1750,7 @@ export default function POSPage() {
             <span>Esc → buscador</span>
           </div>
         ) : cart.length > 0 ? (
-          <div className="px-3 py-1 border-b border-[var(--border)] text-[10px] text-[var(--text3)] flex-shrink-0">
+          <div className="px-3 py-1 border-b border-[var(--border)] text-[10px] text-[var(--text3)] flex-shrink-0 hidden sm:block">
             <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded font-mono">F2</kbd>
             {' '}o{' '}
             <kbd className="px-1 py-0.5 bg-[var(--surface2)] border border-[var(--border)] rounded font-mono">↓</kbd>
@@ -1851,9 +1854,10 @@ export default function POSPage() {
                   {/* Remove */}
                   <button
                     onClick={e => { e.stopPropagation(); removeItem(item.product.id); setFocusedCartIndex(-1); setTimeout(() => searchRef.current?.focus(), 50) }}
-                    className="w-7 h-7 flex items-center justify-center flex-shrink-0 text-[var(--text3)] hover:text-[var(--danger)] transition-colors opacity-0 group-hover:opacity-100"
+                    className="w-8 h-8 flex items-center justify-center flex-shrink-0 rounded-md text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] active:bg-[var(--danger-subtle)] transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+                    aria-label="Quitar del carrito"
                   >
-                    <X size={13} />
+                    <Trash2 size={15} />
                   </button>
                 </div>
               )
@@ -2003,7 +2007,7 @@ export default function POSPage() {
               className="w-full py-3 bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white font-semibold rounded-[var(--radius-md)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed active:scale-95"
             >
               Cobrar {cart.length > 0 ? formatCurrency(total) : ''}
-              <kbd className="ml-2 text-[10px] bg-white/20 border border-white/20 px-1.5 py-0.5 rounded font-sans">F5</kbd>
+              <kbd className="ml-2 text-[10px] bg-white/20 border border-white/20 px-1.5 py-0.5 rounded font-sans hidden sm:inline">F5</kbd>
             </button>
           </div>
         )}
@@ -2435,29 +2439,6 @@ export default function POSPage() {
 
         </div>
       </Drawer>
-
-      {/* Tabs mobile */}
-      <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 flex border-t border-[var(--border)] bg-[var(--surface)]/95 backdrop-blur-md">
-        <button
-          onClick={() => setMobileView('search')}
-          className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium transition-colors ${mobileView === 'search' ? 'text-[var(--accent)]' : 'text-[var(--text3)]'}`}
-        >
-          <Search size={20} strokeWidth={mobileView === 'search' ? 2.5 : 1.8} />
-          Buscar
-        </button>
-        <button
-          onClick={() => setMobileView('cart')}
-          className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 text-xs font-medium transition-colors relative ${mobileView === 'cart' ? 'text-[var(--accent)]' : 'text-[var(--text3)]'}`}
-        >
-          <ShoppingCart size={20} strokeWidth={mobileView === 'cart' ? 2.5 : 1.8} />
-          Carrito
-          {cartItemCount > 0 && (
-            <span className="absolute top-1.5 right-1/4 min-w-[18px] h-[18px] bg-[var(--accent)] text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
-              {cartItemCount}
-            </span>
-          )}
-        </button>
-      </div>
 
       {/* Modal factura */}
       {invoiceModal && (

@@ -112,6 +112,8 @@ export interface Sale {
   installments: number
   notes?: string
   created_at: string
+  status?: 'completed' | 'voided' | 'partially_returned'
+  refund_method?: 'cash' | 'cuenta_corriente' | 'external'
   users?: { full_name: string }
   branches?: { name: string }
   registers?: { name: string }
