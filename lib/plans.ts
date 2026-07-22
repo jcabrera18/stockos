@@ -20,7 +20,7 @@ export interface PlanLimits {
 }
 
 /** Planes cobrables por Nave (excluye trial). Precio MENSUAL en ARS. */
-export type PaidPlan = 'local' | 'negocio' | 'empresa'
+export type PaidPlan = 'local' | 'negocio' | 'multilocal' | 'empresa'
 
 /**
  * Precio mensual por plan (ARS). Fuente única compartida con la landing
@@ -28,9 +28,10 @@ export type PaidPlan = 'local' | 'negocio' | 'empresa'
  * El ciclo anual cobra 10 meses (2 gratis): total = precio × 10.
  */
 export const PLAN_PRICES: Record<PaidPlan, number> = {
-  local:   45000,
-  negocio: 90000,
-  empresa: 180000,
+  local:      45000,
+  negocio:    90000,
+  multilocal: 129000,
+  empresa:    180000,
 }
 
 /** Meses que se cobran en el ciclo anual (2 gratis). Igual que la landing. */
@@ -41,18 +42,31 @@ export function planTotal(plan: PaidPlan, billing: 'monthly' | 'annual'): number
   return billing === 'annual' ? PLAN_PRICES[plan] * ANNUAL_PAID_MONTHS : PLAN_PRICES[plan]
 }
 
-export const PAID_PLAN_ORDER: PaidPlan[] = ['local', 'negocio', 'empresa']
+/**
+ * Precio mensual a MOSTRAR según el ciclo. En anual se reparte el total
+ * (10 meses pagos) sobre los 12 meses del año, igual que la landing
+ * (app/home/components/Pricing.tsx): así el número "por mes" refleja lo
+ * que realmente queda mensual al pagar anual.
+ */
+export function planMonthlyDisplay(plan: PaidPlan, billing: 'monthly' | 'annual'): number {
+  return billing === 'annual'
+    ? Math.round((PLAN_PRICES[plan] * ANNUAL_PAID_MONTHS) / 12)
+    : PLAN_PRICES[plan]
+}
+
+export const PAID_PLAN_ORDER: PaidPlan[] = ['local', 'negocio', 'multilocal', 'empresa']
 
 /** Jerarquía de planes (para distinguir upgrade de downgrade). Debe coincidir con el backend. */
 export const PLAN_RANK: Record<string, number> = {
-  trial: 0, local: 1, negocio: 2, empresa: 3,
+  trial: 0, local: 1, negocio: 2, multilocal: 3, empresa: 4,
 }
 
 export const PLAN_LIMITS: Record<string, PlanLimits> = {
-  trial:   { label: 'Prueba gratuita', maxUsers: 10,   maxBranches: 1,    maxRegisters: 3,    maxWarehouses: 1    },
-  local:   { label: 'Local',           maxUsers: 2,    maxBranches: 1,    maxRegisters: 1,    maxWarehouses: 1    },
-  negocio: { label: 'Negocio',         maxUsers: 10,   maxBranches: 1,    maxRegisters: 3,    maxWarehouses: 1    },
-  empresa: { label: 'Empresa',         maxUsers: null, maxBranches: null, maxRegisters: null, maxWarehouses: null },
+  trial:      { label: 'Prueba gratuita', maxUsers: 10,   maxBranches: 1,    maxRegisters: 3,    maxWarehouses: 1    },
+  local:      { label: 'Local',           maxUsers: 2,    maxBranches: 1,    maxRegisters: 1,    maxWarehouses: 1    },
+  negocio:    { label: 'Negocio',         maxUsers: 5,    maxBranches: 1,    maxRegisters: 3,    maxWarehouses: 1    },
+  multilocal: { label: 'Multilocal',      maxUsers: 10,   maxBranches: 2,    maxRegisters: 4,    maxWarehouses: 2    },
+  empresa:    { label: 'Empresa',         maxUsers: null, maxBranches: null, maxRegisters: null, maxWarehouses: null },
 }
 
 export function getPlanLimits(plan: string | null | undefined): PlanLimits {

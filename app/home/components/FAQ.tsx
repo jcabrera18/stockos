@@ -9,7 +9,7 @@ const FAQS = [
   },
   {
     q: '¿Cuánto cuesta StockOS?',
-    a: 'Tenés los precios completos acá arriba, sin letras chicas. Los 3 planes incluyen todo —ARCA, listas de precio, promociones, compras y cuenta corriente—; lo único que cambia es cuántas sucursales, cajas y depósitos manejás. Probás 30 días gratis, sin tarjeta, y te ayudamos a migrar tu catálogo del Excel.',
+    a: 'Tenés los precios completos acá arriba, sin letras chicas. Los 4 planes incluyen todo —ARCA, listas de precio, promociones, compras y cuenta corriente—; lo único que cambia es cuántas sucursales, cajas y depósitos manejás. Probás 30 días gratis, sin tarjeta, y te ayudamos a migrar tu catálogo del Excel.',
   },
   {
     q: '¿Funciona para facturación ARCA?',

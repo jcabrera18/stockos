@@ -19,8 +19,17 @@ const PLANS = [
     subtitle: 'Para el negocio que ya vende fuerte',
     price: 90000,
     popular: true,
-    perks: ['1 sucursal', '1 depósito', 'Hasta 3 cajas', 'Hasta 10 usuarios'],
+    perks: ['1 sucursal', '1 depósito', 'Hasta 3 cajas', 'Hasta 5 usuarios'],
     cta: { label: 'Probar gratis 30 días', href: '/register', primary: true },
+  },
+  {
+    id: 'multilocal',
+    name: 'Multilocal',
+    subtitle: 'Para el que ya tiene dos locales',
+    price: 129000,
+    popular: false,
+    perks: ['Hasta 2 sucursales', 'Hasta 2 depósitos', 'Hasta 4 cajas', 'Hasta 10 usuarios'],
+    cta: { label: 'Probar gratis 30 días', href: '/register', primary: false },
   },
   {
     id: 'empresa',
@@ -153,7 +162,7 @@ export function Pricing() {
         </div>
 
         {/* Plans */}
-        <div className="grid md:grid-cols-3 gap-4 items-stretch">
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
           {PLANS.map((plan, i) => {
             const annualTotal = plan.price * PAID_MONTHS
             const displayPrice = annual ? Math.round(annualTotal / 12) : plan.price
@@ -254,7 +263,7 @@ export function Pricing() {
               <Check size={15} className="text-[#16a34a]" strokeWidth={2.5} />
             </div>
             <h3 className="font-semibold text-gray-900 text-[16px]">
-              Los 3 planes incluyen todo, sin excepciones
+              Los 4 planes incluyen todo, sin excepciones
             </h3>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-x-6 gap-y-3">

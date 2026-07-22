@@ -9,14 +9,16 @@ import {
   PLAN_RANK,
   ANNUAL_PAID_MONTHS,
   planTotal,
+  planMonthlyDisplay,
   type PaidPlan,
 } from '@/lib/plans'
 
 // Metadatos visuales de cada plan (alineados con la landing).
 const PLAN_META: Record<PaidPlan, { name: string; subtitle: string; perks: string[]; popular?: boolean }> = {
-  local:   { name: 'Local',   subtitle: 'Para un local que arranca en serio', perks: ['1 sucursal', '1 caja', 'Hasta 2 usuarios'] },
-  negocio: { name: 'Negocio', subtitle: 'Para el negocio que ya vende fuerte', perks: ['1 sucursal', 'Hasta 3 cajas', 'Hasta 10 usuarios'], popular: true },
-  empresa: { name: 'Empresa', subtitle: 'Para negocios con varias sucursales', perks: ['Sucursales ilimitadas', 'Cajas ilimitadas', 'Usuarios ilimitados'] },
+  local:      { name: 'Local',      subtitle: 'Para un local que arranca en serio',      perks: ['1 sucursal', '1 caja', 'Hasta 2 usuarios'] },
+  negocio:    { name: 'Negocio',    subtitle: 'Para el negocio que ya vende fuerte',      perks: ['1 sucursal', 'Hasta 3 cajas', 'Hasta 5 usuarios'], popular: true },
+  multilocal: { name: 'Multilocal', subtitle: 'Para el que ya tiene dos locales',          perks: ['Hasta 2 sucursales', 'Hasta 4 cajas', 'Hasta 10 usuarios'] },
+  empresa:    { name: 'Empresa',    subtitle: 'Para negocios con varias sucursales',      perks: ['Sucursales ilimitadas', 'Cajas ilimitadas', 'Usuarios ilimitados'] },
 }
 
 const QR_DURATION_SECS = 25 * 60
@@ -58,12 +60,10 @@ function formatDuration(mins: number): string {
   return m === 0 ? `${h} h` : `${h} h ${m} min`
 }
 
-// Costo diario aproximado. Anual reparte los 10 meses pagos en 365 días;
-// mensual reparte el precio del mes en 30. Sirve para "duele menos" al comercio.
-function perDayOf(monthly: number, billing: 'monthly' | 'annual'): number {
-  return billing === 'annual'
-    ? Math.round((monthly * ANNUAL_PAID_MONTHS) / 365)
-    : Math.round(monthly / 30)
+// Costo diario aproximado: reparte el precio mensual a mostrar sobre 30 días.
+// Como en anual ese mensual ya es el efectivo (total /12), coincide con la landing.
+function perDayOf(monthlyDisplay: number): number {
+  return Math.round(monthlyDisplay / 30)
 }
 
 function formatTime(secs: number): string {
@@ -266,7 +266,7 @@ export function PlansPaymentModal({
   if (!open) return null
 
   const total = selectedPlan ? planTotal(selectedPlan, billing) : 0
-  const perMonth = selectedPlan ? (billing === 'annual' ? PLAN_PRICES[selectedPlan] : total) : 0
+  const perMonth = selectedPlan ? planMonthlyDisplay(selectedPlan, billing) : 0
 
   const sub = user?.business?.subscription
   const currentPlan = sub?.plan ?? null
@@ -374,6 +374,8 @@ export function PlansPaymentModal({
               {PAID_PLAN_ORDER.map(planId => {
                 const meta = PLAN_META[planId]
                 const monthly = PLAN_PRICES[planId]
+                // En anual mostramos el mensual efectivo (total /12), igual que la home.
+                const monthlyDisplay = planMonthlyDisplay(planId, billing)
                 const isCurrent = currentPlan === planId
                 // El highlight verde sigue al plan actual del cliente; solo si todavía no
                 // tiene plan pago resaltamos el "Popular", para no invitar a un downgrade.
@@ -413,10 +415,10 @@ export function PlansPaymentModal({
                       </div>
                       <div className="text-right shrink-0">
                         <p className="text-[var(--text)] font-bold font-mono leading-none">
-                          <span className="text-[var(--text3)] text-xs">$</span>{formatARS(monthly)}
+                          <span className="text-[var(--text3)] text-xs">$</span>{formatARS(monthlyDisplay)}
                         </p>
                         <p className="text-[var(--text3)] text-[10px] mt-1">por mes</p>
-                        <p className="text-[var(--accent)] text-[10px] mt-0.5">≈ ${formatARS(perDayOf(monthly, billing))}/día</p>
+                        <p className="text-[var(--accent)] text-[10px] mt-0.5">≈ ${formatARS(perDayOf(monthlyDisplay))}/día</p>
                         {billing === 'annual' && (
                           <p className="text-[var(--text3)] text-[10px] mt-0.5">${formatARS(monthly * ANNUAL_PAID_MONTHS)}/año</p>
                         )}
@@ -469,7 +471,7 @@ export function PlansPaymentModal({
                 {billing === 'monthly' && <span className="text-[var(--text3)]"> /mes</span>}
               </p>
               <p className="text-[var(--accent)] text-xs mt-0.5">
-                Menos de ${formatARS(perDayOf(PLAN_PRICES[selectedPlan], billing))} por día
+                Menos de ${formatARS(perDayOf(perMonth))} por día
               </p>
               {recap && recap.revenue > 0 && (
                 <p className="text-[var(--text3)] text-xs mt-2 max-w-xs mx-auto">
