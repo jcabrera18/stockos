@@ -191,7 +191,7 @@ export function Pricing() {
                   }`}>
                     {plan.name}
                   </p>
-                  <p className="text-gray-500 text-sm mb-6 leading-snug">{plan.subtitle}</p>
+                  <p className="text-gray-500 text-sm mb-6 leading-snug min-h-[2.5rem]">{plan.subtitle}</p>
 
                   {/* Price */}
                   <div className="mb-1">
