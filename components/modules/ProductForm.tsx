@@ -105,6 +105,21 @@ function serializeFormState(
   return JSON.stringify({ form, barcodes, overridePrices, overrideModes, overridePctValues, ruleQtys })
 }
 
+// ¿El producto recargado del server ya refleja lo que acabamos de guardar?
+// Compara solo los campos editables que el PATCH devuelve tal cual (los numéricos
+// por valor, para no marcar "stale" por "100" vs "100.00"). El stock vivo queda
+// fuera: se reconcilia aparte vía displayStock/reconcileStock.
+function productReflectsSaved(serverForm: FormState, serverBarcodes: string[], expected: FormState, expectedBarcodes: string[]): boolean {
+  const strFields = ['name', 'sku', 'description', 'category_id', 'supplier_id', 'brand_id', 'unit', 'price_mode', 'cost_currency'] as const
+  if (!strFields.every(k => (serverForm[k] ?? '') === (expected[k] ?? ''))) return false
+  if (serverForm.use_fixed_sell_price !== expected.use_fixed_sell_price) return false
+  const numFields = ['cost_price_net', 'vat_rate', 'sell_price', 'stock_min', 'stock_max'] as const
+  if (!numFields.every(k => Number(serverForm[k] || 0) === Number(expected[k] || 0))) return false
+  const a = [...serverBarcodes].sort()
+  const b = [...expectedBarcodes].sort()
+  return a.length === b.length && a.every((v, i) => v === b[i])
+}
+
 const PRICE_MODES = [
   { value: 'fixed' as const, label: 'Precio fijo', hint: 'Vos definís el precio' },
   { value: 'list' as const, label: 'Por lista', hint: 'Margen sobre costo' },
@@ -162,10 +177,21 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
   // la réplica al recargar el producto tras guardar (ver loadPriceRules).
   const expectedRulesRef = useRef<{ productId: string; rules: Record<string, string> } | null>(null)
   const rulesReconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Snapshot de los campos principales recién guardados (nombre/costo/precio/…),
+  // para reconciliar el drawer contra el lag de la réplica al recargar: si el GET
+  // trae datos viejos, mantenemos lo guardado y reintentamos en silencio en vez de
+  // pisar el form con lo stale. Mismo patrón que loadPriceRules/reconcileStock.
+  const expectedProductRef = useRef<{ productId: string; form: FormState; barcodes: string[]; attempt: number } | null>(null)
+  const productReconcileTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [confirmClose, setConfirmClose] = useState(false)
   const baselineRef = useRef('')
   const { workstation } = useWorkstation()
   const { user } = useAuth()
+
+  // Espejo siempre-fresco de onNavigateToProduct para dispararlo desde el timer de
+  // reconciliación sin arrastrar un closure viejo ni sumarlo a deps de efectos.
+  const navigateRef = useRef(onNavigateToProduct)
+  useEffect(() => { navigateRef.current = onNavigateToProduct })
 
   // Multimoneda: solo relevante si el negocio activó la feature. usdRate es la
   // cotización vigente para mostrar la conversión USD→ARS en vivo.
@@ -352,7 +378,7 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
 
   useEffect(() => {
     if (product) {
-      const loadedForm = {
+      const serverForm = {
         name: product.name,
         sku: product.sku ?? '',
         description: product.description ?? '',
@@ -373,12 +399,32 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         unit: product.unit,
         price_mode: product.price_mode ?? 'fixed',
       }
-      setForm(loadedForm)
       // El producto ya viene completo desde la página (incluye product_barcodes
       // y price_overrides), así que poblamos todo de forma síncrona — sin un
       // segundo fetch que haría aparecer el código de barras con retraso.
-      const bars = (product.product_barcodes ?? []).map(b => b.barcode)
-      const loadedBarcodes = bars.length > 0 ? bars : (product.barcode ? [product.barcode] : [])
+      const serverBars = (product.product_barcodes ?? []).map(b => b.barcode)
+      const serverBarcodes = serverBars.length > 0 ? serverBars : (product.barcode ? [product.barcode] : [])
+
+      // Si venimos de guardar ESTE producto y la réplica todavía NO refleja lo
+      // guardado, mostramos lo guardado (correcto) y reintentamos el fetch en
+      // silencio en vez de pisar el drawer con nombre/precio viejos. Mismo patrón
+      // que loadPriceRules/reconcileStock.
+      if (productReconcileTimer.current) { clearTimeout(productReconcileTimer.current); productReconcileTimer.current = null }
+      const pending = expectedProductRef.current?.productId === product.id ? expectedProductRef.current : null
+      let loadedForm = serverForm
+      let loadedBarcodes = serverBarcodes
+      if (pending) {
+        if (!productReflectsSaved(serverForm, serverBarcodes, pending.form, pending.barcodes) && pending.attempt < 4) {
+          loadedForm = { ...pending.form, initial_stock: serverForm.initial_stock }
+          loadedBarcodes = pending.barcodes
+          pending.attempt += 1
+          const pid = product.id
+          productReconcileTimer.current = setTimeout(() => navigateRef.current?.(pid), 1000)
+        } else {
+          expectedProductRef.current = null
+        }
+      }
+      setForm(loadedForm)
       setBarcodes(loadedBarcodes)
       const ovMap: Record<string, string> = {}
       for (const ov of (product.price_overrides ?? [])) {
@@ -404,9 +450,11 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
       loadPriceRules(product.id, loadedForm, loadedBarcodes, ovMap)
       return () => {
         if (rulesReconcileTimer.current) { clearTimeout(rulesReconcileTimer.current); rulesReconcileTimer.current = null }
+        if (productReconcileTimer.current) { clearTimeout(productReconcileTimer.current); productReconcileTimer.current = null }
       }
     } else {
       expectedRulesRef.current = null
+      expectedProductRef.current = null
       setForm(emptyForm)
       setBarcodes([])
       setOverridePrices({})
@@ -556,6 +604,16 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
         expectedRulesRef.current = {
           productId: product!.id,
           rules: Object.fromEntries(rulesPayload.map(r => [r.price_list_id, String(r.min_quantity)])),
+        }
+        // Ídem para los campos principales: guardamos lo recién persistido para
+        // reconciliar el reload contra el lag de la réplica (evita que el drawer
+        // muestre nombre/precio viejos hasta el próximo F5). Normalizamos igual que
+        // el payload (trim) para no marcar "stale" por diferencias cosméticas.
+        expectedProductRef.current = {
+          productId: product!.id,
+          form: { ...form, name: form.name.trim(), sku: form.sku.trim(), description: form.description.trim() },
+          barcodes: [...barcodes],
+          attempt: 0,
         }
         toast.success('Producto actualizado')
         onSaved()

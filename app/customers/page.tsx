@@ -16,6 +16,7 @@ import { CustomerForm } from '@/components/modules/CustomerForm'
 import { PageLoader } from '@/components/ui/Spinner'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { makeOptimisticState, reconcileList, clearOptimisticState } from '@/lib/optimistic-reconcile'
 import type { PaginatedResponse, Pagination as PaginationType } from '@/types'
 import { Plus, Users, Search, Pencil, Trash2, ChevronUp, ChevronDown, ChevronsUpDown, MapPin, Tag, Printer } from 'lucide-react'
 import { toast } from 'sonner'
@@ -693,8 +694,16 @@ export default function CustomersPage() {
     finally { setPrintLocalitiesLoading(false) }
   }, [printLocalities.length])
 
-  const fetchCustomers = useCallback(async () => {
-    setLoading(true)
+  // Estado optimista que el replica del server puede no reflejar aún (lag
+  // read-after-write). El re-fetch lo reconcilia en vez de pisarlo: mantiene el
+  // cliente recién creado prependeado y el nombre recién editado hasta que el
+  // server los devuelve. Mismo patrón que orders/quotes.
+  const optimisticRef = useRef(makeOptimisticState<CustomerSummary>())
+  const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconcileCountRef = useRef(0)
+
+  const fetchCustomers = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const params: Record<string, string | number | undefined> = {
         search: searchRef.current || undefined,
@@ -705,21 +714,52 @@ export default function CustomersPage() {
         client_category_id: categoryRef.current || undefined,
       }
       const res = await api.get<PaginatedResponse<CustomerSummary>>('/api/customers', params)
-      setData(res.data)
+      const { data, pending } = reconcileList(res.data, optimisticRef.current)
+      setData(data)
       setPagination(res.pagination)
+      if (pending && reconcileCountRef.current < 4) {
+        reconcileCountRef.current += 1
+        if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current)
+        reconcileTimerRef.current = setTimeout(() => fetchCustomers(true), 1500)
+      } else {
+        reconcileCountRef.current = 0
+      }
     } catch (err) { console.error(err) }
-    finally { setLoading(false) }
+    finally { if (!silent) setLoading(false) }
   }, [])
+
+  // Registra lo recién guardado en el estado optimista y refetchea. El fetch lo
+  // reconcilia contra el server (lo mantiene hasta que aparezca / coincida).
+  const handleSaved = useCallback((info?: { id: string; created?: CustomerSummary; patch?: Partial<CustomerSummary> }) => {
+    if (info?.created) {
+      optimisticRef.current.created = [info.created, ...optimisticRef.current.created]
+    } else if (info?.id && info.patch) {
+      optimisticRef.current.patches.set(info.id, info.patch)
+    }
+    reconcileCountRef.current = 0
+    fetchCustomers()
+  }, [fetchCustomers])
 
   useEffect(() => {
     pageRef.current = 1
     setPage(1)
+    // Al cambiar filtros/búsqueda, lo optimista puede no pertenecer a la nueva
+    // vista → lo descartamos para no prependear/parchear filas fuera de lugar.
+    clearOptimisticState(optimisticRef.current)
+    reconcileCountRef.current = 0
     fetchCustomers()
   }, [debouncedSearch, statusFilter, zoneFilter, categoryFilter, fetchCustomers])
+
+  useEffect(() => () => {
+    if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current)
+  }, [])
 
   const handlePageChange = useCallback((newPage: number) => {
     pageRef.current = newPage
     setPage(newPage)
+    // La fila optimista vive en la página donde se guardó; al paginar la soltamos.
+    clearOptimisticState(optimisticRef.current)
+    reconcileCountRef.current = 0
     fetchCustomers()
   }, [fetchCustomers])
 
@@ -1167,7 +1207,7 @@ export default function CustomersPage() {
           <div className="w-full md:flex-1 overflow-y-auto">
             <CustomerForm
               customer={formCustomer}
-              onSaved={fetchCustomers}
+              onSaved={handleSaved}
               onClose={closePanel}
             />
           </div>

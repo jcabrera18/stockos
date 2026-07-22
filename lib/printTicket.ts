@@ -421,11 +421,22 @@ export function printThermal(title: string, bodyHtml: string, settings?: PrintSe
   // un poco menor que el 80mm. Ambos quedan calibrados para llenar su papel
   // sin desbordar.
   const vwPerPx = (widthMm === 58 ? 0.30 : 0.345) * ps.fontScale
+
+  // Los `data:` URLs (p.ej. el QR de ARCA en base64) contienen secuencias de
+  // dígitos seguidos de "px" dentro del payload; el replace px→vw las corrompía
+  // y la imagen salía rota. Los apartamos con un placeholder y los restauramos
+  // después de las sustituciones.
+  const dataUrls: string[] = []
   const vwHtml = bodyHtml
+    .replace(/data:[^"')\s]+/g, (m) => {
+      dataUrls.push(m)
+      return ` DATAURL${dataUrls.length - 1} `
+    })
     .replace(/(\d+(?:\.\d+)?)px/g, (_, n) => `${(Number(n) * vwPerPx).toFixed(3)}vw`)
     // Las térmicas son monocromáticas: el gris sale como puntitos dispersos
     // (casi invisible). Forzamos todo el texto a negro sólido.
     .replace(/#(?:222|333|444|555|666|777|888|999|aaa|bbb|ccc)\b/gi, '#000')
+    .replace(/ DATAURL(\d+) /g, (_, i) => dataUrls[Number(i)])
 
   const copies = ps.copies
   const pageBreak = `<div style="break-after:page;page-break-after:always;"></div>`

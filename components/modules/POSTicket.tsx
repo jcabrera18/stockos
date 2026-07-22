@@ -1,6 +1,6 @@
 'use client'
 import { useRef, useState, useEffect } from 'react'
-import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
+import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { Printer, Plus, X, CheckCircle, CreditCard, MessageCircle, Loader2 } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
 import { toast } from 'sonner'
@@ -254,7 +254,8 @@ export function POSTicket({
         toast.success(`Factura ${convertType} autorizada — CAE: ${authorized.afip_cae ?? authorized.cae}`, { id: 'afip-auth' })
         const merged = { ...authorized, invoice_items: authorized.invoice_items ?? converted.invoice_items }
         setInvoice(merged)
-        await handlePrintInvoiceTicket(merged)
+        // No imprimimos automáticamente: el cliente hace click en "Imprimir" si lo necesita.
+        // La factura queda visible en la tarjeta (con QR/CAE) para compartir por WhatsApp.
       } catch (afipErr: unknown) {
         toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar en ARCA', { id: 'afip-auth' })
         setInvoice(converted)
@@ -316,14 +317,6 @@ export function POSTicket({
       sharingRef.current = false
       setSharing(false)
     }
-  }
-
-  // Separator: <hr style={sepStyle} />
-  const sepStyle: React.CSSProperties = {
-    border: 'none',
-    borderTop: '1px dashed #ccc',
-    margin: '12px 0',
-    width: '100%',
   }
 
   const invoiceTypeLabel = (type: string) => {
@@ -413,240 +406,55 @@ export function POSTicket({
             </button>
           </div>
 
-          {/* Ticket paper — scrollable */}
+          {/* Tarjeta moderna — preview + imagen WhatsApp.
+              Si la venta está facturada, se enriquece con los datos fiscales de
+              ARCA (tipo/nº, receptor, CAE y QR). El ticket térmico para imprimir
+              va aparte por handlePrintInvoiceTicket → printThermal. */}
           <div className="overflow-y-auto" style={{ borderRadius: '6px' }}>
-            {isInvoiced && invoice ? (
-            <div style={{
-              display: 'flex',
-              justifyContent: 'center',
-              background: '#e2e2e2',
-              borderRadius: '6px',
-              padding: '16px 8px',
-              boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.14)',
-            }}>
-              <div
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '2px' }}>
+              <SaleShareCard
                 ref={printRef}
-                style={{
-                  fontFamily: "system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif",
-                  fontSize: '12px',
-                  fontWeight: 400,
-                  lineHeight: 1.65,
-                  color: '#111',
-                  background: '#fff',
-                  width: '302px',
-                  padding: '22px 18px 26px',
-                  boxShadow: '0 4px 24px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.08)',
+                business={{
+                  name: business?.name,
+                  cuit: business?.cuit,
+                  ivaConditionLabel: business?.iva_condition ? (IVA_LABELS[business.iva_condition] ?? business.iva_condition) : null,
+                  address: business?.address,
+                  phone: business?.phone,
                 }}
-              >
-                {/* Business header — siempre visible */}
-                <div style={{ textAlign: 'center', marginBottom: '4px' }}>
-                  <div style={{ fontSize: '17px', fontWeight: 400, letterSpacing: '0.01em', color: '#000', marginBottom: '8px' }}>
-                    {business?.name}
-                  </div>
-                  {(business?.cuit || business?.iva_condition || business?.address || business?.phone) && (
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 10px', marginTop: '8px', textAlign: 'left' }}>
-                      {business?.cuit && (
-                        <div>
-                          <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>CUIT</div>
-                          <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{business.cuit}</div>
-                        </div>
-                      )}
-                      {business?.iva_condition && (
-                        <div>
-                          <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cond. IVA</div>
-                          <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{IVA_LABELS[business.iva_condition] ?? business.iva_condition}</div>
-                        </div>
-                      )}
-                      {business?.address && (
-                        <div>
-                          <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Domicilio</div>
-                          <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{business.address}</div>
-                        </div>
-                      )}
-                      {business?.phone && (
-                        <div>
-                          <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Teléfono</div>
-                          <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{business.phone}</div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <hr style={sepStyle} />
-
-                {(
-                  /* ── LAYOUT FACTURA ARCA ── */
-                  <>
-                    {/* Tipo + N° de comprobante */}
-                    <div style={{ textAlign: 'center', padding: '4px 0' }}>
-                      <div style={{ fontSize: '16px', fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#000' }}>
-                        {invoiceTypeLabel(invoice.invoice_type)}
-                      </div>
-                      {invoice.numero !== undefined && (
-                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#555', marginTop: '3px', fontFamily: 'monospace' }}>
-                          N° {String(business?.afip_punto_venta ?? 1).padStart(5, '0')}-{invoice.numero.toString().padStart(8, '0')}
-                        </div>
-                      )}
-                      <div style={{ fontSize: '10px', color: '#999', marginTop: '3px' }}>
-                        {formatDateTime(sale.created_at)}
-                      </div>
-                    </div>
-
-                    <hr style={sepStyle} />
-
-                    {/* Receptor */}
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 10px' }}>
-                      <div>
-                        <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Receptor</div>
-                        <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{invoice.receptor_name ?? customerName ?? 'Consumidor Final'}</div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cond. IVA</div>
-                        <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{IVA_LABELS[invoice.receptor_iva_condition ?? 'CF'] ?? invoice.receptor_iva_condition}</div>
-                      </div>
-                      {invoice.receptor_cuit && (
-                        <div>
-                          <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>CUIT</div>
-                          <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{invoice.receptor_cuit}</div>
-                        </div>
-                      )}
-                      {invoice.receptor_address && (
-                        <div>
-                          <div style={{ fontSize: '8px', fontWeight: 600, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Domicilio</div>
-                          <div style={{ fontSize: '11px', fontWeight: 500, color: '#444' }}>{invoice.receptor_address}</div>
-                        </div>
-                      )}
-                    </div>
-
-                    <hr style={sepStyle} />
-
-                    {/* Columnas de items */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Descripción</span>
-                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Importe</span>
-                    </div>
-
-                    {/* Items de la factura */}
-                    {(invoice.invoice_items ?? []).map((item, i) => (
-                      <div key={i} style={{ marginBottom: '10px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                          <span style={{ flex: 1, paddingRight: '10px', fontWeight: 500, color: '#111', lineHeight: 1.2 }}>
-                            {item.description}
-                          </span>
-                          <span style={{ flexShrink: 0, fontWeight: 700, color: '#000', lineHeight: 1.2 }}>{formatCurrency(item.subtotal)}</span>
-                        </div>
-                        <div style={{ fontSize: '10px', color: '#999', marginTop: '1px' }}>
-                          {item.quantity} × {formatCurrency(item.unit_price)}
-                        </div>
-                      </div>
-                    ))}
-
-                    <hr style={sepStyle} />
-
-                    {/* Subtotales fiscales (solo Factura A) */}
-                    {invoice.invoice_type === 'A' && (
-                      <div style={{ fontSize: '11px', lineHeight: 1.9, marginBottom: '6px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666' }}>
-                          <span>Neto gravado</span><span>{formatCurrency(invoice.net_amount ?? 0)}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666' }}>
-                          <span>IVA 21%</span><span>{formatCurrency(invoice.iva_amount ?? 0)}</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Total */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', paddingTop: '2px' }}>
-                      <span style={{ fontSize: '11px', fontWeight: 700, color: '#000', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Total</span>
-                      <span style={{ fontSize: '22px', fontWeight: 800, color: '#000', letterSpacing: '-0.02em' }}>{formatCurrency(invoice.total_amount ?? sale.total)}</span>
-                    </div>
-
-                    {/* Forma de pago */}
-                    <div style={{ marginTop: '8px' }}>
-                      {sale.payment_splits && sale.payment_splits.length > 1 ? (
-                        <div style={{ fontSize: '11px', color: '#666', lineHeight: 1.8 }}>
-                          {sale.payment_splits.map((s, idx) => (
-                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                              <span>{getPaymentMethodLabel(s.method)}</span>
-                              <span style={{ fontWeight: 500, color: '#444' }}>
-                                {formatCurrency(s.amount)}
-                                {s.method === 'credito' && (s.installments ?? 1) > 1 && ` (${s.installments} ctas)`}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div style={{ fontSize: '11px', color: '#666' }}>
-                          <span style={{ fontWeight: 500, color: '#444' }}>
-                            {getPaymentMethodLabel(sale.payment_method)}
-                            {sale.payment_method === 'credito' && sale.installments > 1 && ` · ${sale.installments} cuotas`}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    <hr style={sepStyle} />
-
-                    {/* CAE + QR ARCA */}
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                        Comprobante autorizado por ARCA
-                      </div>
-                      <div style={{ fontSize: '11px', color: '#444', marginTop: '6px' }}>
-                        CAE: <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: '10px' }}>{invoice.afip_cae ?? invoice.cae}</span>
-                      </div>
-                      {(invoice.afip_cae_vto ?? invoice.cae_expiry) && (
-                        <div style={{ fontSize: '11px', color: '#777' }}>
-                          Vto.: {invoice.afip_cae_vto ?? invoice.cae_expiry}
-                        </div>
-                      )}
-                      {qrDataUrl && (
-                        <img src={qrDataUrl} style={{ width: '110px', height: '110px', display: 'block', margin: '12px auto 4px' }} alt="QR ARCA" />
-                      )}
-                      <div style={{ fontSize: '9px', color: '#ccc', marginBottom: '8px' }}>
-                        Verificar en afip.gob.ar/fe/qr
-                      </div>
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170 58" width="90" height="31" style={{ display: 'block', margin: '0 auto' }}>
-                        <text x="85" y="38" textAnchor="middle" fontFamily="Arial Black,Arial" fontSize="44" fontWeight="900" fill="#000">ARCA</text>
-                        <text x="85" y="49" textAnchor="middle" fontFamily="Arial,sans-serif" fontSize="7.5" fill="#000" letterSpacing="1">AGENCIA DE RECAUDACION</text>
-                        <text x="85" y="58" textAnchor="middle" fontFamily="Arial,sans-serif" fontSize="7.5" fill="#000" letterSpacing="1">Y CONTROL ADUANERO</text>
-                      </svg>
-                    </div>
-
-                    <hr style={sepStyle} />
-
-                    <div style={{ textAlign: 'center', lineHeight: 1.8 }}>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#333' }}>¡Gracias por su compra!</div>
-                      <div style={{ fontSize: '10px', color: '#ccc', marginTop: '2px', letterSpacing: '0.05em' }}>stockos.digital</div>
-                    </div>
-                  </>
-                )}
-              </div>
+                saleId={sale.id}
+                createdAt={sale.created_at}
+                total={isInvoiced && invoice ? (invoice.total_amount ?? sale.total) : sale.total}
+                discount={sale.discount}
+                shippingAmount={sale.shipping_amount}
+                paymentMethod={sale.payment_method}
+                installments={sale.installments}
+                paymentSplits={sale.payment_splits}
+                items={sale.items.map(i => ({
+                  name: i.product.name, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount,
+                }))}
+                branchName={branchName}
+                sellerName={sellerName}
+                customerName={customerName}
+                invoice={isInvoiced && invoice ? {
+                  typeLabel: invoiceTypeLabel(invoice.invoice_type),
+                  invoiceType: invoice.invoice_type,
+                  numero: invoice.numero,
+                  ptoVenta: business?.afip_punto_venta ?? 1,
+                  cae: invoice.afip_cae ?? invoice.cae,
+                  caeVto: invoice.afip_cae_vto ?? invoice.cae_expiry,
+                  qrDataUrl,
+                  receptorName: invoice.receptor_name ?? customerName ?? undefined,
+                  receptorIvaLabel: IVA_LABELS[invoice.receptor_iva_condition ?? 'CF'] ?? invoice.receptor_iva_condition,
+                  receptorCuit: invoice.receptor_cuit,
+                  receptorAddress: invoice.receptor_address,
+                  netAmount: invoice.net_amount,
+                  ivaAmount: invoice.iva_amount,
+                  items: (invoice.invoice_items ?? []).map(it => ({
+                    name: it.description, quantity: it.quantity, unit_price: it.unit_price, discount: 0,
+                  })),
+                } : undefined}
+              />
             </div>
-            ) : (
-              /* ── TARJETA MODERNA — comprobante de venta (preview + imagen WhatsApp) ── */
-              <div style={{ display: 'flex', justifyContent: 'center', padding: '2px' }}>
-                <SaleShareCard
-                  ref={printRef}
-                  business={business}
-                  saleId={sale.id}
-                  createdAt={sale.created_at}
-                  total={sale.total}
-                  discount={sale.discount}
-                  shippingAmount={sale.shipping_amount}
-                  paymentMethod={sale.payment_method}
-                  installments={sale.installments}
-                  paymentSplits={sale.payment_splits}
-                  items={sale.items.map(i => ({
-                    name: i.product.name, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount,
-                  }))}
-                  branchName={branchName}
-                  sellerName={sellerName}
-                  customerName={customerName}
-                />
-              </div>
-            )}
           </div>
 
         </div>

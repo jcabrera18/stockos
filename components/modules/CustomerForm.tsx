@@ -71,7 +71,10 @@ const empty = {
 
 interface CustomerFormProps {
   customer: CustomerSummary | null
-  onSaved: () => void
+  // Devuelve lo recién guardado para reconciliar la lista contra el lag de la
+  // réplica: `created` (POST) para prependear la fila nueva, o `id`+`patch` (edición)
+  // para sostener los campos editados hasta que el server los refleje.
+  onSaved: (info?: { id: string; created?: CustomerSummary; patch?: Partial<CustomerSummary> }) => void
   onClose: () => void
 }
 
@@ -190,12 +193,15 @@ export function CustomerForm({ customer, onSaved, onClose }: CustomerFormProps) 
       if (isEdit) {
         await api.patch(`/api/customers/${customer!.id}`, payload)
         toast.success('Cliente actualizado')
-        onSaved()
+        // Solo parcheamos full_name: es no-nulo y viaja trimmeado, así coincide
+        // exacto con lo que devuelve el server y la reconciliación lo suelta limpio
+        // (campos nullables como phone/email arriesgarían un patch que nunca matchea).
+        onSaved({ id: customer!.id, patch: { full_name: payload.full_name } })
         onClose()
       } else {
-        await api.post('/api/customers', payload)
+        const created = await api.post<CustomerSummary>('/api/customers', payload)
         toast.success(mode === 'create-another' ? 'Cliente creado. Listo para cargar otro.' : 'Cliente creado')
-        onSaved()
+        onSaved(created?.id ? { id: created.id, created } : undefined)
         if (mode === 'create-another') {
           setForm(empty)
           setErrors({})

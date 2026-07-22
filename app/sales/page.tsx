@@ -177,114 +177,121 @@ export default function SalesPage() {
           <p>Consultá todas las ventas con filtros por fecha, sucursal, caja y forma de pago. Tocá una venta para ver el detalle de los productos y, si corresponde, generar su comprobante.</p>
         </HelpBanner>
         {/* Filtros */}
-        <div className="flex flex-wrap gap-2 items-center">
+        <div className="space-y-2">
 
           {/* Período — los roles restringidos quedan fijados a "hoy" (el backend lo fuerza) */}
-          {!restricted && periods.map(p => (
-            <button key={p.key} onClick={() => setPeriod(p.key)}
-              className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${period === p.key ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
-                }`}>
-              {p.label}
-            </button>
-          ))}
-
-          {/* Separador */}
-          {!restricted && <div className="w-px h-5 bg-[var(--border)]" />}
-
-          {/* Método de pago */}
-          <select
-            value={paymentFilter}
-            onChange={e => setPaymentFilter(e.target.value)}
-            className="text-xs px-3 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text2)] focus:outline-none focus:border-[var(--accent)] cursor-pointer"
-          >
-            <option value="">Todos los métodos</option>
-            <option value="efectivo">Efectivo</option>
-            <option value="debito">Débito</option>
-            <option value="credito">Crédito</option>
-            <option value="transferencia">Transferencia</option>
-            <option value="qr">QR</option>
-            <option value="cuenta_corriente">Cta. Cte.</option>
-          </select>
-
-          {/* N° Ticket */}
-          <input
-            value={ticketSearch}
-            onChange={e => setTicketSearch(e.target.value.toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 8))}
-            placeholder="N° Ticket..."
-            className="text-xs px-3 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] w-28 font-mono uppercase"
-          />
-
-          {/* Filtro por cliente */}
-          {customerFilter ? (
-            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--accent-subtle)] border border-[var(--accent)] text-xs">
-              <span className="text-[var(--accent)] font-medium">{customerFilter.full_name}</span>
-              <button onClick={() => { setCustomerFilter(null); setCustomerSearch('') }}
-                className="text-[var(--accent)] hover:text-[var(--danger)]">✕</button>
-            </div>
-          ) : (
-            <div className="relative">
-              <input
-                value={customerSearch}
-                onChange={e => setCustomerSearch(e.target.value)}
-                placeholder="Filtrar por cliente..."
-                className="text-xs px-3 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] w-40"
-              />
-              {searchingCustomers && (
-                <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 border border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
-              )}
-              {customerOptions.length > 0 && (
-                <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 min-w-48 overflow-hidden">
-                  {customerOptions.map(c => (
-                    <button key={c.id}
-                      onClick={() => { setCustomerFilter(c); setCustomerSearch(''); setCustomerOptions([]) }}
-                      className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--surface2)] transition-colors border-b border-[var(--border)] last:border-0">
-                      {c.full_name}
-                    </button>
-                  ))}
-                </div>
-              )}
+          {!restricted && (
+            <div className="flex flex-wrap gap-2">
+              {periods.map(p => (
+                <button key={p.key} onClick={() => setPeriod(p.key)}
+                  className={`px-3 py-1.5 text-xs rounded-full font-medium transition-colors ${period === p.key ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface2)] text-[var(--text2)] hover:bg-[var(--surface3)]'
+                    }`}>
+                  {p.label}
+                </button>
+              ))}
             </div>
           )}
 
-          {/* Monto mínimo */}
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-[var(--text3)]">Desde $</span>
-            <MoneyInput
-              unstyled
-              placeholder="0"
-              value={minAmount}
-              onChange={v => setMinAmount(v)}
-              className="w-24 text-xs px-2 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-            />
-          </div>
+          {/* Resto de filtros — grid 2 cols en mobile, inline en desktop */}
+          <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
 
-          {/* Monto máximo */}
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-[var(--text3)]">Hasta $</span>
-            <MoneyInput
-              unstyled
-              placeholder="∞"
-              value={maxAmount}
-              onChange={v => setMaxAmount(v)}
-              className="w-24 text-xs px-2 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
-            />
-          </div>
-
-          {/* Limpiar filtros */}
-          {(paymentFilter || minAmount || maxAmount || ticketSearch) && (
-            <button
-              onClick={() => { setPaymentFilter(''); setMinAmount(''); setMaxAmount(''); setTicketSearch(''); setCustomerFilter(null); setCustomerSearch('') }} className="text-xs text-[var(--danger)] hover:underline"
+            {/* Método de pago */}
+            <select
+              value={paymentFilter}
+              onChange={e => setPaymentFilter(e.target.value)}
+              className="col-span-2 sm:w-auto text-xs px-3 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text2)] focus:outline-none focus:border-[var(--accent)] cursor-pointer"
             >
-              Limpiar
-            </button>
-          )}
+              <option value="">Todos los métodos</option>
+              <option value="efectivo">Efectivo</option>
+              <option value="debito">Débito</option>
+              <option value="credito">Crédito</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="qr">QR</option>
+              <option value="cuenta_corriente">Cta. Cte.</option>
+            </select>
 
-          {/* Total filtrado */}
-          {!loading && (
-            <span className="sm:ml-auto w-full sm:w-auto text-xs text-[var(--text3)]">
-              {restricted ? `${pagination.total} ventas hoy` : `${pagination.total} ventas · ${formatCurrency(totalRevenue)}`}
-            </span>
-          )}
+            {/* N° Ticket */}
+            <input
+              value={ticketSearch}
+              onChange={e => setTicketSearch(e.target.value.toUpperCase().replace(/[^A-F0-9]/g, '').slice(0, 8))}
+              placeholder="N° Ticket..."
+              className="w-full sm:w-28 text-xs px-3 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)] uppercase placeholder:normal-case"
+            />
+
+            {/* Filtro por cliente */}
+            {customerFilter ? (
+              <div className="flex items-center justify-between gap-1.5 px-3 py-1.5 rounded-full bg-[var(--accent-subtle)] border border-[var(--accent)] text-xs">
+                <span className="text-[var(--accent)] font-medium truncate">{customerFilter.full_name}</span>
+                <button onClick={() => { setCustomerFilter(null); setCustomerSearch('') }}
+                  className="text-[var(--accent)] hover:text-[var(--danger)] shrink-0">✕</button>
+              </div>
+            ) : (
+              <div className="relative">
+                <input
+                  value={customerSearch}
+                  onChange={e => setCustomerSearch(e.target.value)}
+                  placeholder="Filtrar por cliente..."
+                  className="w-full sm:w-40 text-xs px-3 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
+                />
+                {searchingCustomers && (
+                  <div className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 border border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />
+                )}
+                {customerOptions.length > 0 && (
+                  <div className="absolute top-full left-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 min-w-48 overflow-hidden">
+                    {customerOptions.map(c => (
+                      <button key={c.id}
+                        onClick={() => { setCustomerFilter(c); setCustomerSearch(''); setCustomerOptions([]) }}
+                        className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--surface2)] transition-colors border-b border-[var(--border)] last:border-0">
+                        {c.full_name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Monto mínimo */}
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-[var(--text3)] shrink-0">Desde $</span>
+              <MoneyInput
+                unstyled
+                placeholder="0"
+                value={minAmount}
+                onChange={v => setMinAmount(v)}
+                className="w-full sm:w-24 text-xs px-2 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+
+            {/* Monto máximo */}
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-[var(--text3)] shrink-0">Hasta $</span>
+              <MoneyInput
+                unstyled
+                placeholder="∞"
+                value={maxAmount}
+                onChange={v => setMaxAmount(v)}
+                className="w-full sm:w-24 text-xs px-2 py-1.5 rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+              />
+            </div>
+
+            {/* Limpiar filtros + total */}
+            <div className="col-span-2 sm:contents flex items-center justify-between gap-2">
+              {(paymentFilter || minAmount || maxAmount || ticketSearch) && (
+                <button
+                  onClick={() => { setPaymentFilter(''); setMinAmount(''); setMaxAmount(''); setTicketSearch(''); setCustomerFilter(null); setCustomerSearch('') }} className="text-xs text-[var(--danger)] hover:underline"
+                >
+                  Limpiar
+                </button>
+              )}
+
+              {/* Total filtrado */}
+              {!loading && (
+                <span className="sm:ml-auto text-xs text-[var(--text3)]">
+                  {restricted ? `${pagination.total} ventas hoy` : `${pagination.total} ventas · ${formatCurrency(totalRevenue)}`}
+                </span>
+              )}
+            </div>
+          </div>
         </div>
 
         {loading ? <TableSkeleton rows={10} /> : data.length === 0 ? (

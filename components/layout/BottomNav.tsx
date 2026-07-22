@@ -38,6 +38,9 @@ export function BottomNav() {
     {
       label: 'Operación',
       items: [
+        { href: '/pos', label: 'Cobrar', icon: Zap, roles: ['owner', 'admin', 'cashier'] },
+        { href: '/cash-register', label: 'Caja', icon: CreditCard, roles: ['owner', 'admin', 'cashier'] },
+        { href: '/sales', label: 'Ventas', icon: ShoppingCart, roles: ['owner', 'admin', 'cashier'] },
         { href: '/orders', label: 'Pedidos', icon: ClipboardList, roles: ['owner', 'admin', 'cashier', 'stocker', 'seller'] },
         { href: '/quotes', label: 'Presupuestos', icon: FileText, roles: ['owner', 'admin', 'cashier', 'seller'] },
         { href: '/invoices', label: 'Comprobantes', icon: Receipt, roles: ['owner', 'admin', 'cashier'] },
@@ -45,7 +48,6 @@ export function BottomNav() {
         { href: '/accounts', label: 'Cuentas ctes.', icon: Wallet, roles: ['owner', 'admin', 'cashier'] },
         { href: '/purchases', label: 'Compras', icon: Truck, roles: ['owner', 'admin', 'stocker'] },
         { href: '/warehouses', label: 'Depósitos', icon: Warehouse, roles: ['owner', 'admin', 'stocker'] },
-        { href: '/pos', label: 'Cobrar', icon: Zap, roles: ['owner', 'admin', 'cashier'] },
       ]
     },
     {
