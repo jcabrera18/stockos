@@ -136,6 +136,12 @@ export default function POSPage() {
   const searchRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isAddingRef = useRef(false)
+  // Secuencia para descartar refreshes de stock en fondo que llegan fuera de orden
+  // (el usuario ya siguió tecleando y hay una búsqueda más nueva en pantalla).
+  const searchSeqRef = useRef(0)
+  // addToCart se define más abajo; lo exponemos por ref para poder usarlo en
+  // searchProductsLocalFirst (declarado antes) sin caer en TDZ.
+  const addToCartRef = useRef<((product: Product, qty?: number, prefetchedPricing?: PricingResult) => void) | null>(null)
 
   const [pendingQty, setPendingQty] = useState(1)
   const pendingQtyRef = useRef(1)
@@ -599,6 +605,62 @@ export default function POSPage() {
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
+  // Búsqueda de texto local-first: mostramos al instante los resultados desde el
+  // cache (IndexedDB, con stock del último sync) y, si hay depósito + stock activo,
+  // disparamos en fondo un fetch por depósito para refrescar los números de stock
+  // sin bloquear la UI. El seq descarta respuestas que llegan tarde cuando el
+  // usuario ya tecleó una búsqueda nueva.
+  const searchProductsLocalFirst = useCallback(async (
+    trimmed: string,
+    opts: { autoAddSingle?: boolean } = {},
+  ): Promise<Product[]> => {
+    const seq = ++searchSeqRef.current
+    const warehouse = selectedWarehouseRef.current
+    const stockOn   = stockEnabledRef.current
+
+    const local = await searchProductsLocal(trimmed, SEARCH_RESULT_LIMIT)
+    if (seq !== searchSeqRef.current) return local // ya hay una búsqueda más nueva
+
+    if (local.length > 0) {
+      setResults(local)
+      setActiveResultIndex(0)
+      if (opts.autoAddSingle && local.length === 1) addToCartRef.current?.(local[0], pendingQtyRef.current)
+
+      // Refresh de stock en fondo (solo si el depósito lo requiere). No bloquea ni
+      // muestra spinner: cuando responde, actualizamos stock_current de los ítems
+      // aún visibles para esta misma búsqueda.
+      if (warehouse?.id && stockOn) {
+        api.get<{ data: Product[] }>('/api/products', {
+          search: trimmed, limit: SEARCH_RESULT_LIMIT, warehouse_id: warehouse.id,
+        }).then(res => {
+          if (seq !== searchSeqRef.current) return
+          const freshById = new Map(res.data.map(p => [p.id, p]))
+          setResults(prev => prev.map(p => freshById.get(p.id) ?? p))
+        }).catch(() => {})
+      }
+      return local
+    }
+
+    // Cache miss (ej. producto recién creado que aún no sincronizó): fallback a la API.
+    setSearching(true)
+    try {
+      const res = await api.get<{ data: Product[] }>('/api/products', {
+        search: trimmed, limit: SEARCH_RESULT_LIMIT,
+        ...(warehouse?.id && stockOn ? { warehouse_id: warehouse.id } : {}),
+      })
+      if (seq !== searchSeqRef.current) return res.data
+      setResults(res.data)
+      setActiveResultIndex(res.data.length > 0 ? 0 : -1)
+      if (opts.autoAddSingle && res.data.length === 1) addToCartRef.current?.(res.data[0], pendingQtyRef.current)
+      return res.data
+    } catch {
+      if (seq === searchSeqRef.current) { setResults([]); setActiveResultIndex(-1) }
+      return []
+    } finally {
+      if (seq === searchSeqRef.current) setSearching(false)
+    }
+  }, [])
+
   // Search / barcode logic
   useEffect(() => {
     const trimmed   = query.trim()
@@ -765,25 +827,8 @@ export default function POSPage() {
         return
       }
 
-      const currentWarehouse = selectedWarehouseRef.current
-      if (!currentWarehouse || !stockEnabledRef.current) {
-        const localResults = await searchProductsLocal(trimmed, SEARCH_RESULT_LIMIT)
-        if (localResults.length > 0) {
-          setResults(localResults)
-          setActiveResultIndex(0)
-          return
-        }
-      }
-      setSearching(true)
-      try {
-        const res = await api.get<{ data: Product[] }>('/api/products', {
-          search: trimmed, limit: SEARCH_RESULT_LIMIT,
-          ...(currentWarehouse?.id && stockEnabledRef.current ? { warehouse_id: currentWarehouse.id } : {}),
-        })
-        setResults(res.data)
-        setActiveResultIndex(res.data.length > 0 ? 0 : -1)
-      } catch { setResults([]); setActiveResultIndex(-1) }
-      finally { setSearching(false) }
+      // Local-first: resultados instantáneos desde el cache + refresh de stock en fondo.
+      await searchProductsLocalFirst(trimmed)
     // Para barcodes usamos un debounce muy corto (no 0ms): un EAN-13 se teclea
     // dígito a dígito y la regex matchea ya con 8 dígitos, así que con 0ms se
     // procesaba un código parcial (ej. "77992190") antes de completar el scan,
@@ -926,6 +971,9 @@ export default function POSPage() {
       ))
     } catch { }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Exponemos addToCart por ref para searchProductsLocalFirst (declarado antes).
+  useEffect(() => { addToCartRef.current = addToCart }, [addToCart])
 
   const updateQty = useCallback((id: string, delta: number) => {
     const item = cartRef.current.find(i => i.product.id === id)
@@ -1574,21 +1622,8 @@ export default function POSPage() {
                         toast.error(`Escribí al menos ${MIN_SEARCH_LEN} caracteres para buscar`)
                         return
                       }
-                      const currentWarehouseEnter = selectedWarehouseRef.current
-                      if (!currentWarehouseEnter || !stockEnabledRef.current) {
-                        const localSearchResults = await searchProductsLocal(trimmedQ, SEARCH_RESULT_LIMIT)
-                        if (localSearchResults.length > 0) {
-                          setResults(localSearchResults)
-                          if (localSearchResults.length === 1) addToCart(localSearchResults[0], pendingQtyRef.current)
-                          return
-                        }
-                      }
-                      setSearching(true)
-                      try {
-                        const res = await api.get<{ data: Product[] }>('/api/products', { search: trimmedQ, limit: SEARCH_RESULT_LIMIT, ...(currentWarehouseEnter?.id && stockEnabledRef.current ? { warehouse_id: currentWarehouseEnter.id } : {}) })
-                        setResults(res.data)
-                        if (res.data.length === 1) addToCart(res.data[0], pendingQtyRef.current)
-                      } catch { setResults([]) } finally { setSearching(false) }
+                      // Local-first + auto-agregar si hay un único match.
+                      await searchProductsLocalFirst(trimmedQ, { autoAddSingle: true })
                     }
                   }
                 }}
@@ -1760,7 +1795,7 @@ export default function POSPage() {
 
         {/* Columnas de tabla */}
         {cart.length > 0 && (
-          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)] bg-[var(--surface2)] flex-shrink-0">
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)] bg-[var(--surface2)] flex-shrink-0">
             <div className="w-[88px] text-[10px] font-semibold text-[var(--text3)] uppercase tracking-wide text-center">Cant.</div>
             <div className="flex-1 text-[10px] font-semibold text-[var(--text3)] uppercase tracking-wide">Producto</div>
             <div className="w-[84px] text-[10px] font-semibold text-[var(--text3)] uppercase tracking-wide text-right">Precio unit.</div>
@@ -1784,7 +1819,7 @@ export default function POSPage() {
                   key={item.product.id}
                   ref={el => { cartItemRefs.current[index] = el }}
                   onClick={() => setFocusedCartIndex(index)}
-                  className={`group flex items-center gap-2 px-3 py-2 border-b border-[var(--border)] cursor-default select-none transition-colors ${
+                  className={`group flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2 px-3 py-2 border-b border-[var(--border)] cursor-default select-none transition-colors ${
                     item.status === 'error'
                       ? 'bg-[var(--danger-subtle,#fee2e2)]'
                       : isFocused
@@ -1792,73 +1827,79 @@ export default function POSPage() {
                         : 'hover:bg-[var(--surface2)]'
                   }`}
                 >
-                  {/* Qty controls */}
-                  <div className="flex items-center flex-shrink-0 rounded border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
-                    <button
-                      onClick={e => { e.stopPropagation(); updateQty(item.product.id, -1) }}
-                      className="w-7 h-8 flex items-center justify-center hover:bg-[var(--surface2)] hover:text-[var(--accent)] transition-colors"
-                    >
-                      <Minus size={11} />
-                    </button>
-                    <span className="w-8 text-center text-sm font-bold mono">{item.quantity}</span>
-                    <button
-                      onClick={e => { e.stopPropagation(); updateQty(item.product.id, 1) }}
-                      className="w-7 h-8 flex items-center justify-center hover:bg-[var(--surface2)] hover:text-[var(--accent)] transition-colors"
-                    >
-                      <Plus size={11} />
-                    </button>
-                  </div>
-
-                  {/* Name + badges */}
-                  <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                    {item.status === 'pending' && (
-                      <span className="w-3 h-3 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin flex-shrink-0" />
-                    )}
-                    <span className={`text-sm font-medium truncate ${item.status === 'error' ? 'text-[var(--danger)]' : 'text-[var(--text)]'}`}>
-                      {item.status === 'error' ? `¿? ${item.product.name}` : item.product.name}
-                    </span>
-                    {item.promo_label && (
-                      <span className="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-[var(--warning-subtle,#fef3c7)] text-[var(--warning)] font-medium whitespace-nowrap">
-                        🎉 {item.promo_label}
+                  {/* Fila 1 (mobile): nombre + quitar. En desktop se aplana (sm:contents) */}
+                  <div className="flex items-center gap-2 sm:contents">
+                    {/* Name + badges */}
+                    <div className="flex-1 min-w-0 flex items-center gap-1.5 sm:order-2">
+                      {item.status === 'pending' && (
+                        <span className="w-3 h-3 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin flex-shrink-0" />
+                      )}
+                      <span className={`text-sm font-medium leading-snug line-clamp-2 sm:line-clamp-none sm:truncate ${item.status === 'error' ? 'text-[var(--danger)]' : 'text-[var(--text)]'}`}>
+                        {item.status === 'error' ? `¿? ${item.product.name}` : item.product.name}
                       </span>
-                    )}
-                    {item.product.price_mode === 'custom' && item.unit_price === 0 && (
-                      <span className="flex-shrink-0 text-[10px] text-[var(--warning)] font-medium whitespace-nowrap">← precio</span>
-                    )}
+                      {item.promo_label && (
+                        <span className="flex-shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-[var(--warning-subtle,#fef3c7)] text-[var(--warning)] font-medium whitespace-nowrap">
+                          🎉 {item.promo_label}
+                        </span>
+                      )}
+                      {item.product.price_mode === 'custom' && item.unit_price === 0 && (
+                        <span className="flex-shrink-0 text-[10px] text-[var(--warning)] font-medium whitespace-nowrap">← precio</span>
+                      )}
+                    </div>
+
+                    {/* Remove */}
+                    <button
+                      onClick={e => { e.stopPropagation(); removeItem(item.product.id); setFocusedCartIndex(-1); setTimeout(() => searchRef.current?.focus(), 50) }}
+                      className="w-8 h-8 flex items-center justify-center flex-shrink-0 rounded-md text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] active:bg-[var(--danger-subtle)] transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:order-5"
+                      aria-label="Quitar del carrito"
+                    >
+                      <Trash2 size={15} />
+                    </button>
                   </div>
 
-                  {/* Unit price — editable inline */}
-                  <div className="w-[84px] flex-shrink-0" onClick={e => e.stopPropagation()}>
-                    <MoneyInput
-                      unstyled
-                      ref={el => { priceInputRefs.current[item.product.id] = el }}
-                      value={item.unit_price}
-                      onChange={v => updateItemPrice(item.product.id, v)}
-                      onFocus={e => { e.target.select(); setFocusedCartIndex(index) }}
-                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); searchRef.current?.focus() } }}
-                      className={`w-full text-sm mono text-right bg-transparent border-b-2 px-1 py-0.5 focus:outline-none transition-colors rounded-t ${
-                        item.product.price_mode === 'custom' && item.unit_price === 0
-                          ? 'border-[var(--warning)] text-[var(--warning)]'
-                          : 'border-transparent focus:border-[var(--accent)] focus:bg-[var(--surface)]'
-                      }`}
-                    />
-                  </div>
+                  {/* Fila 2 (mobile): cantidad + precios. En desktop se aplana (sm:contents) */}
+                  <div className="flex items-center gap-2 sm:contents">
+                    {/* Qty controls */}
+                    <div className="flex items-center flex-shrink-0 rounded border border-[var(--border)] bg-[var(--surface)] overflow-hidden sm:order-1">
+                      <button
+                        onClick={e => { e.stopPropagation(); updateQty(item.product.id, -1) }}
+                        className="w-7 h-8 flex items-center justify-center hover:bg-[var(--surface2)] hover:text-[var(--accent)] transition-colors"
+                      >
+                        <Minus size={11} />
+                      </button>
+                      <span className="w-8 text-center text-sm font-bold mono">{item.quantity}</span>
+                      <button
+                        onClick={e => { e.stopPropagation(); updateQty(item.product.id, 1) }}
+                        className="w-7 h-8 flex items-center justify-center hover:bg-[var(--surface2)] hover:text-[var(--accent)] transition-colors"
+                      >
+                        <Plus size={11} />
+                      </button>
+                    </div>
 
-                  {/* Subtotal */}
-                  <div className="w-[88px] flex-shrink-0 text-right">
-                    <span className="text-sm font-bold mono text-[var(--text)]">
-                      {formatCurrency(item.unit_price * item.quantity - item.discount)}
-                    </span>
-                  </div>
+                    {/* Unit price — editable inline */}
+                    <div className="w-[84px] flex-shrink-0 ml-auto sm:ml-0 sm:order-3" onClick={e => e.stopPropagation()}>
+                      <MoneyInput
+                        unstyled
+                        ref={el => { priceInputRefs.current[item.product.id] = el }}
+                        value={item.unit_price}
+                        onChange={v => updateItemPrice(item.product.id, v)}
+                        onFocus={e => { e.target.select(); setFocusedCartIndex(index) }}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); searchRef.current?.focus() } }}
+                        className={`w-full text-sm mono text-right bg-transparent border-b-2 px-1 py-0.5 focus:outline-none transition-colors rounded-t ${
+                          item.product.price_mode === 'custom' && item.unit_price === 0
+                            ? 'border-[var(--warning)] text-[var(--warning)]'
+                            : 'border-transparent focus:border-[var(--accent)] focus:bg-[var(--surface)]'
+                        }`}
+                      />
+                    </div>
 
-                  {/* Remove */}
-                  <button
-                    onClick={e => { e.stopPropagation(); removeItem(item.product.id); setFocusedCartIndex(-1); setTimeout(() => searchRef.current?.focus(), 50) }}
-                    className="w-8 h-8 flex items-center justify-center flex-shrink-0 rounded-md text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] active:bg-[var(--danger-subtle)] transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
-                    aria-label="Quitar del carrito"
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                    {/* Subtotal */}
+                    <div className="w-[88px] flex-shrink-0 text-right sm:order-4">
+                      <span className="text-sm font-bold mono text-[var(--text)]">
+                        {formatCurrency(item.unit_price * item.quantity - item.discount)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               )
             })

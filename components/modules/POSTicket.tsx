@@ -3,9 +3,10 @@ import { useRef, useState, useEffect } from 'react'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
 import { Printer, Plus, X, CheckCircle, CreditCard, MessageCircle, Loader2 } from 'lucide-react'
 import { Input } from '@/components/ui/Input'
-import { toBlob } from 'html-to-image'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { shareTicketImage } from '@/lib/shareTicket'
+import { SaleShareCard } from './SaleShareCard'
 import QRCode from 'qrcode'
 import { type PrintSettings, DEFAULT_PRINT_SETTINGS } from '@/hooks/usePrintSettings'
 import {
@@ -138,10 +139,6 @@ export function POSTicket({
   const [receptorAddress, setReceptorAddress] = useState('')
   const [receptorIva, setReceptorIva] = useState('CF')
   const [converting, setConverting] = useState(false)
-
-  const itemsSubtotal = sale.items.reduce(
-    (a, i) => a + i.unit_price * i.quantity - i.discount, 0
-  )
 
   useEffect(() => {
     if (!invoiceId) return
@@ -305,56 +302,13 @@ export function POSTicket({
     sharingRef.current = true
     setSharing(true)
     try {
-      // Esperar a que las fuentes terminen de cargar para que el texto no salga
-      // en blanco o con fallback en el render (Safari/mobile sobre todo).
-      if (document.fonts?.ready) {
-        try { await document.fonts.ready } catch { /* noop */ }
-      }
-
-      // html-to-image clona SOLO el ticket (no todo el documento) y respeta
-      // colores modernos como oklch de Tailwind v4 — html2canvas fallaba acá.
-      const blob = await toBlob(printRef.current, {
-        backgroundColor: '#ffffff',
-        pixelRatio: 2,
-        cacheBust: true,
+      const res = await shareTicketImage(printRef.current, {
+        fileName: `ticket-${sale.id.slice(-8)}.png`,
+        customerPhone,
       })
-      if (!blob) throw new Error('No se pudo generar la imagen')
-
-      const fileName = `ticket-${sale.id.slice(-8)}.png`
-      const file = new File([blob], fileName, { type: 'image/png' })
-
-      // 1) Compartir nativo (mobile y Mac con Web Share): adjunta la imagen
-      // directo al chat elegido. Es el único camino "compartir": si funciona
-      // salimos acá para no duplicar la imagen (el flujo de copiar+pegar en
-      // WhatsApp Web terminaba adjuntándola dos veces).
-      if (navigator.canShare?.({ files: [file] })) {
-        try {
-          // Compartir SOLO el archivo. Adjuntar title/text junto a files hace
-          // que WhatsApp en macOS duplique la imagen en el compositor.
-          await navigator.share({ files: [file] })
-          return
-        } catch (err) {
-          // Cancelar el share sheet no es un error: no seguimos con el fallback.
-          if (err instanceof Error && err.name === 'AbortError') return
-          // Cualquier otro error real → caemos a la descarga.
-        }
+      if (res === 'downloaded') {
+        toast.success('Ticket descargado — adjuntalo en el chat de WhatsApp', { duration: 6000 })
       }
-
-      // 2) Escritorio (Windows/Firefox sin Web Share): descargar el PNG y abrir
-      // WhatsApp para adjuntarlo. Determinístico: nunca duplica ni depende del
-      // portapapeles (que en Windows suele estar bloqueado).
-      const phone = customerPhone?.replace(/\D/g, '')
-      const waUrl = phone ? `https://wa.me/${phone}` : 'https://web.whatsapp.com/'
-      const objectUrl = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = objectUrl
-      link.download = fileName
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 10000)
-      window.open(waUrl, '_blank')
-      toast.success('Ticket descargado — adjuntalo en el chat de WhatsApp', { duration: 6000 })
     } catch (err) {
       toast.error('No se pudo generar la imagen')
       console.error(err)
@@ -461,6 +415,7 @@ export function POSTicket({
 
           {/* Ticket paper — scrollable */}
           <div className="overflow-y-auto" style={{ borderRadius: '6px' }}>
+            {isInvoiced && invoice ? (
             <div style={{
               display: 'flex',
               justifyContent: 'center',
@@ -520,7 +475,7 @@ export function POSTicket({
 
                 <hr style={sepStyle} />
 
-                {isInvoiced && invoice ? (
+                {(
                   /* ── LAYOUT FACTURA ARCA ── */
                   <>
                     {/* Tipo + N° de comprobante */}
@@ -666,135 +621,32 @@ export function POSTicket({
                       <div style={{ fontSize: '10px', color: '#ccc', marginTop: '2px', letterSpacing: '0.05em' }}>stockos.digital</div>
                     </div>
                   </>
-                ) : (
-                  /* ── LAYOUT TICKET SIMPLE ── */
-                  <>
-                    {/* Meta: sucursal / cajero / fecha / ticket# / cliente */}
-                    <div style={{ fontSize: '11px', lineHeight: 1.9 }}>
-                      {(branchName || registerName) && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                          <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Sucursal</span>
-                          <span style={{ fontWeight: 500, color: '#222' }}>{branchName ?? ''}{registerName ? ` · ${registerName}` : ''}</span>
-                        </div>
-                      )}
-                      {sellerName && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                          <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cajero</span>
-                          <span style={{ fontWeight: 500, color: '#222' }}>{sellerName}</span>
-                        </div>
-                      )}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                        <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Fecha</span>
-                        <span style={{ fontWeight: 500, color: '#222' }}>{formatDateTime(sale.created_at)}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                        <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Ticket</span>
-                        <span style={{ fontWeight: 700, color: '#000', fontFamily: 'monospace', fontSize: '12px' }}>
-                          #{sale.id.slice(-8).toUpperCase()}
-                        </span>
-                      </div>
-                      {customerName && (
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                          <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Cliente</span>
-                          <span style={{ fontWeight: 500, color: '#222' }}>{customerName}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <hr style={sepStyle} />
-
-                    {/* Columnas de items */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Producto</span>
-                      <span style={{ fontSize: '9px', fontWeight: 600, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Total</span>
-                    </div>
-
-                    {/* Items de la venta */}
-                    {sale.items.map((item, i) => {
-                      const lineTotal = item.unit_price * item.quantity - item.discount
-                      return (
-                        <div key={i} style={{ marginBottom: '10px' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <span style={{ flex: 1, paddingRight: '10px', fontSize: '15px', fontWeight: 600, color: '#111', lineHeight: 1.2 }}>
-                              {item.product.name}
-                            </span>
-                            <span style={{ flexShrink: 0, fontSize: '15px', fontWeight: 700, color: '#000', lineHeight: 1.2 }}>{formatCurrency(lineTotal)}</span>
-                          </div>
-                          <div style={{ fontSize: '12px', color: '#999', marginTop: '1px' }}>
-                            {item.quantity} × {formatCurrency(item.unit_price)}
-                            {item.discount > 0 && <span> · dto -{formatCurrency(item.discount)}</span>}
-                          </div>
-                        </div>
-                      )
-                    })}
-
-                    <hr style={sepStyle} />
-
-                    {/* Subtotales opcionales */}
-                    {(sale.discount > 0 || (sale.shipping_amount ?? 0) > 0) && (
-                      <div style={{ fontSize: '11px', lineHeight: 1.9, marginBottom: '6px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666' }}>
-                          <span>Subtotal</span><span>{formatCurrency(itemsSubtotal)}</span>
-                        </div>
-                        {sale.discount > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#888' }}>
-                            <span>Descuento</span><span>-{formatCurrency(sale.discount)}</span>
-                          </div>
-                        )}
-                        {(sale.shipping_amount ?? 0) > 0 && (
-                          <div style={{ display: 'flex', justifyContent: 'space-between', color: '#666' }}>
-                            <span>Envío</span><span>+{formatCurrency(sale.shipping_amount!)}</span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Total */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', paddingTop: '2px' }}>
-                      <span style={{ fontSize: '14px', fontWeight: 700, color: '#000', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Total</span>
-                      <span style={{ fontSize: '26px', fontWeight: 800, color: '#000', letterSpacing: '-0.02em' }}>{formatCurrency(sale.total)}</span>
-                    </div>
-
-                    {/* Forma de pago */}
-                    <div style={{ marginTop: '8px' }}>
-                      {sale.payment_splits && sale.payment_splits.length > 1 ? (
-                        <div style={{ fontSize: '11px', color: '#666', lineHeight: 1.8 }}>
-                          {sale.payment_splits.map((s, idx) => (
-                            <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                              <span>{getPaymentMethodLabel(s.method)}</span>
-                              <span style={{ fontWeight: 500, color: '#444' }}>
-                                {formatCurrency(s.amount)}
-                                {s.method === 'credito' && (s.installments ?? 1) > 1 && ` (${s.installments} ctas)`}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div style={{ fontSize: '11px', color: '#666' }}>
-                          <span style={{ fontWeight: 500, color: '#444' }}>
-                            {getPaymentMethodLabel(sale.payment_method)}
-                            {sale.payment_method === 'credito' && sale.installments > 1 && ` · ${sale.installments} cuotas`}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-
-                    <hr style={sepStyle} />
-
-                    <div style={{ textAlign: 'center', fontSize: '10px', color: '#bbb', letterSpacing: '0.06em', padding: '2px 0' }}>
-                      NO VÁLIDO COMO FACTURA
-                    </div>
-
-                    <hr style={sepStyle} />
-
-                    <div style={{ textAlign: 'center', lineHeight: 1.8 }}>
-                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#333' }}>¡Gracias por su compra!</div>
-                      <div style={{ fontSize: '10px', color: '#ccc', marginTop: '2px', letterSpacing: '0.05em' }}>stockos.digital</div>
-                    </div>
-                  </>
                 )}
               </div>
             </div>
+            ) : (
+              /* ── TARJETA MODERNA — comprobante de venta (preview + imagen WhatsApp) ── */
+              <div style={{ display: 'flex', justifyContent: 'center', padding: '2px' }}>
+                <SaleShareCard
+                  ref={printRef}
+                  business={business}
+                  saleId={sale.id}
+                  createdAt={sale.created_at}
+                  total={sale.total}
+                  discount={sale.discount}
+                  shippingAmount={sale.shipping_amount}
+                  paymentMethod={sale.payment_method}
+                  installments={sale.installments}
+                  paymentSplits={sale.payment_splits}
+                  items={sale.items.map(i => ({
+                    name: i.product.name, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount,
+                  }))}
+                  branchName={branchName}
+                  sellerName={sellerName}
+                  customerName={customerName}
+                />
+              </div>
+            )}
           </div>
 
         </div>

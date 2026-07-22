@@ -87,6 +87,19 @@ function barcodeMaxWidthMm(columns: number): number {
   return colMm - LBARCODE_PAD_MM * 2
 }
 
+/**
+ * Ancho útil real para el precio grande dentro de .lmain-price. El padding
+ * horizontal de ese bloque es mm(2) = 2×colScale por lado (crece con menos
+ * columnas), así que a 1-2 columnas es bastante mayor que los 2mm que asume
+ * barcodeMaxWidthMm. Usar el ancho correcto evita que el precio se dimensione
+ * más grande que la caja y quede recortado contra el borde. −1mm de resguardo.
+ */
+function mainPriceUsableWidthMm(columns: number): number {
+  const colMm = (PAGE_USABLE_MM - (columns - 1) * COL_GAP_MM) / columns
+  const padPerSide = 2 * colScale(columns) // .lmain-price px:mm(2)
+  return colMm - padPerSide * 2 - 1
+}
+
 // Validación de checksum: solo usamos EAN/UPC (más compactos y estándar de
 // retail) cuando el dígito verificador es correcto; si no, cae a CODE128.
 function ean13Ok(code: string): boolean {
@@ -185,11 +198,11 @@ const FALLBACK_LIST: PriceList = {
  * depende de si hay escalas y/o código de barras. Mantiene el preview alineado
  * con el PDF y aprovecha mejor la hoja en modo compacto.
  */
-function labelsPerPage(showTiers: boolean, showCode: boolean, columns: number): number {
+function labelsPerPage(showTiers: boolean, showCode: boolean, columns: number, uniform: boolean): number {
   const usableMm = 277 // A4 297mm − 2×10mm de margen
   const gapMm = 3
-  // alto aprox. de fila (escalado por columnas): con escalas ~46mm; compacto ~23/17mm según barcode
-  const rowMm = (showTiers ? 46 : (showCode ? 23 : 17)) * colScale(columns)
+  // alto aprox. de fila (escalado por columnas): uniforme ~24/30mm; con escalas ~46mm; compacto ~23/17mm
+  const rowMm = (uniform ? (showCode ? 30 : 24) : showTiers ? 46 : (showCode ? 23 : 17)) * colScale(columns)
   const rows = Math.max(1, Math.floor((usableMm + gapMm) / (rowMm + gapMm)))
   return rows * columns
 }
@@ -250,6 +263,16 @@ function labelStyles(scope = '', columns = 4): string {
     ${s}.ltier-main { display:flex; align-items:baseline; gap:${mm(1.2)}mm; }
     ${s}.ltier-price { font-size:${pt(13)}pt; font-weight:700; color:#111; line-height:1; letter-spacing:-0.4pt; white-space:nowrap; font-variant-numeric:tabular-nums; }
     ${s}.ltier-cu { font-size:${pt(5.5)}pt; font-weight:600; color:#9a9a94; letter-spacing:0.02em; }
+    /* Precios de mismo tamaño: escalas en columnas horizontales, todas iguales, sin destacar
+       ninguna. Nombre arriba (lname), luego una fila de celdas separadas por divisor vertical,
+       cada una con su rótulo (Unidad · X3 · X20) arriba y el precio abajo. */
+    /* Uniforme: sin alto extra, solo el necesario para nombre + fila de precios → más por hoja */
+    ${s}.label.uni { min-height:${mm(22)}mm; }
+    ${s}.luniform { flex:1; display:flex; align-items:stretch; overflow:hidden; }
+    ${s}.ucol { flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:${mm(1)}mm ${mm(1)}mm ${mm(1.2)}mm; }
+    ${s}.ucol + .ucol { border-left:1.5px solid #e6e6e2; }
+    ${s}.ucol-lead { font-size:${pt(7.5)}pt; font-weight:800; letter-spacing:0.04em; text-transform:uppercase; color:#2a2a26; margin-bottom:${mm(1.4)}mm; }
+    ${s}.ucol-price { font-weight:700; color:#111; line-height:1; letter-spacing:-0.4pt; white-space:nowrap; font-variant-numeric:tabular-nums; }
     /* 1 columna (cartel apaisado): precio a la izquierda, listas apiladas a la derecha */
     ${s}.label.wide .lbody { flex:1; display:flex; align-items:stretch; }
     ${s}.label.wide .lmain-price { flex:1; }
@@ -280,6 +303,7 @@ function buildLabelHtml(
   showCode: boolean,
   showTiers: boolean,
   columns: number,
+  uniformSize: boolean,
 ): string {
   const colContentMm = barcodeMaxWidthMm(columns) // ancho útil de la columna
   const mainPrice = getListPrice(p, mainList)
@@ -317,13 +341,32 @@ function buildLabelHtml(
   // (la etiqueta ya trae el nombre para buscar el producto).
   const barcodeHtml = barcode?.svg ? `<div class="lbarcode">${barcode.svg}</div>` : ''
 
+  // Precios de mismo tamaño: main + escalas en columnas horizontales, todas a
+  // igual tamaño y sin destacar ninguna. El ancho útil se reparte entre las
+  // celdas y se calcula un único tamaño que hace entrar al precio más largo en
+  // esa fracción, aplicado a todas por igual.
+  if (uniformSize && tiers.length > 0) {
+    const allLists = [mainList, ...tiers].sort((a, b) => (a.min_quantity ?? 1) - (b.min_quantity ?? 1))
+    const priceStrs = allLists.map(l => formatPrice(getListPrice(p, l)))
+    const longest = priceStrs.reduce((a, b) => (b.length > a.length ? b : a))
+    const perCellMm = mainPriceUsableWidthMm(columns) / allLists.length - 2 // −2mm por padding/divisor
+    const uPt = mainPriceFontPt(longest, Math.max(6, perCellMm), Math.round(30 * colScale(columns)))
+    const colsHtml = allLists.map(l => {
+      const q = l.min_quantity ?? 1
+      const lead = `x${q}`
+      const priceHtml = formatPrice(getListPrice(p, l)).replace(/^\$/, '<span class="lcurr">$</span>')
+      return `<div class="ucol"><span class="ucol-lead">${lead}</span><span class="ucol-price" style="font-size:${uPt}pt">${priceHtml}</span></div>`
+    }).join('')
+    return `<div class="label uni"><p class="lname">${escapeHtml(p.name)}</p><div class="luniform">${colsHtml}</div>${barcodeHtml}</div>`
+  }
+
   const qtyHtml = showQty ? `<p class="lqty">${qtyLabel(mainQty)}</p>` : ''
 
   // Techo del precio escalado por columnas (base 44pt a 4 col) para que en 1-2
   // columnas el precio crezca de verdad y no quede "colgado". En wide el precio
   // comparte el ancho con las listas de la derecha, así que se achica un poco.
   const priceMaxPt = wide ? 72 : Math.round(44 * colScale(columns))
-  const priceUsableMm = wide && tiers.length > 0 ? colContentMm * 0.6 : colContentMm
+  const priceUsableMm = wide && tiers.length > 0 ? colContentMm * 0.6 : mainPriceUsableWidthMm(columns)
 
   const priceBlock = `<div class="lmain-price">${qtyHtml}<p class="lprice" style="font-size:${mainPriceFontPt(mainPriceStr, priceUsableMm, priceMaxPt)}pt">${mainPriceHtml}</p>${mainQty > 1 ? '<p class="lmain-cu">c/u</p>' : ''}</div>`
 
@@ -362,6 +405,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   const [recentHours, setRecentHours] = useState('0')
   const [showCode, setShowCode] = useState(false)
   const [showTiers, setShowTiers] = useState(false)
+  const [uniformSize, setUniformSize] = useState(false)
   const [hiddenTierListIds, setHiddenTierListIds] = useState<Set<string>>(new Set())
   const [copies, setCopies] = useState(1)
   const [columns, setColumns] = useState(4)
@@ -384,7 +428,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     if (!open) {
       setStep('config')
       setMainListId(''); setCategoryId(''); setBrandId(''); setRecentHours('0')
-      setShowCode(false); setShowTiers(false); setHiddenTierListIds(new Set()); setCopies(1); setColumns(4)
+      setShowCode(false); setShowTiers(false); setUniformSize(false); setHiddenTierListIds(new Set()); setCopies(1); setColumns(4)
       setAllProducts([]); setSelected(new Set()); setSearchText('')
       setPreviewPage(1)
       return
@@ -487,8 +531,11 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     })
   }, [step, showCode, columns, allProducts, selected])
 
+  // Modo uniforme efectivo: solo aplica si hay escalas visibles para unificar
+  const effectiveUniform = uniformSize && showTiers && otherLists.length > 0
+
   // Etiquetas por página según altura estimada de fila (4 columnas)
-  const perPage = labelsPerPage(showTiers, showCode, columns)
+  const perPage = labelsPerPage(showTiers, showCode, columns, effectiveUniform)
   const totalPages = Math.max(1, Math.ceil(labelItems.length / perPage))
   const pageItems = labelItems.slice((previewPage - 1) * perPage, previewPage * perPage)
 
@@ -497,7 +544,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     ? `<style>${labelStyles('.lbl-scope', columns)}</style>` +
       `<div class="lbl-scope" style="padding:10mm">` +
       `<div class="grid">` +
-        pageItems.map(p => buildLabelHtml(p, mainList, otherLists, showCode, showTiers, columns)).join('') +
+        pageItems.map(p => buildLabelHtml(p, mainList, otherLists, showCode, showTiers, columns, uniformSize)).join('') +
         Array(perPage - pageItems.length).fill(`<div class="label empty${showTiers ? '' : ' compact'}"></div>`).join('') +
       `</div></div>`
     : ''
@@ -519,7 +566,7 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     if (!mainList) return
 
     const labelsHtml = labelItems
-      .map(p => buildLabelHtml(p, mainList, otherLists, showCode, showTiers, columns))
+      .map(p => buildLabelHtml(p, mainList, otherLists, showCode, showTiers, columns, uniformSize))
       .join('')
 
     const win = window.open('', '_blank', 'width=900,height=1100')
@@ -706,6 +753,16 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
                           Ocultaste todas las escalas: la etiqueta saldrá sin escalas de precio.
                         </p>
                       )}
+
+                      <label className="flex items-center gap-2 text-xs text-[var(--text2)] cursor-pointer mt-1">
+                        <input
+                          type="checkbox"
+                          checked={uniformSize}
+                          onChange={e => setUniformSize(e.target.checked)}
+                          className="w-3.5 h-3.5 accent-[var(--accent)]"
+                        />
+                        Precios del mismo tamaño (sin destacar el precio por unidad)
+                      </label>
                     </div>
                   )}
                 </>

@@ -306,15 +306,21 @@ export default function DashboardPage() {
               />
             </button>
           )}
-          <StatCard
-            title="Cuentas corrientes"
-            value={formatIntCurrency(data?.accounts_receivable ?? 0)}
-            valueClassName="text-[clamp(1rem,1.6vw,1.5rem)] tracking-tight"
-            valueTitle={formatCurrency(data?.accounts_receivable ?? 0)}
-            subtitle="Saldo por cobrar"
-            icon={CreditCard}
-            className={(data?.accounts_receivable ?? 0) > 0 ? 'border-amber-500/30 bg-amber-500/5' : ''}
-          />
+          <Link
+            href="/accounts"
+            className="block text-left rounded-[var(--radius-lg)] transition-transform hover:-translate-y-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+            title="Ir a Cuentas corrientes"
+          >
+            <StatCard
+              title="Cuentas corrientes"
+              value={formatIntCurrency(data?.accounts_receivable ?? 0)}
+              valueClassName="text-[clamp(1rem,1.6vw,1.5rem)] tracking-tight"
+              valueTitle={formatCurrency(data?.accounts_receivable ?? 0)}
+              subtitle="Ir a las cuentas →"
+              icon={CreditCard}
+              className={`h-full ${(data?.accounts_receivable ?? 0) > 0 ? 'border-amber-500/30 bg-amber-500/5' : ''}`}
+            />
+          </Link>
         </div>
 
         {/* ══ Para tener en cuenta — avisos accionables del negocio ═ */}

@@ -1,15 +1,17 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
-import { Printer, CreditCard, Package, User, Calendar, Hash, FileText, Download, Receipt, Ban } from 'lucide-react'
+import { Printer, CreditCard, Package, User, Calendar, Hash, FileText, Download, Receipt, Ban, MessageCircle, Loader2 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { toast } from 'sonner'
 import { printFacturaA4 } from '@/lib/printFactura'
+import { shareTicketImage } from '@/lib/shareTicket'
+import { SaleShareCard } from './SaleShareCard'
 import {
   printThermal,
   buildSaleTicketHtml,
@@ -51,6 +53,7 @@ interface SaleDetail {
 interface CustomerInfo {
   full_name: string
   current_balance: number
+  phone?: string | null
 }
 
 interface InvoiceSummary {
@@ -118,6 +121,11 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
   const [voidReason, setVoidReason] = useState('')
   const [voiding, setVoiding] = useState(false)
 
+  // Compartir comprobante por WhatsApp
+  const shareCardRef = useRef<HTMLDivElement>(null)
+  const sharingRef = useRef(false)
+  const [sharing, setSharing] = useState(false)
+
   const role = user?.role ?? 'cashier'
   const canVoid = ['owner', 'admin', 'cashier'].includes(role)
   // El cajero sólo puede anular ventas del día; owner/admin sin límite.
@@ -182,6 +190,7 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.key === 'p' || e.key === 'P') { e.preventDefault(); handlePrint() }
+      if (e.key === 'w' || e.key === 'W') { e.preventDefault(); handleShareWhatsApp() }
       const canConvertOrRetry = invoice?.invoice_type === 'X' ||
         (invoice && ['rejected', 'pending'].includes(invoice.afip_status) && ['A', 'B', 'C'].includes(invoice.invoice_type))
       if ((e.key === 'f' || e.key === 'F') && canConvertOrRetry) {
@@ -256,6 +265,29 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
     }, biz))
   }
 
+
+  const handleShareWhatsApp = async () => {
+    if (!sale || !shareCardRef.current) return
+    // Guard reentrante: botón + atajo podrían dispararse casi juntos.
+    if (sharingRef.current) return
+    sharingRef.current = true
+    setSharing(true)
+    try {
+      const res = await shareTicketImage(shareCardRef.current, {
+        fileName: `comprobante-${sale.id.slice(-8)}.png`,
+        customerPhone: customer?.phone ?? undefined,
+      })
+      if (res === 'downloaded') {
+        toast.success('Comprobante descargado — adjuntalo en el chat de WhatsApp', { duration: 6000 })
+      }
+    } catch (err) {
+      toast.error('No se pudo generar la imagen')
+      console.error(err)
+    } finally {
+      sharingRef.current = false
+      setSharing(false)
+    }
+  }
 
   const handleDownloadInvoice = () => {
     if (!invoice) return
@@ -531,39 +563,69 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
               </div>
             )}
 
-            {/* Acciones — destructiva a la izquierda, principales a la derecha */}
-            <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div>
-                  {canVoid && withinWindow && !isVoided && (
-                    <Button variant="ghost" onClick={() => { setVoidReason(''); setVoidModal(true) }}
-                      className="text-[var(--danger)] hover:bg-[var(--danger-subtle)]">
-                      <Ban size={14} />
-                      Anular venta
-                    </Button>
-                  )}
-                </div>
-                <div className="flex gap-2 flex-wrap">
-                  <Button variant="secondary" onClick={handlePrint}>
-                    <Printer size={14} />
-                    Reimprimir
-                    <kbd className="ml-1 text-[10px] bg-[var(--surface3)] px-1.5 py-0.5 rounded font-sans">P</kbd>
-                  </Button>
-                  {invoice && invoice.invoice_type === 'X' && (
-                    <Button onClick={openConvertModal}>
-                      <Receipt size={15} />
-                      Facturar
-                      <kbd className="ml-1 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-sans">F</kbd>
-                    </Button>
-                  )}
-                  {invoice && invoice.invoice_type !== 'X' && (invoice.afip_status === 'pending' || invoice.afip_status === 'rejected') && (
-                    <Button variant="secondary" onClick={openConvertModal}>
-                      <Receipt size={15} />
-                      Reintentar ARCA
-                    </Button>
-                  )}
-                </div>
+            {/* Acciones */}
+            <div className="pt-3 mt-2 border-t border-[var(--border)] space-y-2">
+              {/* CTA principal: facturar / reintentar */}
+              {invoice && invoice.invoice_type === 'X' && (
+                <Button onClick={openConvertModal} className="w-full">
+                  <Receipt size={15} />
+                  Facturar
+                  <kbd className="ml-1 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-sans">F</kbd>
+                </Button>
+              )}
+              {invoice && invoice.invoice_type !== 'X' && (invoice.afip_status === 'pending' || invoice.afip_status === 'rejected') && (
+                <Button variant="secondary" onClick={openConvertModal} className="w-full">
+                  <Receipt size={15} />
+                  Reintentar ARCA
+                </Button>
+              )}
+
+              {/* Compartir / imprimir */}
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="secondary" onClick={handleShareWhatsApp} disabled={sharing}
+                  className="!bg-[#25d366] !border-[#25d366] !text-white hover:!bg-[#20bd5a]">
+                  {sharing ? <Loader2 size={14} className="animate-spin" /> : <MessageCircle size={14} />}
+                  WhatsApp
+                  <kbd className="ml-1 text-[10px] bg-white/20 px-1.5 py-0.5 rounded font-sans">W</kbd>
+                </Button>
+                <Button variant="secondary" onClick={handlePrint}>
+                  <Printer size={14} />
+                  Reimprimir
+                  <kbd className="ml-1 text-[10px] bg-[var(--surface3)] px-1.5 py-0.5 rounded font-sans">P</kbd>
+                </Button>
               </div>
+
+              {/* Anular venta — sutil, separado de las acciones positivas */}
+              {canVoid && withinWindow && !isVoided && (
+                <button
+                  onClick={() => { setVoidReason(''); setVoidModal(true) }}
+                  className="w-full flex items-center justify-center gap-1.5 pt-1 text-xs font-medium text-[var(--danger)] hover:underline"
+                >
+                  <Ban size={13} />
+                  Anular venta
+                </button>
+              )}
+            </div>
+
+            {/* Tarjeta oculta off-screen — solo para capturar la imagen de WhatsApp */}
+            <div style={{ position: 'fixed', left: '-10000px', top: 0, pointerEvents: 'none' }} aria-hidden>
+              <SaleShareCard
+                ref={shareCardRef}
+                business={user?.business ?? undefined}
+                saleId={sale.id}
+                createdAt={sale.created_at}
+                total={sale.total}
+                discount={sale.discount}
+                shippingAmount={sale.shipping_amount}
+                paymentMethod={sale.payment_method}
+                installments={sale.installments}
+                paymentSplits={sale.payment_splits}
+                items={sale.sale_items.map(i => ({
+                  name: i.products.name, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount,
+                }))}
+                sellerName={sale.users?.full_name}
+                customerName={customer?.full_name}
+              />
             </div>
 
           </div>

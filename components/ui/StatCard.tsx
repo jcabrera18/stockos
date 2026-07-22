@@ -46,11 +46,11 @@ export function StatCard({ title, value, valueTitle, valueClassName, subtitle, i
             )}>
               {delta.value >= 0 ? <ArrowUpRight size={13} /> : <ArrowDownRight size={13} />}
               <span className="mono">{delta.value >= 0 ? '+' : ''}{delta.value}%</span>
-              <span className="text-[var(--text3)] font-normal">{delta.label}</span>
+              <span className="text-[var(--text3)] font-normal whitespace-nowrap">{delta.label}</span>
             </div>
           )}
           {subtitle && (
-            <p className="text-xs text-[var(--text3)] mt-1 truncate">{subtitle}</p>
+            <p className="text-xs text-[var(--text3)] mt-1 leading-tight">{subtitle}</p>
           )}
           {trend && (
             <p className={cn(

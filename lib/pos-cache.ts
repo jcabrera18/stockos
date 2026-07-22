@@ -15,6 +15,7 @@
  * desde IndexedDB al init, para que computeLocalPrice sea SÍNCRONO.
  */
 import { api } from '@/lib/api'
+import { normalizeText } from '@/lib/utils'
 import { posDB, type LocalPriceList, type LocalPriceRule, type LocalPriceOverride } from '@/lib/pos-db'
 import type { Product, PaginatedResponse } from '@/types'
 import type { Promotion } from '@/lib/promoUtils'
@@ -228,22 +229,23 @@ export async function resolveBarcode(
  */
 export async function searchProductsLocal(query: string, limit = 8): Promise<Product[]> {
   try {
-    const q = query.toLowerCase()
+    // Sin acentos ni mayúsculas: "bri" encuentra "Brío", "cafe" → "Café".
+    const q = normalizeText(query)
     const matches = await posDB.products
       .filter(
         p =>
           p.is_active !== false &&
-          (p.name.toLowerCase().includes(q) ||
+          (normalizeText(p.name).includes(q) ||
             (p.barcode ?? '').includes(q) ||
-            (p.sku ?? '').toLowerCase().includes(q)),
+            normalizeText(p.sku ?? '').includes(q)),
       )
       .toArray()
     // Relevancia: primero los productos cuyo nombre EMPIEZA con la query
     // (lo más probable que el usuario busca), luego orden alfabético. Sin esto,
     // con pocas letras el producto deseado podía quedar fuera del límite.
     matches.sort((a, b) => {
-      const aStarts = a.name.toLowerCase().startsWith(q) ? 0 : 1
-      const bStarts = b.name.toLowerCase().startsWith(q) ? 0 : 1
+      const aStarts = normalizeText(a.name).startsWith(q) ? 0 : 1
+      const bStarts = normalizeText(b.name).startsWith(q) ? 0 : 1
       if (aStarts !== bStarts) return aStarts - bStarts
       return a.name.localeCompare(b.name)
     })
@@ -273,17 +275,17 @@ export async function getVariablePriceProducts(): Promise<Product[]> {
  */
 export async function searchCustomersLocal(query: string, limit = 8): Promise<CustomerSummary[]> {
   try {
-    const q = query.toLowerCase()
+    const q = normalizeText(query)
     return posDB.customers
       .filter(
         c =>
           c.is_active !== false &&
-          (c.full_name.toLowerCase().includes(q) ||
-            (c.razon_social ?? '').toLowerCase().includes(q) ||
-            (c.nombre_fantasia ?? '').toLowerCase().includes(q) ||
+          (normalizeText(c.full_name).includes(q) ||
+            normalizeText(c.razon_social ?? '').includes(q) ||
+            normalizeText(c.nombre_fantasia ?? '').includes(q) ||
             (c.document ?? '').includes(q) ||
             (c.phone ?? '').includes(q) ||
-            (c.customer_code ?? '').toLowerCase().includes(q)),
+            normalizeText(c.customer_code ?? '').includes(q)),
       )
       .limit(limit)
       .toArray()

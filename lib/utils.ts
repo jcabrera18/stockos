@@ -4,6 +4,16 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs)
 }
 
+// Normaliza texto para búsquedas: minúsculas + sin acentos/diacríticos.
+// Así "bri" encuentra "Brío", "cafe" encuentra "Café", etc. Se aplica
+// tanto a la query como a los campos comparados (los dos lados).
+export function normalizeText(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+}
+
 export function formatCurrency(amount: number | string): string {
   return new Intl.NumberFormat('es-AR', {
     style: 'currency',
