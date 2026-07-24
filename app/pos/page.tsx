@@ -889,9 +889,23 @@ export default function POSPage() {
     }
   }
 
+  // Si no hay puesto guardado, auto-elegimos un default (primera sucursal con
+  // caja) y lo persistimos. A partir de ahí se recuerda el último usado y el
+  // owner solo lo cambia manualmente con "Cambiar". Sin modal automático.
   useEffect(() => {
-    if (workstation === null && loaded) setSelectingWorkstation(true)
-  }, [workstation, loaded])
+    if (workstation || !loaded || loadingBranches) return
+    const branch = branches.find(b => b.registers.length > 0)
+    const register = branch?.registers[0]
+    if (branch && register) {
+      setWorkstation({
+        branch_id:     branch.id,
+        branch_name:   branch.name,
+        register_id:   register.id,
+        register_name: register.name,
+        warehouse_id:  branch.warehouse_id,
+      })
+    }
+  }, [workstation, loaded, loadingBranches, branches, setWorkstation])
 
   const addToCart = useCallback(async (product: Product, qty?: number, prefetchedPricing?: PricingResult) => {
     if (isAddingRef.current) return
@@ -2548,12 +2562,6 @@ export default function POSPage() {
           </div>
           <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
             <div className="flex justify-end gap-2">
-              <button
-                onClick={() => setSelectingWorkstation(false)}
-                className="text-xs text-[var(--text3)] hover:text-[var(--text)]"
-              >
-                Continuar sin seleccionar
-              </button>
               <Button
                 onClick={() => {
                   if (!tempBranchId || !tempRegisterId) { toast.error('Seleccioná sucursal y caja'); return }

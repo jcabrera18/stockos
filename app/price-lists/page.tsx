@@ -12,12 +12,11 @@ import { Badge } from '@/components/ui/Badge'
 import { HelpBanner } from '@/components/ui/HelpBanner'
 import { api } from '@/lib/api'
 import { notifyPOSDataChanged } from '@/lib/pos-sync-signal'
-import { Plus, Tag, Pencil, Trash2, Star, TrendingUp, Printer, Share2 } from 'lucide-react'
+import { Plus, Tag, Pencil, Trash2, Star, TrendingUp, Printer } from 'lucide-react'
 import { toast } from 'sonner'
 import { PrintShelfLabelsModal } from '@/components/modules/PrintShelfLabelsModal'
 import { BulkPriceModal } from '@/components/modules/BulkPriceModal'
 import { PrintPriceListModal } from '@/components/modules/PrintPriceListModal'
-import { ShareCatalogModal } from '@/components/modules/ShareCatalogModal'
 
 export interface PriceList {
   id: string
@@ -65,7 +64,6 @@ export default function PriceListsPage() {
   // Modal lista de precios y actualizar precios
   const [priceListPrintModal, setPriceListPrintModal] = useState(false)
   const [bulkPriceModal, setBulkPriceModal] = useState(false)
-  const [shareModal, setShareModal] = useState(false)
 
   const fetchLists = useCallback(async () => {
     setLoading(true)
@@ -177,9 +175,6 @@ export default function PriceListsPage() {
             </Button>
             <Button variant="secondary" onClick={() => setPrintModal(true)} disabled={lists.length === 0}>
               <Printer size={15} /> Imprimir precios
-            </Button>
-            <Button variant="secondary" onClick={() => setShareModal(true)}>
-              <Share2 size={15} /> <span className="hidden sm:inline">Compartir catálogo</span>
             </Button>
             <Button onClick={openCreate}>
               <Plus size={15} /> Nueva lista
@@ -413,7 +408,6 @@ export default function PriceListsPage() {
 
       <PrintPriceListModal open={priceListPrintModal} onClose={() => setPriceListPrintModal(false)} />
       <BulkPriceModal open={bulkPriceModal} onClose={() => setBulkPriceModal(false)} onApplied={() => notifyPOSDataChanged()} />
-      <ShareCatalogModal open={shareModal} onClose={() => setShareModal(false)} lists={lists} />
     </AppShell>
   )
 }

@@ -22,9 +22,10 @@ import type { PriceList } from '@/app/price-lists/page'
 import {
   Plus, Search, Package, CheckCircle, Clock, Truck,
   X, Minus, Trash2, ChevronRight, DollarSign, AlertCircle,
-  ClipboardList, Printer, Receipt, FileText, RefreshCw, Copy, CreditCard,
+  ClipboardList, Printer, Receipt, FileText, RefreshCw, Copy, CreditCard, Share2,
 } from 'lucide-react'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
+import { ShareCatalogModal } from '@/components/modules/ShareCatalogModal'
 import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
 import { CustomerDetailModal } from '@/components/modules/CustomerDetailModal'
 import { CashRegisterPicker, type RegisterWithBranch } from '@/components/modules/CashRegisterPicker'
@@ -177,6 +178,7 @@ function OrdersPageInner() {
   // El form de nuevo pedido necesita el catálogo local (productos/promos/precios).
   // Solo sincronizamos cuando se abre, no en cada carga de la lista de pedidos.
   const [newOrderModal, setNewOrderModal] = useState(false)
+  const [shareModal, setShareModal] = useState(false)
   const [isMac, setIsMac] = useState(true)
   useEffect(() => {
     setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.platform) || /Mac/.test(navigator.userAgent))
@@ -1627,6 +1629,9 @@ function OrdersPageInner() {
                       </Button>
                       <Button variant="secondary" onClick={openByClientList}>
                         <FileText size={15} /> <span className="hidden sm:inline">Por cliente</span>
+                      </Button>
+                      <Button variant="secondary" onClick={() => setShareModal(true)}>
+                        <Share2 size={15} /> <span className="hidden sm:inline">Compartir catálogo</span>
                       </Button>
                     </>
                   )}
@@ -3370,6 +3375,8 @@ function OrdersPageInner() {
           setCcPaymentModal(true)
         }}
       />
+
+      <ShareCatalogModal open={shareModal} onClose={() => setShareModal(false)} lists={priceLists} />
 
       {/* ── Confirmación cancelación ── */}
       {cancelConfirmOrder && (
