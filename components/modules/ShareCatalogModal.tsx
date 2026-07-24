@@ -20,6 +20,7 @@ interface Catalog {
   only_in_stock: boolean
   warehouse_id: string | null
   whatsapp_phone: string | null
+  accept_orders: boolean
   is_active: boolean
   price_lists?: { name: string } | null
   warehouses?: { name: string } | null
@@ -39,6 +40,7 @@ const emptyForm = {
   only_in_stock: false,
   warehouse_id: '',
   whatsapp_phone: '',
+  accept_orders: false,
 }
 
 function catalogUrl(slug: string): string {
@@ -84,6 +86,7 @@ export function ShareCatalogModal({ open, onClose, lists }: Props) {
         only_in_stock: form.only_in_stock,
         warehouse_id: form.only_in_stock && form.warehouse_id ? form.warehouse_id : null,
         whatsapp_phone: form.whatsapp_phone.trim() || null,
+        accept_orders: form.accept_orders,
       })
       setCatalogs(prev => [created, ...prev])
       setForm(emptyForm)
@@ -101,6 +104,16 @@ export function ShareCatalogModal({ open, onClose, lists }: Props) {
     try {
       const updated = await api.patch<Catalog>(`/api/catalogs/${cat.id}`, { is_active: !cat.is_active })
       setCatalogs(prev => prev.map(c => (c.id === cat.id ? { ...c, ...updated } : c)))
+    } catch {
+      toast.error('No se pudo actualizar')
+    }
+  }
+
+  const toggleAcceptOrders = async (cat: Catalog) => {
+    try {
+      const updated = await api.patch<Catalog>(`/api/catalogs/${cat.id}`, { accept_orders: !cat.accept_orders })
+      setCatalogs(prev => prev.map(c => (c.id === cat.id ? { ...c, ...updated } : c)))
+      toast.success(!cat.accept_orders ? 'Pedidos online activados' : 'Pedidos online desactivados')
     } catch {
       toast.error('No se pudo actualizar')
     }
@@ -180,6 +193,13 @@ export function ShareCatalogModal({ open, onClose, lists }: Props) {
                         <Button variant="ghost" size="sm" aria-label="Abrir"><ExternalLink size={15} /></Button>
                       </a>
                     </div>
+                    <label className="flex items-center justify-between gap-2 pt-1 cursor-pointer">
+                      <span className="text-xs text-[var(--text2)]">
+                        Recibir pedidos online
+                        {cat.accept_orders && <Badge variant="success" className="ml-2">Activo</Badge>}
+                      </span>
+                      <Toggle checked={cat.accept_orders} onChange={() => toggleAcceptOrders(cat)} />
+                    </label>
                   </div>
                 ))}
               </div>
@@ -215,6 +235,13 @@ export function ShareCatalogModal({ open, onClose, lists }: Props) {
                     onChange={e => setForm({ ...form, warehouse_id: e.target.value })}
                   />
                 )}
+                <div className="flex items-center justify-between">
+                  <div className="pr-3">
+                    <div className="text-sm font-medium text-[var(--text)]">Recibir pedidos online</div>
+                    <div className="text-xs text-[var(--text2)]">El cliente puede enviar el pedido y entra a Pedidos como pendiente</div>
+                  </div>
+                  <Toggle checked={form.accept_orders} onChange={v => setForm({ ...form, accept_orders: v })} />
+                </div>
                 <Input
                   label="WhatsApp para recibir pedidos (opcional)"
                   placeholder="Ej. 5493401555123"

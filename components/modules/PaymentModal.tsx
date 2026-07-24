@@ -8,13 +8,15 @@ import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime } from '@/lib/utils'
 import { printThermal } from '@/lib/printTicket'
+import { shareTicketImage } from '@/lib/shareTicket'
 import { toast } from 'sonner'
-import { CheckCircle, Printer, FileText } from 'lucide-react'
+import { CheckCircle, Printer, FileText, MessageCircle } from 'lucide-react'
 import type { CustomerSummary } from '@/app/customers/page'
 import { useAuth } from '@/hooks/useAuth'
 import { useWorkstation } from '@/hooks/useWorkstation'
 import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
 import { CashRegisterPicker, type RegisterWithBranch } from '@/components/modules/CashRegisterPicker'
+import { PaymentReceiptShareCard } from '@/components/modules/PaymentReceiptShareCard'
 
 /** Movimiento recién registrado, para que el detalle lo refleje al instante. */
 export interface SavedMovement {
@@ -93,6 +95,11 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
   const receiptRef = useRef<HTMLDivElement>(null)
   const printRef = useRef<HTMLDivElement>(null)
+
+  // ── Compartir recibo por WhatsApp (tarjeta linda, no el ticket térmico) ──
+  const shareCardRef = useRef<HTMLDivElement>(null)
+  const sharingRef = useRef(false)
+  const [sharing, setSharing] = useState(false)
 
   // ── Facturar el cobro ──
   const [invoicing, setInvoicing] = useState(false)
@@ -223,6 +230,29 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
     const content = printRef.current
     if (!content) return
     printThermal('Recibo de pago', content.innerHTML)
+  }
+
+  const handleShareWhatsApp = async () => {
+    if (!receipt || !shareCardRef.current) return
+    // Guard reentrante: botón podría dispararse dos veces casi juntas.
+    if (sharingRef.current) return
+    sharingRef.current = true
+    setSharing(true)
+    try {
+      const res = await shareTicketImage(shareCardRef.current, {
+        fileName: `recibo-${receipt.paidAt.slice(0, 10)}.png`,
+        customerPhone: customer?.phone ?? undefined,
+      })
+      if (res === 'downloaded') {
+        toast.success('Recibo descargado — adjuntalo en el chat de WhatsApp', { duration: 6000 })
+      }
+    } catch (err) {
+      toast.error('No se pudo generar la imagen')
+      console.error(err)
+    } finally {
+      sharingRef.current = false
+      setSharing(false)
+    }
   }
 
   // Crea un Ticket X por el monto entregado y abre la conversión → AFIP.
@@ -598,13 +628,38 @@ export function PaymentModal({ open, onClose, onSaved, customer, initialTab = 'p
               <Button variant="secondary" className="flex-1" onClick={handlePrint}>
                 <Printer size={14} /> Imprimir
               </Button>
-              {canInvoice && (
-                <Button variant="secondary" className="flex-1" onClick={handleInvoice} loading={invoicing}>
-                  <FileText size={14} /> Facturar
-                </Button>
-              )}
+              <Button variant="secondary" onClick={handleShareWhatsApp} loading={sharing}
+                className="flex-1 !bg-[#25d366] !border-[#25d366] !text-white hover:!bg-[#20bd5a]">
+                <MessageCircle size={14} /> WhatsApp
+              </Button>
             </div>
+            {canInvoice && (
+              <Button variant="secondary" className="w-full" onClick={handleInvoice} loading={invoicing}>
+                <FileText size={14} /> Facturar
+              </Button>
+            )}
             <Button className="w-full" onClick={onClose}>Cerrar</Button>
+          </div>
+
+          {/* Tarjeta oculta off-screen — solo para capturar la imagen de WhatsApp */}
+          <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }} aria-hidden>
+            <PaymentReceiptShareCard
+              ref={shareCardRef}
+              business={{
+                name: user?.business?.name,
+                cuit: user?.business?.cuit,
+                address: user?.business?.address,
+                phone: user?.business?.phone,
+              }}
+              customerName={receipt.customerName}
+              customerDoc={receipt.customerDoc}
+              amount={receipt.amount}
+              methodLabel={METHOD_LABELS[receipt.method] ?? receipt.method}
+              description={receipt.description}
+              balanceBefore={receipt.balanceBefore}
+              balanceAfter={receipt.balanceAfter}
+              paidAt={receipt.paidAt}
+            />
           </div>
         </div>
       )}

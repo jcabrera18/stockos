@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useParams } from 'next/navigation'
-import { Search, ShoppingCart, Plus, Minus, Trash2, Copy, X, Store, Tag, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Search, ShoppingCart, Plus, Minus, Trash2, Copy, X, Store, Tag, ChevronLeft, ChevronRight, Truck, CheckCircle2, MapPin, Clock } from 'lucide-react'
 import { toast } from 'sonner'
 import { evaluatePromo, findApplicablePromo, staticPromoLabel, type Promotion } from '@/lib/promoUtils'
 
@@ -19,7 +19,7 @@ interface Product {
 interface Category { id: string; name: string; product_count: number }
 interface CatalogData {
   business: { name: string; logo: string | null; phone: string | null }
-  catalog: { name: string }
+  catalog: { name: string; accept_orders?: boolean }
   categories: Category[]
   products: Product[]
   promotions: Promotion[]
@@ -44,6 +44,24 @@ export default function PublicCatalogPage() {
   const [cart, setCart] = useState<Record<string, number>>({})
   const [cartOpen, setCartOpen] = useState(false)
   const [buyerName, setBuyerName] = useState('')
+  const [buyerPhone, setBuyerPhone] = useState('')
+  const [deliveryMethod, setDeliveryMethod] = useState<'pickup' | 'delivery'>('pickup')
+  const [address, setAddress] = useState('')
+  const [preferredDate, setPreferredDate] = useState('')
+  const [preferredTime, setPreferredTime] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitted, setSubmitted] = useState(false)
+  const [receipt, setReceipt] = useState<{
+    code: string
+    date: string
+    name: string
+    phone: string
+    method: 'pickup' | 'delivery'
+    address: string
+    when: string
+    lines: { name: string; qty: number; net: number }[]
+    total: number
+  } | null>(null)
 
   // ── Carga del catálogo ──────────────────────────────────────────────────
   useEffect(() => {
@@ -164,6 +182,60 @@ export default function PublicCatalogPage() {
       .catch(() => toast.error('No se pudo copiar'))
   }, [buildOrderText, cartLines.length])
 
+  // ── Enviar pedido al comercio (crea un pedido pendiente en /orders) ──────
+  const acceptOrders = data?.catalog.accept_orders ?? false
+
+  const sendOrder = useCallback(async () => {
+    if (cartLines.length === 0) { toast.error('Tu carrito está vacío'); return }
+    if (!buyerName.trim()) { toast.error('Ingresá tu nombre'); return }
+    if (buyerPhone.trim().length < 4) { toast.error('Ingresá un teléfono de contacto'); return }
+    if (deliveryMethod === 'delivery' && !address.trim()) { toast.error('Ingresá la dirección de envío'); return }
+    setSubmitting(true)
+    try {
+      const res = await fetch(`${API_URL}/api/public/catalog/${slug}/order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_name:   buyerName.trim(),
+          customer_phone:  buyerPhone.trim(),
+          delivery_method: deliveryMethod,
+          address:         deliveryMethod === 'delivery' ? address.trim() : null,
+          preferred_date:  preferredDate || null,
+          preferred_time:  preferredTime || null,
+          items: cartLines.map(l => ({ product_id: l.product.id, quantity: l.qty })),
+        }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => null)
+        throw new Error(err?.error ?? 'No se pudo enviar')
+      }
+      const data = await res.json().catch(() => ({} as { order_code?: string }))
+      const whenLabel = [
+        preferredDate ? preferredDate.split('-').reverse().join('/') : '',
+        preferredTime,
+      ].filter(Boolean).join(' ')
+      // Snapshot para el comprobante (el carrito se vacía a continuación).
+      setReceipt({
+        code:    data.order_code ?? '—',
+        date:    new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }),
+        name:    buyerName.trim(),
+        phone:   buyerPhone.trim(),
+        method:  deliveryMethod,
+        address: address.trim(),
+        when:    whenLabel,
+        lines:   cartLines.map(l => ({ name: l.product.name, qty: l.qty, net: l.net })),
+        total:   cartTotal,
+      })
+      setSubmitted(true)
+      setCart({})
+      try { localStorage.removeItem(cartKey(slug)) } catch { /* ignore */ }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo enviar el pedido')
+    } finally {
+      setSubmitting(false)
+    }
+  }, [cartLines, buyerName, buyerPhone, deliveryMethod, address, preferredDate, preferredTime, cartTotal, slug])
+
   // ── Estados de carga / error ─────────────────────────────────────────────
   if (loading) {
     return (
@@ -178,6 +250,91 @@ export default function PublicCatalogPage() {
         <Store size={40} className="text-[var(--text3)]" />
         <h1 className="text-lg font-semibold text-[var(--text)]">Catálogo no disponible</h1>
         <p className="text-sm text-[var(--text2)]">El link no existe o fue pausado por el comercio.</p>
+      </div>
+    )
+  }
+  if (submitted) {
+    return (
+      <div className="min-h-screen bg-[var(--bg)] px-4 py-8 flex flex-col items-center">
+        <div className="w-full max-w-md flex flex-col items-center gap-3">
+          <div className="h-14 w-14 rounded-full bg-[var(--accent)] flex items-center justify-center text-white">
+            <CheckCircle2 size={28} />
+          </div>
+          <h1 className="text-lg font-semibold text-[var(--text)]">¡Pedido enviado!</h1>
+          <p className="text-sm text-[var(--text2)] text-center max-w-xs">
+            {data.business.name} recibió tu pedido y te va a contactar para coordinar el pago y la entrega.
+          </p>
+
+          {receipt && (
+            <div className="w-full mt-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
+              {/* Encabezado del comprobante */}
+              <div className="px-4 py-3 border-b border-dashed border-[var(--border)] flex items-center justify-between">
+                <div className="min-w-0">
+                  <p className="font-bold text-[var(--text)] truncate">{data.business.name}</p>
+                  <p className="text-xs text-[var(--text3)]">{receipt.date}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Pedido</p>
+                  <p className="font-mono font-bold text-[var(--text)]">#{receipt.code}</p>
+                </div>
+              </div>
+
+              {/* Datos del comprador + entrega */}
+              <div className="px-4 py-3 border-b border-dashed border-[var(--border)] space-y-1 text-sm">
+                <p className="text-[var(--text)]"><span className="text-[var(--text3)]">Cliente:</span> {receipt.name}</p>
+                <p className="text-[var(--text)]"><span className="text-[var(--text3)]">Tel:</span> {receipt.phone}</p>
+                <p className="flex items-center gap-1.5 text-[var(--text)]">
+                  {receipt.method === 'delivery'
+                    ? <><Truck size={14} className="text-[var(--accent)]" /> Envío a domicilio</>
+                    : <><Store size={14} className="text-[var(--accent)]" /> Retira en el local</>}
+                </p>
+                {receipt.method === 'delivery' && receipt.address && (
+                  <p className="flex items-start gap-1.5 text-[var(--text2)] text-xs">
+                    <MapPin size={13} className="mt-0.5 shrink-0" /> {receipt.address}
+                  </p>
+                )}
+                {receipt.when && (
+                  <p className="flex items-center gap-1.5 text-[var(--text2)] text-xs">
+                    <Clock size={13} className="shrink-0" /> {receipt.method === 'delivery' ? 'Entregar' : 'Retirar'}: {receipt.when}
+                  </p>
+                )}
+              </div>
+
+              {/* Detalle de ítems */}
+              <div className="px-4 py-3 space-y-2">
+                {receipt.lines.map((l, i) => (
+                  <div key={i} className="flex items-start justify-between gap-3 text-sm">
+                    <span className="text-[var(--text)] flex-1 min-w-0">
+                      <span className="text-[var(--text3)] mr-1">{l.qty}×</span>{l.name}
+                    </span>
+                    <span className="font-medium text-[var(--text)] whitespace-nowrap">${money(l.net)}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Total */}
+              <div className="px-4 py-3 border-t border-dashed border-[var(--border)] flex items-center justify-between">
+                <span className="text-sm font-medium text-[var(--text2)]">Total</span>
+                <span className="text-lg font-bold text-[var(--text)]">${money(receipt.total)}</span>
+              </div>
+            </div>
+          )}
+
+          <p className="text-[11px] text-center text-[var(--text3)] mt-1 max-w-xs">
+            Guardá el número de pedido. El total es a confirmar por el comercio.
+          </p>
+
+          <button
+            onClick={() => {
+              setSubmitted(false); setReceipt(null); setCartOpen(false)
+              setBuyerName(''); setBuyerPhone(''); setAddress(''); setDeliveryMethod('pickup')
+              setPreferredDate(''); setPreferredTime('')
+            }}
+            className="mt-1 px-5 py-2.5 rounded-lg bg-[var(--accent)] text-white text-sm font-semibold active:scale-95 transition"
+          >
+            Hacer otro pedido
+          </button>
+        </div>
       </div>
     )
   }
@@ -347,9 +504,72 @@ export default function PublicCatalogPage() {
               <input
                 value={buyerName}
                 onChange={e => setBuyerName(e.target.value)}
-                placeholder="Tu nombre (opcional)"
+                placeholder={acceptOrders ? 'Tu nombre' : 'Tu nombre (opcional)'}
                 className="w-full px-3 py-2 text-sm rounded-md bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
               />
+              {acceptOrders && (
+                <input
+                  value={buyerPhone}
+                  onChange={e => setBuyerPhone(e.target.value)}
+                  inputMode="tel"
+                  placeholder="Tu teléfono (para que te contacten)"
+                  className="w-full px-3 py-2 text-sm rounded-md bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                />
+              )}
+              {acceptOrders && (
+                <>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDeliveryMethod('pickup')}
+                      className={`flex items-center justify-center gap-1.5 py-2 rounded-md text-sm font-medium border transition ${deliveryMethod === 'pickup' ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]' : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)]'}`}
+                    >
+                      <Store size={15} /> Retiro
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeliveryMethod('delivery')}
+                      className={`flex items-center justify-center gap-1.5 py-2 rounded-md text-sm font-medium border transition ${deliveryMethod === 'delivery' ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]' : 'border-[var(--border)] bg-[var(--surface2)] text-[var(--text2)]'}`}
+                    >
+                      <Truck size={15} /> Envío
+                    </button>
+                  </div>
+                  {deliveryMethod === 'delivery' && (
+                    <input
+                      value={address}
+                      onChange={e => setAddress(e.target.value)}
+                      placeholder="Dirección de envío (calle, número, localidad)"
+                      className="w-full px-3 py-2 text-sm rounded-md bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                    />
+                  )}
+                  <div>
+                    <p className="text-xs text-[var(--text3)] mb-1.5">
+                      ¿Cuándo querés {deliveryMethod === 'delivery' ? 'recibirlo' : 'retirarlo'}? (opcional)
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="date"
+                        value={preferredDate}
+                        onChange={e => setPreferredDate(e.target.value)}
+                        min={new Date().toISOString().split('T')[0]}
+                        className="w-full px-3 py-2 text-sm rounded-md bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                      />
+                      <select
+                        value={preferredTime}
+                        onChange={e => setPreferredTime(e.target.value)}
+                        className="w-full px-3 py-2 text-sm rounded-md bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                      >
+                        <option value="">Horario…</option>
+                        <option value="Mañana (8 a 12)">Mañana (8 a 12)</option>
+                        <option value="Mediodía (12 a 14)">Mediodía (12 a 14)</option>
+                        <option value="Tarde (14 a 18)">Tarde (14 a 18)</option>
+                        <option value="Noche (18 a 21)">Noche (18 a 21)</option>
+                        <option value="A convenir">A convenir</option>
+                      </select>
+                    </div>
+                  </div>
+                </>
+              )}
               {cartDiscount > 0 && (
                 <div className="flex items-center justify-between text-sm text-[var(--accent)]">
                   <span>Descuento promociones</span>
@@ -360,16 +580,40 @@ export default function PublicCatalogPage() {
                 <span className="text-sm text-[var(--text2)]">Total</span>
                 <span className="text-lg font-bold text-[var(--text)]">${money(cartTotal)}</span>
               </div>
-              <button
-                onClick={copyOrder}
-                disabled={cartLines.length === 0}
-                className="w-full flex items-center justify-center gap-2 py-3 rounded-lg bg-[var(--accent)] text-white font-semibold active:scale-95 transition disabled:opacity-50"
-              >
-                <Copy size={17} /> Copiar pedido
-              </button>
-              <p className="text-[11px] text-center text-[var(--text3)]">
-                Copiá el texto y pegáselo al comercio por WhatsApp.
-              </p>
+              {acceptOrders ? (
+                <>
+                  <button
+                    onClick={sendOrder}
+                    disabled={cartLines.length === 0 || submitting}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-lg bg-[var(--accent)] text-white font-semibold active:scale-95 transition disabled:opacity-50"
+                  >
+                    <ShoppingCart size={17} /> {submitting ? 'Enviando…' : 'Enviar pedido'}
+                  </button>
+                  <button
+                    onClick={copyOrder}
+                    disabled={cartLines.length === 0}
+                    className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-[var(--border)] text-[var(--text2)] text-sm font-medium active:scale-95 transition disabled:opacity-50"
+                  >
+                    <Copy size={15} /> Copiar como texto
+                  </button>
+                  <p className="text-[11px] text-center text-[var(--text3)]">
+                    Al enviar, el comercio recibe tu pedido y te contacta para coordinar pago y entrega.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={copyOrder}
+                    disabled={cartLines.length === 0}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-lg bg-[var(--accent)] text-white font-semibold active:scale-95 transition disabled:opacity-50"
+                  >
+                    <Copy size={17} /> Copiar pedido
+                  </button>
+                  <p className="text-[11px] text-center text-[var(--text3)]">
+                    Copiá el texto y pegáselo al comercio por WhatsApp.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         </div>

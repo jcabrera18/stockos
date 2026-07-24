@@ -21,6 +21,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { isRestrictedRole } from '@/lib/roles'
 import { printFacturaA4 } from '@/lib/printFactura'
 import { allowedInvoiceTypes } from '@/lib/invoiceRules'
+import { makeOptimisticState, reconcileList, clearOptimisticState } from '@/lib/optimistic-reconcile'
 import {
   printThermal,
   buildInvoiceTicketHtml,
@@ -141,6 +142,13 @@ function InvoicesPageInner() {
   useEffect(() => { ticketRef.current = debouncedTicket }, [debouncedTicket])
   useEffect(() => { pageRef.current = page }, [page])
 
+  // Reconciliación optimista: tras autorizar en ARCA, el re-fetch puede leer del
+  // replica todavía "una atrás" y devolver el estado viejo (Rechazado), pisando
+  // el update. Mantenemos el estado esperado hasta que el server lo refleje.
+  const optimisticRef = useRef(makeOptimisticState<Invoice>())
+  const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconcileCountRef = useRef(0)
+
   // Detail modal
   const [detailModal, setDetailModal] = useState(false)
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null)
@@ -200,12 +208,17 @@ function InvoicesPageInner() {
       // Autorizar la NC/ND en ARCA: es un comprobante fiscal y necesita su
       // propio CAE (NO se convierte a factura). Igual que la conversión X→Factura.
       toast.loading('Autorizando en ARCA...', { id: 'afip-auth' })
+      let createdNote: Invoice = note
       try {
         const authorized = await api.post<Invoice>(`/api/invoices/${note.id}/authorize`, {})
         toast.success(`Nota autorizada — CAE: ${authorized.afip_cae}`, { id: 'afip-auth' })
+        createdNote = authorized
       } catch (afipErr: unknown) {
         toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar la nota en ARCA', { id: 'afip-auth' })
       }
+      // La nota recién creada puede no venir aún del replica: retenerla en la lista.
+      reconcileCountRef.current = 0
+      optimisticRef.current.created = [createdNote, ...optimisticRef.current.created.filter(i => i.id !== createdNote.id)]
       fetchInvoices()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al crear la nota')
@@ -222,8 +235,8 @@ function InvoicesPageInner() {
   const [receptorIva, setReceptorIva] = useState('CF')
   const [converting, setConverting] = useState(false)
 
-  const fetchInvoices = useCallback(async () => {
-    setLoading(true)
+  const fetchInvoices = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const params: Record<string, string | number | undefined> = {
         page: pageRef.current,
@@ -235,10 +248,20 @@ function InvoicesPageInner() {
       if (ticketRef.current) params.ticket = ticketRef.current
 
       const res = await api.get<{ data: Invoice[]; pagination: PaginationType }>('/api/invoices', params)
-      setData(res.data)
+      // Conservar el estado esperado (ej. afip_status autorizado tras reintentar)
+      // hasta que el replica lo refleje, y reintentar unas pocas veces.
+      const { data, pending } = reconcileList(res.data, optimisticRef.current)
+      setData(data)
       setPagination(res.pagination)
+      if (pending && reconcileCountRef.current < 4) {
+        reconcileCountRef.current += 1
+        if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current)
+        reconcileTimerRef.current = setTimeout(() => fetchInvoices(true), 1500)
+      } else {
+        reconcileCountRef.current = 0
+      }
     } catch (err) { console.error(err) }
-    finally { setLoading(false) }
+    finally { if (!silent) setLoading(false) }
   }, [])
 
   const router = useRouter()
@@ -250,7 +273,12 @@ function InvoicesPageInner() {
   useEffect(() => { fetchInvoices() }, [typeFilter, from, to, debouncedTicket, page, fetchInvoices])
 
   // Reset página al cambiar filtros
-  useEffect(() => { setPage(1) }, [typeFilter, from, to, debouncedTicket])
+  useEffect(() => {
+    setPage(1)
+    // Cambió el filtro: el optimismo de la vista anterior ya no aplica.
+    clearOptimisticState(optimisticRef.current)
+    reconcileCountRef.current = 0
+  }, [typeFilter, from, to, debouncedTicket])
 
   const pendingOpenRef = useRef<string | null>(null)
 
@@ -334,6 +362,12 @@ function InvoicesPageInner() {
         const authorized = await api.post<Invoice>(`/api/invoices/${converted.id}/authorize`, {})
         toast.success(`Factura ${convertType} autorizada — CAE: ${authorized.afip_cae}`, { id: 'afip-auth' })
         setSelectedInvoice({ ...authorized, invoice_items: authorized.invoice_items ?? converted.invoice_items })
+        // El replica puede tardar en reflejar el CAE: retener el estado autorizado.
+        reconcileCountRef.current = 0
+        optimisticRef.current.patches.set(authorized.id, {
+          afip_status: authorized.afip_status,
+          invoice_type: authorized.invoice_type,
+        })
       } catch (afipErr: unknown) {
         toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar en ARCA', { id: 'afip-auth' })
         setSelectedInvoice(converted)
@@ -355,6 +389,11 @@ function InvoicesPageInner() {
       const authorized = await api.post<Invoice>(`/api/invoices/${invoice.id}/authorize`, {})
       toast.success(`Nota autorizada — CAE: ${authorized.afip_cae}`, { id: 'afip-auth' })
       setSelectedInvoice({ ...authorized, invoice_items: authorized.invoice_items ?? invoice.invoice_items })
+      reconcileCountRef.current = 0
+      optimisticRef.current.patches.set(authorized.id, {
+        afip_status: authorized.afip_status,
+        invoice_type: authorized.invoice_type,
+      })
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al autorizar en ARCA', { id: 'afip-auth' })
     } finally {
@@ -413,7 +452,7 @@ function InvoicesPageInner() {
         title="Comprobantes"
         description={`${pagination.total} comprobantes`}
         action={
-          <Button variant="secondary" onClick={fetchInvoices}>
+          <Button variant="secondary" onClick={() => fetchInvoices()}>
             <RefreshCw size={15} /> Actualizar
           </Button>
         }

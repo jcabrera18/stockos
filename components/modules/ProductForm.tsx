@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
 import { cn, formatCurrency } from '@/lib/utils'
 import { toast } from 'sonner'
-import { Plus, X, ChevronDown, ArrowLeft, AlertTriangle, SlidersHorizontal, Loader2 } from 'lucide-react'
+import { Plus, X, ChevronDown, ArrowLeft, AlertTriangle, SlidersHorizontal, Loader2, Trash2 } from 'lucide-react'
 import type { Product, Category, Supplier } from '@/types'
 import { CategoryTreePicker } from '@/components/ui/CategoryTreePicker'
 import type { PriceList } from '@/app/price-lists/page'
@@ -27,6 +27,10 @@ interface ProductFormProps {
   // al detalle recién creado; en mobile el panel es full-screen y conviene cerrarlo
   // para volver al listado. La página decide según el viewport.
   onCreated?: (id: string) => void
+  // Solicita eliminar el producto en edición. La página abre su propio diálogo de
+  // confirmación (igual que el menú de la fila). En mobile el listado se oculta al
+  // abrir el form full-screen, así que este es el único acceso a "Eliminar".
+  onDelete?: () => void
 }
 
 const UNITS = [
@@ -134,7 +138,7 @@ function SectionLabel({ children }: { children: string }) {
   )
 }
 
-export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigateToProduct, onCreated }: ProductFormProps) {
+export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigateToProduct, onCreated, onDelete }: ProductFormProps) {
   const [form, setForm] = useState(emptyForm)
   const [barcodes, setBarcodes] = useState<string[]>([])
   const [newBarcode, setNewBarcode] = useState('')
@@ -1407,7 +1411,17 @@ export function ProductForm({ product, stockCurrent, onSaved, onClose, onNavigat
       </div>
 
       {/* Footer */}
-      <div className="sticky bottom-0 z-10 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end px-5 py-4 bg-[var(--bg)] border-t border-[var(--border)]">
+      <div className="sticky bottom-0 z-10 flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end px-5 py-4 bg-[var(--bg)] border-t border-[var(--border)]">
+        {isEdit && onDelete && (
+          <Button
+            variant="ghost"
+            onClick={onDelete}
+            disabled={saving}
+            className="text-[var(--danger)] hover:bg-[var(--danger-subtle)] sm:mr-auto"
+          >
+            <Trash2 size={15} /> Eliminar
+          </Button>
+        )}
         <Button variant="secondary" onClick={requestClose} disabled={saving}>Cancelar</Button>
         {!isEdit && (
           <Button variant="secondary" onClick={handleSaveAndNew} loading={saving}>

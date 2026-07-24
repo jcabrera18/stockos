@@ -844,6 +844,7 @@ export default function ProductsPage() {
                   onClose={closePanel}
                   onNavigateToProduct={handleNavigateToProduct}
                   onCreated={handleProductCreated}
+                  onDelete={formProduct ? () => { setDeleteProduct(formProduct as unknown as StockSummary); setDeleteModal(true) } : undefined}
                 />
               </div>
             )}

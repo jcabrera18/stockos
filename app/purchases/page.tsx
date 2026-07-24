@@ -14,6 +14,7 @@ import { SupplierModal } from '@/components/modules/SupplierModal'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { printDocument, partiesGrid, totalsBox, fmtARS } from '@/lib/printDocument'
+import { makeOptimisticState, reconcileList, clearOptimisticState } from '@/lib/optimistic-reconcile'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useAuth } from '@/hooks/useAuth'
 import type { PurchaseOrder, Supplier, PaginatedResponse, Pagination as PaginationType } from '@/types'
@@ -116,8 +117,12 @@ export default function PurchasesPage() {
   useEffect(() => { supplierFilterRef.current = supplierFilter }, [supplierFilter])
   useEffect(() => { searchRef.current = debouncedSearch }, [debouncedSearch])
 
-  const fetchOrders = useCallback(async () => {
-    setLoadingOrders(true)
+  const optimisticRef = useRef(makeOptimisticState<PurchaseOrder>())
+  const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconcileCountRef = useRef(0)
+
+  const fetchOrders = useCallback(async (silent = false) => {
+    if (!silent) setLoadingOrders(true)
     try {
       const res = await api.get<PaginatedResponse<PurchaseOrder>>('/api/purchases', {
         status: statusFilterRef.current !== 'all' ? statusFilterRef.current : undefined,
@@ -125,15 +130,28 @@ export default function PurchasesPage() {
         search: searchRef.current || undefined,
         page: orderPageRef.current, limit: ORDERS_PER_PAGE,
       })
-      setOrders(res.data)
+      // Retener el estado recién cambiado (recibida/cancelada) hasta que el replica
+      // lo refleje: si no, un re-fetch contra el replica "una atrás" lo revierte.
+      const { data, pending } = reconcileList(res.data, optimisticRef.current)
+      setOrders(data)
       setOrderPag(res.pagination)
+      if (pending && reconcileCountRef.current < 4) {
+        reconcileCountRef.current += 1
+        if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current)
+        reconcileTimerRef.current = setTimeout(() => fetchOrders(true), 1500)
+      } else {
+        reconcileCountRef.current = 0
+      }
     } catch (err) { console.error(err) }
-    finally { setLoadingOrders(false) }
+    finally { if (!silent) setLoadingOrders(false) }
   }, [])
 
   useEffect(() => {
     orderPageRef.current = 1
     setOrderPage(1)
+    // Cambió el filtro: el optimismo de la vista anterior ya no aplica.
+    clearOptimisticState(optimisticRef.current)
+    reconcileCountRef.current = 0
     fetchOrders()
   }, [statusFilter, supplierFilter, debouncedSearch, fetchOrders])
 
@@ -245,9 +263,12 @@ export default function PurchasesPage() {
       const receivedAt = new Date().toISOString()
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'received', received_at: receivedAt } : o))
       setDetailOrder(prev => prev && prev.id === orderId ? { ...prev, status: 'received', received_at: receivedAt } : prev)
+      reconcileCountRef.current = 0
+      optimisticRef.current.patches.set(orderId, { status: 'received' })
       fetchOrders()
+      // No pisar el detalle con una lectura del replica todavía en 'pending'.
       api.get<PurchaseOrder>(`/api/purchases/${orderId}`)
-        .then(updated => setDetailOrder(prev => prev && prev.id === orderId ? updated : prev))
+        .then(updated => setDetailOrder(prev => prev && prev.id === orderId && updated.status !== 'pending' ? updated : prev))
         .catch(() => {})
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al recibir')
@@ -266,9 +287,12 @@ export default function PurchasesPage() {
       // Optimista: pintar el nuevo estado al instante; el re-fetch reconcilia.
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'cancelled' } : o))
       setDetailOrder(prev => prev && prev.id === orderId ? { ...prev, status: 'cancelled' } : prev)
+      reconcileCountRef.current = 0
+      optimisticRef.current.patches.set(orderId, { status: 'cancelled' })
       fetchOrders()
+      // No pisar el detalle con una lectura del replica todavía en 'pending'.
       api.get<PurchaseOrder>(`/api/purchases/${orderId}`)
-        .then(updated => setDetailOrder(prev => prev && prev.id === orderId ? updated : prev))
+        .then(updated => setDetailOrder(prev => prev && prev.id === orderId && updated.status !== 'pending' ? updated : prev))
         .catch(() => {})
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al cancelar')

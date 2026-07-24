@@ -405,7 +405,7 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
             <div className="grid grid-cols-2 gap-3">
               <div className="px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)]">
                 <p className="text-xs text-[var(--text3)] mb-0.5">Total</p>
-                <p className="text-2xl font-bold mono text-[var(--accent)]">{formatCurrency(sale.total)}</p>
+                <p className="text-lg sm:text-2xl font-bold mono text-[var(--accent)] break-all leading-tight">{formatCurrency(sale.total)}</p>
               </div>
               <div className="px-3 py-2.5 bg-[var(--surface2)] rounded-[var(--radius-md)] space-y-1.5">
                 <div className="flex items-center gap-1.5 text-xs text-[var(--text2)]">

@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { TableSkeleton } from '@/components/ui/Skeleton'
 import { Pagination } from '@/components/ui/Pagination'
+import { StatCard } from '@/components/ui/StatCard'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
 import type { Product, Pagination as PaginationType } from '@/types'
@@ -64,6 +65,7 @@ interface OrderSummary {
   warehouse_name?: string
   notes?: string
   pickup_mode?: boolean
+  source?: string
   created_at: string
   confirmed_at?: string
   dispatched_at?: string
@@ -94,6 +96,15 @@ interface OrderDetail extends OrderSummary {
   customers?: { full_name: string; current_balance: number; document?: string; phone?: string }
   invoices?: { id: string; invoice_type: string; numero: number; afip_status: string } | null
   sales?: { status?: string } | null
+}
+
+interface OrderStats {
+  pending: number
+  to_dispatch: number
+  delivered: number
+  to_collect: number
+  avg_ticket: number
+  period_count: number
 }
 
 interface OrderDelivery {
@@ -174,6 +185,7 @@ function OrdersPageInner() {
 
   // Lista
   const [orders, setOrders] = useState<OrderSummary[]>([])
+  const [stats, setStats] = useState<OrderStats | null>(null)
   const [pagination, setPagination] = useState<PaginationType>({ total: 0, page: 1, limit: 10, pages: 0 })
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
@@ -215,10 +227,6 @@ function OrdersPageInner() {
   const [priceListId, setPriceListId] = useState('')
   const [orderNotes, setOrderNotes] = useState('')
   const [orderDiscount, setOrderDiscount] = useState('')
-  // Cobro opcional al crear el pedido (seña o total). Si no, nace a cuenta corriente.
-  const [collectNow, setCollectNow] = useState(false)
-  const [collectNowMethod, setCollectNowMethod] = useState<PaymentMethod>('efectivo')
-  const [collectNowAmount, setCollectNowAmount] = useState('')
   const [cart, setCart] = useState<CartItem[]>([])
   const [productQuery, setProductQuery] = useState('')
   const [productResults, setProductResults] = useState<Product[]>([])
@@ -260,7 +268,19 @@ function OrdersPageInner() {
   // Confirmación cancelación
   const [cancelConfirmOrder, setCancelConfirmOrder] = useState<{ id: string; customer_name: string } | null>(null)
   // Confirmación de "Confirmar pedido"
-  const [confirmOrder, setConfirmOrder] = useState<{ id: string; customer_name: string } | null>(null)
+  const [confirmOrder, setConfirmOrder] = useState<{ id: string; customer_name: string; customer_id?: string | null; customer_phone?: string; source?: string } | null>(null)
+  // Asignación de cliente al confirmar (necesario para pedidos web sin cliente).
+  const [confirmCustomerId, setConfirmCustomerId] = useState<string | null>(null)
+  const [confirmCustomerName, setConfirmCustomerName] = useState('')
+  const [confirmCustomerQuery, setConfirmCustomerQuery] = useState('')
+  const [confirmCustomerResults, setConfirmCustomerResults] = useState<{ id: string; full_name: string; phone?: string }[]>([])
+  const [confirming, setConfirming] = useState(false)
+  // Carga rápida de cliente desde el modal de confirmar (pedidos web).
+  const [confirmQcOpen, setConfirmQcOpen] = useState(false)
+  const [confirmQcName, setConfirmQcName] = useState('')
+  const [confirmQcPhone, setConfirmQcPhone] = useState('')
+  const [confirmQcDoc, setConfirmQcDoc] = useState('')
+  const [confirmQcSaving, setConfirmQcSaving] = useState(false)
 
   // Cobro parcial
   const [paymentModal, setPaymentModal] = useState(false)
@@ -664,6 +684,15 @@ function OrdersPageInner() {
     finally { if (!silent) setLoading(false) }
   }, [])
 
+  // Métricas de la franja (todo el negocio, no dependen de los filtros). Se refresca
+  // junto con la lista para quedar en sync tras confirmar/despachar/cobrar.
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await api.get<OrderStats>('/api/orders/stats')
+      setStats(res)
+    } catch (err) { console.error(err) }
+  }, [])
+
   // Refetch del detalle con guarda de staleness: si el server todavía devuelve el
   // estado viejo, mantenemos los campos esperados (optimistas) y reintentamos.
   const detailRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -700,6 +729,10 @@ function OrdersPageInner() {
     reconcileCountRef.current = 0
     fetchOrders()
   }, [statusFilter, debouncedSearch, debouncedIdSearch, fetchOrders])
+
+  // Refresca las métricas cada vez que cambia la lista (tras confirmar, despachar,
+  // cobrar, etc. la lista se recarga y con ella las cards quedan en sync).
+  useEffect(() => { fetchStats() }, [orders, fetchStats])
 
   const handlePageChange = useCallback((newPage: number) => {
     pageRef.current = newPage
@@ -787,9 +820,6 @@ function OrdersPageInner() {
         if (d.priceListId) setPriceListId(d.priceListId)
         if (d.orderNotes) setOrderNotes(d.orderNotes)
         if (d.orderDiscount) setOrderDiscount(d.orderDiscount)
-        if (d.collectNow) setCollectNow(true)
-        if (d.collectNowMethod) setCollectNowMethod(d.collectNowMethod)
-        if (d.collectNowAmount) setCollectNowAmount(d.collectNowAmount)
         if (d.pickupMode) setPickupMode(true)
       }
     } catch { /* ignore */ }
@@ -804,11 +834,11 @@ function OrdersPageInner() {
     try {
       localStorage.setItem(DRAFT_KEY, JSON.stringify({
         cart, selectedCustomerId, customerName, selectedCustomerBalance, selectedCustomerCreditLimit,
-        warehouseId, priceListId, orderNotes, orderDiscount, collectNow, collectNowMethod, collectNowAmount, pickupMode,
+        warehouseId, priceListId, orderNotes, orderDiscount, pickupMode,
       }))
     } catch { /* ignore */ }
   }, [cart, selectedCustomerId, customerName, selectedCustomerBalance, selectedCustomerCreditLimit,
-    warehouseId, priceListId, orderNotes, orderDiscount, collectNow, collectNowMethod, collectNowAmount, pickupMode])
+    warehouseId, priceListId, orderNotes, orderDiscount, pickupMode])
 
   // Búsqueda de productos para el pedido
   useEffect(() => {
@@ -1050,7 +1080,6 @@ function OrdersPageInner() {
 
   const resetOrderForm = () => {
     setOrderNotes(''); setOrderDiscount(''); setCart([])
-    setCollectNow(false); setCollectNowAmount(''); setCollectNowMethod('efectivo')
     setPickupMode(false)
     setCustomerQuery(''); setCustomerResults([]); setSelectedCustomerId(null)
     setSelectedCustomerBalance(0); setSelectedCustomerCreditLimit(0)
@@ -1150,10 +1179,8 @@ function OrdersPageInner() {
 
     setSavingOrder(true)
 
-    // Cobro al crear activo solo si se marcó, el medio no es CC y hay monto.
-    const collectingNow = collectNow && collectNowMethod !== 'cuenta_corriente'
-      && (Number(collectNowAmount) || cartTotal) > 0
-
+    // El pedido nace 'pending' sin cobro: la venta se genera al confirmarlo y el
+    // cobro se registra después. No se cobra al crear.
     const payload = {
       customer_name: customerName.trim(),
       warehouse_id: warehouseId || null,
@@ -1167,15 +1194,6 @@ function OrdersPageInner() {
         unit_price: i.unit_price,
         discount: i.discount,
       })),
-      // Cobro opcional al crear (seña/total). Si no, nace a cuenta corriente y el
-      // cobro se registra después con "Registrar pago".
-      paid_amount: collectingNow ? Number(collectNowAmount) || cartTotal : 0,
-      payment_method: collectingNow ? collectNowMethod : null,
-      payment_status: collectingNow
-        ? ((Number(collectNowAmount) || cartTotal) >= cartTotal ? 'paid' : 'partial')
-        : 'unpaid',
-      branch_id: collectBranchId,
-      register_id: collectRegisterId,
       pickup_mode: pickupMode,
     }
 
@@ -1259,9 +1277,9 @@ function OrdersPageInner() {
     confirm: 'confirmed', cancel: 'cancelled',
   }
 
-  const handleAction = async (id: string, action: string) => {
+  const handleAction = async (id: string, action: string, body: Record<string, unknown> = {}) => {
     try {
-      const res = await api.post<Partial<OrderDetail>>(`/api/orders/${id}/${action}`, {})
+      const res = await api.post<Partial<OrderDetail>>(`/api/orders/${id}/${action}`, body)
       toast.success('Estado actualizado')
       // Optimista: pintar el nuevo estado de inmediato. El re-fetch de abajo
       // reconcilia con el server (totales del view + joins completos).
@@ -1283,6 +1301,71 @@ function OrdersPageInner() {
       msg.split('\n').forEach((line, i) => {
         setTimeout(() => toast.error(line), i * 150)
       })
+    }
+  }
+
+  // Buscar clientes para asignar al confirmar un pedido web.
+  useEffect(() => {
+    const q = confirmCustomerQuery.trim()
+    if (q.length < 2 || confirmCustomerId) { setConfirmCustomerResults([]); return }
+    let active = true
+    const t = setTimeout(async () => {
+      try {
+        const data = await api.get<{ id: string; full_name: string; phone?: string }[]>(
+          `/api/customers/search?q=${encodeURIComponent(q)}`
+        )
+        if (active) setConfirmCustomerResults(data ?? [])
+      } catch { if (active) setConfirmCustomerResults([]) }
+    }, 250)
+    return () => { active = false; clearTimeout(t) }
+  }, [confirmCustomerQuery, confirmCustomerId])
+
+  const openConfirm = (o: { id: string; customer_name: string; customer_id?: string | null; customer_phone?: string; source?: string }) => {
+    setConfirmOrder(o)
+    setConfirmCustomerId(o.customer_id ?? null)
+    setConfirmCustomerName(o.customer_id ? o.customer_name : '')
+    setConfirmCustomerQuery('')
+    setConfirmCustomerResults([])
+    // Prefill de la carga rápida con los datos que dejó el comprador en el pedido web.
+    setConfirmQcOpen(false)
+    setConfirmQcName(o.customer_id ? '' : (o.customer_name ?? ''))
+    setConfirmQcPhone(o.customer_id ? '' : (o.customer_phone ?? ''))
+    setConfirmQcDoc('')
+  }
+
+  // Crea un cliente con datos básicos y lo deja asignado al pedido a confirmar.
+  const saveConfirmQuickCustomer = async () => {
+    if (!confirmQcName.trim()) { toast.error('El nombre es obligatorio'); return }
+    setConfirmQcSaving(true)
+    try {
+      const customer = await api.post<{ id: string; full_name: string }>('/api/customers', {
+        full_name: confirmQcName.trim(),
+        phone: confirmQcPhone.trim() || null,
+        document: confirmQcDoc.trim() || null,
+        credit_limit: 0,
+      })
+      setConfirmCustomerId(customer.id)
+      setConfirmCustomerName(customer.full_name)
+      setConfirmCustomerResults([])
+      setConfirmQcOpen(false)
+      toast.success(`Cliente "${customer.full_name}" creado`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'No se pudo crear el cliente')
+    } finally {
+      setConfirmQcSaving(false)
+    }
+  }
+
+  const submitConfirm = async () => {
+    if (!confirmOrder) return
+    const needsCustomer = !confirmOrder.customer_id
+    if (needsCustomer && !confirmCustomerId) { toast.error('Asigná un cliente para confirmar'); return }
+    setConfirming(true)
+    try {
+      await handleAction(confirmOrder.id, 'confirm', confirmCustomerId ? { customer_id: confirmCustomerId } : {})
+      setConfirmOrder(null)
+    } finally {
+      setConfirming(false)
     }
   }
 
@@ -1585,6 +1668,42 @@ function OrdersPageInner() {
           </div>
         )}
 
+        {/* Métricas — franja de cards (todo el negocio). Las clickeables aplican filtro. */}
+        {stats && (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            {([
+              { key: 'pending',   title: 'Pendientes',      value: String(stats.pending),     valueTitle: undefined,                       money: false, icon: Clock,       subtitle: 'por confirmar',                       filter: 'pending' as const },
+              { key: 'dispatch',  title: 'Por despachar',   value: String(stats.to_dispatch), valueTitle: undefined,                       money: false, icon: Truck,       subtitle: 'confirmados',                         filter: 'confirmed' as const },
+              { key: 'delivered', title: 'Entregados',      value: String(stats.delivered),   valueTitle: undefined,                       money: false, icon: CheckCircle, subtitle: 'últimos 30 días',                     filter: 'delivered' as const },
+              { key: 'collect',   title: 'A cobrar',        value: formatCurrency(stats.to_collect), valueTitle: formatCurrency(stats.to_collect), money: true,  icon: DollarSign,  subtitle: 'saldo pendiente',                     filter: null },
+              { key: 'avg',       title: 'Ticket promedio', value: formatCurrency(stats.avg_ticket), valueTitle: formatCurrency(stats.avg_ticket), money: true,  icon: Receipt,     subtitle: `${stats.period_count} pedidos / 30d`, filter: null },
+            ]).map(card => {
+              const active = card.filter !== null && statusFilter === card.filter
+              const clickable = card.filter !== null
+              const el = (
+                <StatCard
+                  title={card.title}
+                  value={card.value}
+                  valueTitle={card.valueTitle}
+                  valueClassName={card.money ? 'text-[clamp(1rem,1.6vw,1.5rem)] tracking-tight' : undefined}
+                  icon={card.icon}
+                  subtitle={card.subtitle}
+                  accent={active}
+                  className={clickable ? 'transition-colors hover:border-[var(--accent)]' : undefined}
+                />
+              )
+              return clickable ? (
+                <button key={card.key} type="button" className="text-left"
+                  onClick={() => setStatusFilter(active ? '' : card.filter!)}>
+                  {el}
+                </button>
+              ) : (
+                <div key={card.key}>{el}</div>
+              )
+            })}
+          </div>
+        )}
+
         {/* Filtros */}
         <div className="space-y-2">
           {/* Estado */}
@@ -1679,7 +1798,10 @@ function OrdersPageInner() {
                           </td>
                         )}
                         <td className="px-4 py-3">
-                          <p className="font-medium text-[var(--text)]">{order.customer_name}</p>
+                          <p className="font-medium text-[var(--text)] flex items-center gap-1.5">
+                            <span className="truncate">{order.customer_name}</span>
+                            {order.source === 'catalog' && <Badge variant="warning">Web</Badge>}
+                          </p>
                           {order.customer_address && (
                             <p className="text-xs text-[var(--text3)] truncate max-w-[160px]">{order.customer_address}</p>
                           )}
@@ -1799,7 +1921,7 @@ function OrdersPageInner() {
                   const currentIdx = detail.status === 'partially_delivered' ? 1 : statuses.indexOf(detail.status)
                   const NEXT_LABELS: Partial<Record<OrderStatus, string>> = { confirmed: 'Confirmar', delivered: 'Entregar' }
                   const advance = (target: OrderStatus) => {
-                    if (target === 'confirmed') setConfirmOrder({ id: detail.id, customer_name: detail.customer_name })
+                    if (target === 'confirmed') openConfirm({ id: detail.id, customer_name: detail.customer_name, customer_id: detail.customer_id, customer_phone: detail.customer_phone, source: detail.source })
                     else if (target === 'delivered') { setDeliverMode('full'); setDeliverOrderId(detail.id); setDeliverAmount(''); setDeliverNotes(''); setDeliverModal(true) }
                   }
                   return statuses.map((s, i) => {
@@ -1843,7 +1965,7 @@ function OrdersPageInner() {
               </div>
               {detail.status === 'pending' && (
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button size="sm" onClick={() => setConfirmOrder({ id: detail.id, customer_name: detail.customer_name })}>
+                  <Button size="sm" onClick={() => openConfirm({ id: detail.id, customer_name: detail.customer_name, customer_id: detail.customer_id, customer_phone: detail.customer_phone, source: detail.source })}>
                     <CheckCircle size={14} /> Confirmar pedido
                   </Button>
                   <button
@@ -1968,7 +2090,10 @@ function OrdersPageInner() {
               <div className="bg-[var(--surface2)] rounded-[var(--radius-md)] p-3.5 flex justify-between gap-3">
                 {/* Datos del cliente */}
                 <div className="min-w-0 flex flex-col gap-1.5">
-                  <p className="text-xs text-[var(--text3)]">Cliente</p>
+                  <p className="text-xs text-[var(--text3)] flex items-center gap-1.5">
+                    Cliente
+                    {detail.source === 'catalog' && <Badge variant="warning">Pedido web</Badge>}
+                  </p>
                   <p className="text-sm font-semibold text-[var(--text)] leading-tight">{detail.customer_name}</p>
                   <div className="flex flex-col gap-0.5 text-xs text-[var(--text2)]">
                     {detail.customers?.document && <span>DNI/CUIT: <span className="mono">{detail.customers.document}</span></span>}
@@ -2611,55 +2736,11 @@ function OrdersPageInner() {
             onChange={e => setOrderNotes(e.target.value)}
             placeholder="Instrucciones de entrega, observaciones..." />
 
-          {/* ¿Cobrás ahora? (seña o total). Opcional: si no, nace a cuenta corriente. */}
-          <div className="border border-[var(--border)] rounded-[var(--radius-md)] p-3 space-y-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={collectNow}
-                onChange={e => setCollectNow(e.target.checked)}
-                className="w-4 h-4 accent-[var(--accent)]" />
-              <span className="text-sm font-medium text-[var(--text)]">
-                Cobrar ahora (seña o total)
-              </span>
-            </label>
-            {collectNow && (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                  <Select label="Método de cobro"
-                    options={PAYMENT_METHODS}
-                    value={collectNowMethod}
-                    onChange={e => setCollectNowMethod(e.target.value as PaymentMethod)} />
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label htmlFor="monto-cobrado-pedido" className="text-sm font-medium text-[var(--text2)]">
-                        Monto cobrado
-                      </label>
-                      <button type="button"
-                        onClick={() => setCollectNowAmount(String(Math.round(cartTotal * 100) / 100))}
-                        className="text-xs font-medium text-[var(--accent)] hover:underline">
-                        Total: {formatCurrency(cartTotal)}
-                      </button>
-                    </div>
-                    <MoneyInput id="monto-cobrado-pedido"
-                      value={collectNowAmount} placeholder={String(Math.round(cartTotal * 100) / 100)}
-                      onChange={v => setCollectNowAmount(v)} />
-                  </div>
-                </div>
-                <CashRegisterPicker
-                  registers={allRegisters}
-                  branchId={collectBranchId}
-                  registerId={collectRegisterId}
-                  onBranchChange={handleCollectBranchChange}
-                  onRegisterChange={setCollectRegisterId}
-                />
-              </>
-            )}
-          </div>
-
-          {/* Modelo unificado: la venta se genera al crear y se carga a la cuenta
-              corriente; el resto del cobro se registra después con "Registrar pago". */}
+          {/* El pedido nace pendiente. Al confirmarlo se genera la venta (Ticket X +
+              cuenta corriente) y desde ahí se cobra y se entrega. */}
           <div className="flex items-start gap-2 px-3 py-2.5 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] text-[11px] text-[var(--text3)]">
             <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
-            <span>Si no cobrás ahora, la venta se carga a la cuenta corriente y podés cobrar después con <span className="font-medium text-[var(--text2)]">Registrar pago</span>. Podés entregar por partes; lo que no entregues genera un saldo a favor al cerrar.</span>
+            <span>El pedido queda <span className="font-medium text-[var(--text2)]">pendiente</span>. Al <span className="font-medium text-[var(--text2)]">confirmarlo</span> se genera la venta a cuenta corriente; después podés cobrar con <span className="font-medium text-[var(--text2)]">Registrar pago</span> y entregar por partes.</span>
           </div>
 
               <div className="sticky bottom-0 -mx-4 sm:-mx-5 px-4 sm:px-5 bg-[var(--surface)] pt-3 pb-4 mt-2 border-t border-[var(--border)]">
@@ -3323,26 +3404,105 @@ function OrdersPageInner() {
       {/* ── Confirmación de confirmar pedido ── */}
       {confirmOrder && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setConfirmOrder(null)} />
+          <div className="absolute inset-0 bg-black/50" onClick={() => !confirming && setConfirmOrder(null)} />
           <div className="relative bg-[var(--surface)] rounded-[var(--radius-lg)] p-6 w-full max-w-sm shadow-xl">
             <h3 className="text-base font-semibold text-[var(--text)] mb-2">Confirmar pedido</h3>
-            <p className="text-sm text-[var(--text2)] mb-5">
-              ¿Confirmás el pedido de <span className="font-medium text-[var(--text)]">{confirmOrder.customer_name}</span>?
-            </p>
+            {confirmOrder.customer_id ? (
+              <p className="text-sm text-[var(--text2)] mb-5">
+                ¿Confirmás el pedido de <span className="font-medium text-[var(--text)]">{confirmOrder.customer_name}</span>? Se genera la venta y se carga a su cuenta corriente.
+              </p>
+            ) : (
+              <>
+                <p className="text-sm text-[var(--text2)] mb-3">
+                  Pedido web de <span className="font-medium text-[var(--text)]">{confirmOrder.customer_name}</span>. Asigná un cliente registrado para generar la venta.
+                </p>
+                {confirmCustomerId ? (
+                  <div className="flex items-center justify-between rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface2)] px-3 py-2 mb-4">
+                    <span className="text-sm font-medium text-[var(--text)]">{confirmCustomerName}</span>
+                    <button onClick={() => { setConfirmCustomerId(null); setConfirmCustomerName(''); setConfirmCustomerQuery('') }}
+                      className="text-xs text-[var(--accent)]">Cambiar</button>
+                  </div>
+                ) : confirmQcOpen ? (
+                  <div className="rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface2)] p-3 mb-4 space-y-2">
+                    <p className="text-xs font-medium text-[var(--text2)]">Nuevo cliente</p>
+                    <input
+                      value={confirmQcName}
+                      onChange={e => setConfirmQcName(e.target.value)}
+                      placeholder="Nombre y apellido *"
+                      className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        value={confirmQcPhone}
+                        onChange={e => setConfirmQcPhone(e.target.value)}
+                        inputMode="tel"
+                        placeholder="Teléfono"
+                        className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                      />
+                      <input
+                        value={confirmQcDoc}
+                        onChange={e => setConfirmQcDoc(e.target.value)}
+                        placeholder="DNI/CUIT"
+                        className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                      />
+                    </div>
+                    <div className="flex gap-2 justify-end pt-1">
+                      <button
+                        onClick={() => setConfirmQcOpen(false)}
+                        disabled={confirmQcSaving}
+                        className="px-3 py-1.5 text-xs rounded-[var(--radius-md)] bg-[var(--surface)] text-[var(--text2)] border border-[var(--border)] disabled:opacity-50">
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={saveConfirmQuickCustomer}
+                        disabled={confirmQcSaving || !confirmQcName.trim()}
+                        className="px-3 py-1.5 text-xs rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] disabled:opacity-50">
+                        {confirmQcSaving ? 'Creando…' : 'Crear y asignar'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-4 space-y-2">
+                    <div className="relative">
+                      <input
+                        value={confirmCustomerQuery}
+                        onChange={e => setConfirmCustomerQuery(e.target.value)}
+                        placeholder="Buscar cliente por nombre…"
+                        className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                      />
+                      {confirmCustomerResults.length > 0 && (
+                        <div className="absolute z-10 mt-1 w-full max-h-48 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] shadow-lg">
+                          {confirmCustomerResults.map(c => (
+                            <button key={c.id}
+                              onClick={() => { setConfirmCustomerId(c.id); setConfirmCustomerName(c.full_name); setConfirmCustomerResults([]) }}
+                              className="w-full text-left px-3 py-2 text-sm text-[var(--text)] hover:bg-[var(--surface2)] border-b border-[var(--border)] last:border-0">
+                              {c.full_name}{c.phone ? <span className="text-[var(--text3)]"> · {c.phone}</span> : null}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setConfirmQcOpen(true)}
+                      className="flex items-center gap-1.5 text-sm font-medium text-[var(--accent)] hover:underline">
+                      <Plus size={15} /> Cargar cliente nuevo
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setConfirmOrder(null)}
-                className="px-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] text-[var(--text2)] border border-[var(--border)]">
+                disabled={confirming}
+                className="px-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] text-[var(--text2)] border border-[var(--border)] disabled:opacity-50">
                 Volver
               </button>
               <button
-                onClick={async () => {
-                  const { id } = confirmOrder
-                  setConfirmOrder(null)
-                  await handleAction(id, 'confirm')
-                }}
-                className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)]">
-                Confirmar pedido
+                onClick={submitConfirm}
+                disabled={confirming || (!confirmOrder.customer_id && !confirmCustomerId)}
+                className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] disabled:opacity-50">
+                {confirming ? 'Confirmando…' : 'Confirmar pedido'}
               </button>
             </div>
           </div>

@@ -117,6 +117,7 @@ export interface Sale {
   users?: { full_name: string }
   branches?: { name: string }
   registers?: { name: string }
+  customers?: { full_name: string }
   sale_items?: SaleItem[]
 }
 

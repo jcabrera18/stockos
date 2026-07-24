@@ -17,6 +17,7 @@ import { useRouter } from 'next/navigation'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 import { useAuth } from '@/hooks/useAuth'
 import { isRestrictedRole } from '@/lib/roles'
+import { makeOptimisticState, reconcileList, clearOptimisticState } from '@/lib/optimistic-reconcile'
 
 type Period = 'today' | 'week' | 'month' | 'all'
 
@@ -73,8 +74,15 @@ export default function SalesPage() {
   useEffect(() => { ticketRef.current = debouncedTicket }, [debouncedTicket])
   useEffect(() => { customerRef.current = customerFilter }, [customerFilter])
 
-  const fetchSales = useCallback(async () => {
-    setLoading(true)
+  // Reconciliación optimista: tras anular una venta, el re-fetch puede leer del
+  // replica "una atrás" y devolver la venta aún como 'completed', revirtiendo la
+  // anulación en la tabla. Retenemos el estado esperado hasta que se refleje.
+  const optimisticRef = useRef(makeOptimisticState<Sale>())
+  const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconcileCountRef = useRef(0)
+
+  const fetchSales = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       const params: Record<string, string | number | undefined> = {
         page: pageRef.current,
@@ -109,22 +117,42 @@ export default function SalesPage() {
               '/api/finances/summary', summaryParams
             ),
       ])
-      setData(res.data)
+      const { data, pending } = reconcileList(res.data, optimisticRef.current)
+      setData(data)
       setPagination(res.pagination)
       if (summary) {
         const pm = paymentRef.current
         setPeriodRevenue(pm ? (summary.by_payment[pm] ?? 0) : summary.revenue)
       }
+      if (pending && reconcileCountRef.current < 4) {
+        reconcileCountRef.current += 1
+        if (reconcileTimerRef.current) clearTimeout(reconcileTimerRef.current)
+        reconcileTimerRef.current = setTimeout(() => fetchSales(true), 1500)
+      } else {
+        reconcileCountRef.current = 0
+      }
     } catch (err) { console.error(err) }
-    finally { setLoading(false) }
+    finally { if (!silent) setLoading(false) }
   }, [])
 
   // Al cambiar filtros: resetear página y fetchear una sola vez
   useEffect(() => {
     pageRef.current = 1
     setPage(1)
+    // Cambió el filtro: el optimismo de la vista anterior ya no aplica.
+    clearOptimisticState(optimisticRef.current)
+    reconcileCountRef.current = 0
     fetchSales()
   }, [period, paymentFilter, debouncedMin, debouncedMax, debouncedTicket, customerFilter, restricted, fetchSales])
+
+  // Tras anular: retener el estado 'voided' hasta que el replica lo refleje.
+  const handleVoided = useCallback(() => {
+    if (detailSaleId) {
+      reconcileCountRef.current = 0
+      optimisticRef.current.patches.set(detailSaleId, { status: 'voided' })
+    }
+    fetchSales()
+  }, [detailSaleId, fetchSales])
 
   // Cambio de página desde el componente Pagination
   const handlePageChange = useCallback((newPage: number) => {
@@ -308,6 +336,7 @@ export default function SalesPage() {
                   <tr className="border-b border-[var(--border)]">
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)]">Fecha</th>
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">N° Ticket</th>
+                    <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden sm:table-cell">Cliente</th>
                     {!restricted && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Vendedor</th>}
                     <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Sucursal / Caja</th>
                     <th className="text-center px-4 py-3 text-xs font-medium text-[var(--text3)]">Método</th>
@@ -329,9 +358,18 @@ export default function SalesPage() {
                         {sale.status === 'voided' && (
                           <Badge variant="danger" className="ml-2 align-middle">Anulada</Badge>
                         )}
+                        {/* Cliente en mobile: sublínea bajo la fecha (la columna Cliente está oculta) */}
+                        {(sale.customers as { full_name: string } | undefined)?.full_name && (
+                          <p className="sm:hidden mt-0.5 text-[var(--text3)] normal-case truncate">
+                            {(sale.customers as { full_name: string }).full_name}
+                          </p>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-xs mono text-[var(--text3)] hidden sm:table-cell">
                         #{sale.id.slice(-8).toUpperCase()}
+                      </td>
+                      <td className="px-4 py-3 text-[var(--text2)] hidden sm:table-cell">
+                        {(sale.customers as { full_name: string } | undefined)?.full_name ?? '—'}
                       </td>
                       {!restricted && (
                         <td className="px-4 py-3 text-[var(--text2)] hidden md:table-cell">
@@ -368,7 +406,7 @@ export default function SalesPage() {
           open={detailModal}
           onClose={() => { setDetailModal(false); setDetailSaleId(null) }}
           saleId={detailSaleId}
-          onVoided={fetchSales}
+          onVoided={handleVoided}
         />
 
       </div>

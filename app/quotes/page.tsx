@@ -25,15 +25,6 @@ import {
 import { useAuth } from '@/hooks/useAuth'
 import { useWorkstation } from '@/hooks/useWorkstation'
 import { usePOSSync } from '@/hooks/usePOSSync'
-import { CashRegisterPicker, type RegisterWithBranch } from '@/components/modules/CashRegisterPicker'
-
-const CONVERT_PAYMENT_METHODS = [
-  { value: 'efectivo', label: 'Efectivo' },
-  { value: 'transferencia', label: 'Transferencia' },
-  { value: 'debito', label: 'Débito' },
-  { value: 'credito', label: 'Crédito' },
-  { value: 'qr', label: 'QR' },
-]
 import { useCollapseSidebar } from '@/contexts/SidePanelContext'
 import { searchProductsLocal, searchCustomersLocal } from '@/lib/pos-cache'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
@@ -181,49 +172,12 @@ export default function QuotesPage() {
   const [convertQuickCustomerOpen, setConvertQuickCustomerOpen] = useState(false)
   const [convertWarehouseId, setConvertWarehouseId] = useState('')
   const [converting, setConverting] = useState(false)
-  // Cobro opcional al convertir (seña o total) + selector de caja.
-  const [convertCollectNow, setConvertCollectNow] = useState(false)
-  const [convertCollectMethod, setConvertCollectMethod] = useState('efectivo')
-  const [convertCollectAmount, setConvertCollectAmount] = useState('')
-  const [allRegisters, setAllRegisters] = useState<RegisterWithBranch[]>([])
-  const [collectBranchId, setCollectBranchId] = useState<string | null>(null)
-  const [collectRegisterId, setCollectRegisterId] = useState<string | null>(null)
-  const collectDefaultsSet = useRef(false)
 
   const statusFilterRef = useRef(statusFilter)
   const searchRef = useRef(search)
   const pageRef = useRef(page)
   useEffect(() => { statusFilterRef.current = statusFilter }, [statusFilter])
   useEffect(() => { searchRef.current = search }, [search])
-
-  // Cajas del negocio para el selector de cobro al convertir.
-  useEffect(() => {
-    api.get<RegisterWithBranch[]>('/api/branches/all-registers')
-      .then(regs => setAllRegisters(regs ?? []))
-      .catch(() => {})
-  }, [])
-
-  // Precarga sucursal/caja con el workstation del usuario logueado (una sola vez).
-  useEffect(() => {
-    if (collectDefaultsSet.current || allRegisters.length === 0) return
-    collectDefaultsSet.current = true
-    const branchIds = new Set(allRegisters.map(r => r.branches?.id).filter(Boolean))
-    const defBranch = (workstation?.branch_id && branchIds.has(workstation.branch_id))
-      ? workstation.branch_id
-      : allRegisters.find(r => r.is_open)?.branches?.id
-      ?? allRegisters[0]?.branches?.id ?? null
-    setCollectBranchId(defBranch)
-    const wsReg = allRegisters.find(r => r.id === workstation?.register_id)
-    setCollectRegisterId(wsReg?.is_open ? wsReg.id : null)
-  }, [allRegisters, workstation?.branch_id, workstation?.register_id])
-
-  const handleCollectBranchChange = useCallback((bid: string | null) => {
-    setCollectBranchId(bid)
-    setCollectRegisterId(prev => {
-      const reg = allRegisters.find(r => r.id === prev)
-      return reg && reg.branches?.id === bid ? prev : null
-    })
-  }, [allRegisters])
 
   // Estado optimista que el replica del server puede no reflejar aún (lag
   // read-after-write). El re-fetch lo reconcilia en vez de pisarlo.
@@ -570,7 +524,6 @@ export default function QuotesPage() {
     const preferred = warehouses.find(w => w.id === (authUser?.warehouse_id ?? ''))
     const defWh = warehouses.find(w => w.is_default)
     setConvertWarehouseId(preferred?.id ?? defWh?.id ?? warehouses[0]?.id ?? '')
-    setConvertCollectNow(false); setConvertCollectMethod('efectivo'); setConvertCollectAmount('')
     setConvertModal(true)
   }
 
@@ -578,17 +531,11 @@ export default function QuotesPage() {
     if (!detail) return
     if (!convertCustomerId) { toast.error('Seleccioná un cliente registrado para el pedido'); return }
     setConverting(true)
-    const quoteTotal = Number(detail.total) || 0
-    const collectingNow = convertCollectNow && convertCollectMethod !== 'cuenta_corriente'
-      && (Number(convertCollectAmount) || quoteTotal) > 0
     try {
+      // El pedido nace 'pending' sin cobro: se confirma y se cobra desde /orders.
       const res = await api.post<{ order_id: string }>(`/api/quotes/${detail.id}/convert`, {
         customer_id: convertCustomerId,
         warehouse_id: convertWarehouseId || null,
-        branch_id: collectBranchId,
-        register_id: collectRegisterId,
-        payment_method: collectingNow ? convertCollectMethod : null,
-        paid_amount: collectingNow ? Number(convertCollectAmount) || quoteTotal : 0,
       })
       toast.success('Presupuesto convertido en pedido')
       setConvertModal(false)
@@ -1333,46 +1280,10 @@ export default function QuotesPage() {
               value={convertWarehouseId} onChange={e => setConvertWarehouseId(e.target.value)} />
           )}
 
-          {/* ¿Cobrás ahora? (seña o total). Opcional: si no, nace a cuenta corriente. */}
-          <div className="border border-[var(--border)] rounded-[var(--radius-md)] p-3 space-y-3">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={convertCollectNow}
-                onChange={e => setConvertCollectNow(e.target.checked)}
-                className="w-4 h-4 accent-[var(--accent)]" />
-              <span className="text-sm font-medium text-[var(--text)]">Cobrar ahora (seña o total)</span>
-            </label>
-            {convertCollectNow && (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                  <Select label="Método de cobro"
-                    options={CONVERT_PAYMENT_METHODS}
-                    value={convertCollectMethod}
-                    onChange={e => setConvertCollectMethod(e.target.value)} />
-                  <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label htmlFor="monto-cobrado-quote" className="text-sm font-medium text-[var(--text2)]">Monto cobrado</label>
-                      {!!detail?.total && (
-                        <button type="button"
-                          onClick={() => setConvertCollectAmount(String(Math.round(Number(detail.total) * 100) / 100))}
-                          className="text-xs font-medium text-[var(--accent)] hover:underline">
-                          Total: {formatCurrency(Number(detail.total))}
-                        </button>
-                      )}
-                    </div>
-                    <MoneyInput id="monto-cobrado-quote"
-                      value={convertCollectAmount} placeholder={String(Math.round((Number(detail?.total) || 0) * 100) / 100)}
-                      onChange={v => setConvertCollectAmount(v)} />
-                  </div>
-                </div>
-                <CashRegisterPicker
-                  registers={allRegisters}
-                  branchId={collectBranchId}
-                  registerId={collectRegisterId}
-                  onBranchChange={handleCollectBranchChange}
-                  onRegisterChange={setCollectRegisterId}
-                />
-              </>
-            )}
+          {/* El pedido nace pendiente: al confirmarlo desde /orders se genera la
+              venta a cuenta corriente y desde ahí se cobra. */}
+          <div className="flex items-start gap-2 px-3 py-2.5 bg-[var(--surface2)] border border-[var(--border)] rounded-[var(--radius-md)] text-[11px] text-[var(--text3)]">
+            <span>El pedido queda <span className="font-medium text-[var(--text2)]">pendiente</span>. Al confirmarlo se genera la venta a cuenta corriente y desde ahí podés cobrar y entregar.</span>
           </div>
 
           <div className="sticky bottom-0 bg-[var(--surface)] pt-3 pb-5 mt-4 border-t border-[var(--border)]">
