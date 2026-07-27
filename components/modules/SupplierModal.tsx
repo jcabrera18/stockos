@@ -57,9 +57,9 @@ export function SupplierModal({ open, onClose, onSaved, supplier, zIndex }: Supp
         notes: form.notes.trim() || null,
       }
       if (isEdit) {
-        await api.patch(`/api/purchases/suppliers/${supplier!.id}`, payload)
+        const saved = await api.patch<Supplier>(`/api/purchases/suppliers/${supplier!.id}`, payload)
         toast.success('Proveedor actualizado')
-        onSaved()
+        onSaved(saved)
       } else {
         const created = await api.post<Supplier>('/api/purchases/suppliers', payload)
         toast.success('Proveedor creado')

@@ -409,14 +409,28 @@ export default function WarehousesPage() {
         is_primary: form.branch_id ? form.is_primary : false,
       }
       if (editWarehouse) {
-        await api.patch(`/api/warehouses/${editWarehouse.id}`, payload)
+        const saved = await api.patch<WarehouseItem>(`/api/warehouses/${editWarehouse.id}`, payload)
+        // Actualizamos desde la respuesta del write para evitar el lag del replica.
+        // El write no incluye el join `branch`: lo resolvemos con la lista local.
+        const branch = saved.branch_id
+          ? branches.find(b => b.id === saved.branch_id) ?? null
+          : null
+        setWarehouses(prev => prev.map(w => {
+          if (w.id === saved.id) return { ...w, ...saved, branch }
+          // Reflejar los flips por lado del server (default global, venta por sucursal).
+          const next = { ...w }
+          if (saved.is_default) next.is_default = false
+          if (saved.is_primary && w.branch_id === saved.branch_id) next.is_primary = false
+          return next
+        }))
         toast.success('Depósito actualizado')
+        setWarehouseModal(false)
       } else {
-        await api.post('/api/warehouses', payload)
+        await api.post<WarehouseItem>('/api/warehouses', payload)
         toast.success('Depósito creado')
+        setWarehouseModal(false)
+        fetchWarehouses()
       }
-      setWarehouseModal(false)
-      fetchWarehouses()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
     } finally { setSaving(false) }

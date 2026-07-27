@@ -111,14 +111,24 @@ export default function PriceListsPage() {
         min_quantity: form.min_quantity.trim() === '' ? null : Number(form.min_quantity),
       }
       if (editList) {
-        await api.patch(`/api/price-lists/${editList.id}`, payload)
+        const saved = await api.patch<PriceList>(`/api/price-lists/${editList.id}`, payload)
+        // Actualizamos desde la respuesta autoritativa del write (evita el lag del
+        // replica read-after-write que dejaba la card sin reflejar el cambio).
+        setLists(prev => prev.map(l =>
+          l.id === saved.id
+            ? saved
+            : saved.is_default ? { ...l, is_default: false } : l,
+        ))
         toast.success('Lista actualizada')
       } else {
-        await api.post('/api/price-lists', payload)
+        const saved = await api.post<PriceList>('/api/price-lists', payload)
+        setLists(prev => [
+          ...prev.map(l => saved.is_default ? { ...l, is_default: false } : l),
+          saved,
+        ])
         toast.success('Lista creada')
       }
       setModal(false)
-      fetchLists()
       notifyPOSDataChanged()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')

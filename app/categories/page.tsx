@@ -98,14 +98,17 @@ export default function CategoriesPage() {
         parent_id: formParent || null,
       }
       if (editCat) {
-        await api.patch(`/api/products/categories/${editCat.id}`, payload)
+        const saved = await api.patch<Category>(`/api/products/categories/${editCat.id}`, payload)
+        // Actualizamos desde la respuesta del write para evitar el lag del replica
+        // (el re-fetch silencioso a veces lee la versión vieja y revertía el cambio).
+        setCategories(prev => prev.map(c => (c.id === saved.id ? { ...c, ...saved } : c)))
         toast.success('Categoría actualizada')
       } else {
-        await api.post('/api/products/categories', payload)
+        await api.post<Category>('/api/products/categories', payload)
         toast.success('Categoría creada')
+        fetchCategories(true)
       }
       setModal(false)
-      fetchCategories(true)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
     } finally { setSaving(false) }

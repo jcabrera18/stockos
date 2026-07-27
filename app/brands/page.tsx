@@ -64,14 +64,16 @@ export default function BrandsPage() {
     setSaving(true)
     try {
       if (editBrand) {
-        await api.patch(`/api/brands/${editBrand.id}`, { name: name.trim() })
+        const saved = await api.patch<Brand>(`/api/brands/${editBrand.id}`, { name: name.trim() })
+        // Actualizamos desde la respuesta del write para evitar el lag del replica.
+        setBrands(prev => prev.map(b => (b.id === saved.id ? { ...b, ...saved } : b)))
         toast.success('Marca actualizada')
       } else {
-        await api.post('/api/brands', { name: name.trim() })
+        await api.post<Brand>('/api/brands', { name: name.trim() })
         toast.success('Marca creada')
+        fetchBrands()
       }
       setModal(false)
-      fetchBrands()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
     } finally { setSaving(false) }

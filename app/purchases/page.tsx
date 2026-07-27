@@ -554,7 +554,15 @@ export default function PurchasesPage() {
       <SupplierModal
         open={supplierModal}
         onClose={() => { setSupplierModal(false); setEditSupplier(null) }}
-        onSaved={fetchSuppliers}
+        onSaved={(saved) => {
+          // En edición mergeamos la respuesta del write (evita el lag del replica);
+          // en alta refrescamos para traer la fila nueva ordenada.
+          if (saved && editSupplier) {
+            setSuppliers(prev => prev.map(s => (s.id === saved.id ? { ...s, ...saved } : s)))
+          } else {
+            fetchSuppliers()
+          }
+        }}
         supplier={editSupplier}
       />
 

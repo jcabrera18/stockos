@@ -170,8 +170,18 @@ export default function BranchesPage() {
 
       if (editBranch) {
         payload.warehouse_id = branchForm.warehouse_id
-        await api.patch(`/api/branches/${editBranch.id}`, payload)
+        const saved = await api.patch<Branch>(`/api/branches/${editBranch.id}`, payload)
+        // Actualizamos desde la respuesta del write para evitar el lag del replica.
+        // Preservamos los campos derivados (registers/warehouses/stats), que el
+        // write no devuelve, mediante el spread sobre la fila existente.
+        setBranches(prev => prev.map(b => {
+          if (b.id === saved.id) return { ...b, ...saved }
+          return saved.is_main ? { ...b, is_main: false } : b
+        }))
         toast.success('Sucursal actualizada')
+        setBranchModal(false)
+        // El depósito de venta cambió: refrescamos para recomputar warehouses/primary.
+        if (branchForm.warehouse_id !== editBranch.warehouse_id) fetchData()
       } else {
         if (branchForm.warehouseMode === 'existing') {
           payload.warehouse_id = branchForm.warehouse_id
@@ -181,9 +191,9 @@ export default function BranchesPage() {
         // Sin nombre → el backend crea "Depósito {sucursal}" automáticamente
         await api.post('/api/branches', payload)
         toast.success('Sucursal creada')
+        setBranchModal(false)
+        fetchData()
       }
-      setBranchModal(false)
-      fetchData()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
     } finally { setSavingBranch(false) }
@@ -227,17 +237,23 @@ export default function BranchesPage() {
     setSavingRegister(true)
     try {
       if (editRegister) {
-        await api.patch(`/api/branches/registers/${editRegister.id}`, { name: registerName.trim() })
+        const saved = await api.patch<Register>(`/api/branches/registers/${editRegister.id}`, { name: registerName.trim() })
+        // Actualizamos la caja dentro de su sucursal desde la respuesta del write.
+        setBranches(prev => prev.map(b => ({
+          ...b,
+          registers: b.registers.map(r => (r.id === saved.id ? { ...r, ...saved } : r)),
+        })))
         toast.success('Caja actualizada')
+        setRegisterModal(false)
       } else {
         await api.post('/api/branches/registers', {
           name: registerName.trim(),
           branch_id: registerBranch.id,
         })
         toast.success('Caja creada')
+        setRegisterModal(false)
+        fetchData()
       }
-      setRegisterModal(false)
-      fetchData()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
     } finally { setSavingRegister(false) }

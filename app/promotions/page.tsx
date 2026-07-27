@@ -214,14 +214,17 @@ export default function PromotionsPage() {
       }
 
       if (editPromo) {
-        await api.patch(`/api/promotions/${editPromo.id}`, payload)
+        const saved = await api.patch<Promotion>(`/api/promotions/${editPromo.id}`, payload)
+        // Actualizamos desde la respuesta del write para evitar el lag del replica.
+        setPromotions(prev => prev.map(p => (p.id === saved.id ? { ...p, ...saved } : p)))
         toast.success('Promoción actualizada')
+        setModal(false)
       } else {
-        await api.post('/api/promotions', payload)
+        await api.post<Promotion>('/api/promotions', payload)
         toast.success('Promoción creada')
+        setModal(false)
+        fetchAll()
       }
-      setModal(false)
-      fetchAll()
       notifyPOSDataChanged()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')

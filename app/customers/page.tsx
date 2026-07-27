@@ -141,14 +141,16 @@ function DeliveryZonesTab() {
         active: form.active,
       }
       if (editZone) {
-        await api.patch(`/api/delivery-zones/${editZone.id}`, payload)
+        const saved = await api.patch<DeliveryZone>(`/api/delivery-zones/${editZone.id}`, payload)
+        // Actualizamos desde la respuesta del write para evitar el lag del replica.
+        setZones(prev => prev.map(z => (z.id === saved.id ? { ...z, ...saved } : z)))
         toast.success('Zona actualizada')
       } else {
         await api.post('/api/delivery-zones', payload)
         toast.success('Zona creada')
+        fetchZones()
       }
       setModal(false)
-      fetchZones()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
     } finally { setSaving(false) }
@@ -397,14 +399,16 @@ function ClientCategoriesTab() {
         active: form.active,
       }
       if (editCategory) {
-        await api.patch(`/api/client-categories/${editCategory.id}`, payload)
+        const saved = await api.patch<ClientCategory>(`/api/client-categories/${editCategory.id}`, payload)
+        // Actualizamos desde la respuesta del write para evitar el lag del replica.
+        setCategories(prev => prev.map(c => (c.id === saved.id ? { ...c, ...saved } : c)))
         toast.success('Categoría actualizada')
       } else {
         await api.post('/api/client-categories', payload)
         toast.success('Categoría creada')
+        fetchCategories()
       }
       setModal(false)
-      fetchCategories()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al guardar')
     } finally { setSaving(false) }
