@@ -599,10 +599,21 @@ export async function initPOSCache(warehouseId?: string | null): Promise<void> {
   await buildMemoryCaches()
 }
 
-/** Refresh en background — falla silenciosa por servicio, el POS sigue funcionando. */
-export async function syncPOSCache(warehouseId?: string | null): Promise<void> {
+/**
+ * Refresh en background — falla silenciosa por servicio, el POS sigue funcionando.
+ *
+ * `full`: fuerza descarga completa de productos (clear + bulkPut) en vez del incremental
+ * por `updated_since`. El incremental filtra por `products.updated_at`, que NO se mueve
+ * ante cambios de stock hechos en OTRO dispositivo (el stock vive en warehouse_stock) →
+ * un ajuste/venta ajeno no se refleja. El "Actualizar" manual del POS pasa `full` para
+ * garantizar stock fresco; el refresh periódico sigue incremental (barato).
+ */
+export async function syncPOSCache(
+  warehouseId?: string | null,
+  opts: { full?: boolean } = {},
+): Promise<void> {
   await Promise.all([
-    syncProducts(warehouseId).catch(() => {}),
+    syncProducts(warehouseId, { full: opts.full }).catch(() => {}),
     syncPromotions().catch(() => {}),
     syncPriceLists().catch(() => {}),
     syncCustomers().catch(() => {}),

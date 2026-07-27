@@ -79,7 +79,10 @@ export function usePOSSync(warehouseId?: string | null, enabled: boolean = true)
     setSyncing(true)
     try {
       lastSyncAtRef.current = Date.now()
-      await syncPOSCache(warehouseIdRef.current)
+      // Full sync: el "Actualizar" manual es infrecuente y disparado por el usuario,
+      // así que descargamos todo el catálogo → refleja stock cambiado en otras cajas
+      // (que el incremental por products.updated_at no vería).
+      await syncPOSCache(warehouseIdRef.current, { full: true })
       setCacheReady(true)
     } finally {
       setSyncing(false)

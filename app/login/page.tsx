@@ -426,7 +426,11 @@ export default function LoginPage() {
         setLoading(false)
       } else {
         setWorkstation(null)
-        router.replace(ROLE_REDIRECT[profile.role] ?? '/dashboard')
+        // Navegación dura en vez de router.replace: la navegación soft de Next
+        // a veces queda colgada (RSC fetch / cookie de Supabase aún no flusheada
+        // cuando corre el middleware) y el spinner queda infinito. window.location
+        // garantiza que la cookie de sesión ya esté escrita y el server la vea.
+        window.location.assign(ROLE_REDIRECT[profile.role] ?? '/dashboard')
       }
     } catch {
       setError('Error al iniciar sesión')
@@ -445,7 +449,8 @@ export default function LoginPage() {
       register_name: selectedRegister.name,
       warehouse_id:  selectedBranch.warehouse_id,
     })
-    router.replace('/pos')
+    // Navegación dura (ver nota en handleLogin) para evitar spinner colgado.
+    window.location.assign('/pos')
   }
 
   const resetWorkstation = () => {

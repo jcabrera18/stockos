@@ -4,7 +4,9 @@ import JsBarcode from 'jsbarcode'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/lib/api'
-import { Printer, Search, ChevronLeft, ChevronRight, Tag } from 'lucide-react'
+import { buildBatchZpl, isBarcodePrintable, templateFromCm, type ZebraLabelInput } from '@/lib/zpl'
+import { sendZpl, downloadZpl, ZebraNotAvailableError } from '@/lib/zebra'
+import { Printer, Search, ChevronLeft, ChevronRight, Tag, Zap } from 'lucide-react'
 import type { Category } from '@/types'
 import type { PriceList } from '@/app/price-lists/page'
 
@@ -423,6 +425,16 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   const [previewScale, setPreviewScale] = useState(1)
   const [previewHeight, setPreviewHeight] = useState(0)
 
+  // Estado del envío a la impresora Zebra (POC ZPL térmico)
+  const [zebra, setZebra] = useState<{ status: 'idle' | 'sending' | 'ok' | 'fallback' | 'error'; msg: string }>({ status: 'idle', msg: '' })
+  // Tamaño físico de la etiqueta Zebra, en cm (lo que el comercio mide con regla).
+  // El generador ZPL adapta el layout a este tamaño → sirve para cualquier papel.
+  const [zebraWidthCm, setZebraWidthCm] = useState('2.9')
+  const [zebraHeightCm, setZebraHeightCm] = useState('2.2')
+  // Panel para confirmar el tamaño ANTES de generar/descargar el ZPL. El botón
+  // "Zebra (ZPL)" lo abre; recién al confirmar se genera el archivo.
+  const [zebraPrompt, setZebraPrompt] = useState(false)
+
   // Reset al cerrar
   useEffect(() => {
     if (!open) {
@@ -431,6 +443,8 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
       setShowCode(false); setShowTiers(false); setUniformSize(false); setHiddenTierListIds(new Set()); setCopies(1); setColumns(4)
       setAllProducts([]); setSelected(new Set()); setSearchText('')
       setPreviewPage(1)
+      setZebra({ status: 'idle', msg: '' })
+      setZebraWidthCm('2.9'); setZebraHeightCm('2.2'); setZebraPrompt(false)
       return
     }
     Promise.all([
@@ -600,6 +614,61 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
     win.document.close()
   }
 
+  // ─── Print Zebra (ZPL térmica) ──────────────────────────────────────────────
+  // Reutiliza la selección/precios/barcode del modal, pero en vez de HTML→PDF
+  // genera ZPL y lo manda a la impresora Zebra vía Browser Print. Si no está
+  // disponible, cae a descargar el .zpl (probable con `lp -o raw`).
+
+  const handlePrintZebra = async () => {
+    if (!mainList) return
+    // Tamaño físico elegido → template ZPL (203dpi = 8 dots/mm). El generador
+    // adapta el layout a este alto/ancho, así funciona con cualquier papel.
+    const wCm = Number(zebraWidthCm.replace(',', '.'))
+    const hCm = Number(zebraHeightCm.replace(',', '.'))
+    if (!(wCm >= 1) || !(hCm >= 1)) {
+      setZebra({ status: 'error', msg: 'Ingresá un tamaño de etiqueta válido (mínimo 1 cm de lado)' })
+      return
+    }
+    const tpl = templateFromCm(wCm, hCm)
+    setZebra({ status: 'sending', msg: 'Enviando a la impresora Zebra…' })
+    // En Zebra la etiqueta es siempre nombre + precio + código de barras
+    // (a diferencia del PDF, donde el barcode es opcional vía "Mostrar código").
+    const items: ZebraLabelInput[] = labelItems.map(p => ({
+      name: p.name,
+      price: formatPrice(getListPrice(p, mainList)),
+      barcode: getProductCode(p),
+    }))
+    const zpl = buildBatchZpl(items, tpl)
+    const sizeLabel = `${wCm}×${hCm}cm (${tpl.widthDots}×${tpl.lengthDots} dots @203dpi)`
+    // Códigos que no entran como barra escaneable en la etiqueta (ej. no-EAN largos):
+    // salen con el número legible en vez de una barra muerta.
+    const noBarcode = new Set(
+      selectedProducts.filter(p => {
+        const c = getProductCode(p)
+        return !c || !isBarcodePrintable(c, tpl)
+      }).map(p => p.id)
+    ).size
+    const warn = noBarcode > 0
+      ? ` (${noBarcode} sin barra escaneable — salen con el número; usá EAN-13 para que escaneen)`
+      : ''
+    try {
+      await sendZpl(zpl)
+      setZebraPrompt(false)
+      setZebra({ status: 'ok', msg: `${items.length} etiquetas ${sizeLabel} enviadas a la Zebra ✓${warn}` })
+    } catch (e) {
+      if (e instanceof ZebraNotAvailableError) {
+        downloadZpl(zpl, `etiquetas-${wCm}x${hCm}cm.zpl`)
+        setZebraPrompt(false)
+        setZebra({
+          status: 'fallback',
+          msg: `No detecté Zebra Browser Print. Descargué el .zpl de ${sizeLabel} — probalo con: lp -d <impresora> -o raw etiquetas-${wCm}x${hCm}cm.zpl`,
+        })
+      } else {
+        setZebra({ status: 'error', msg: `Error al imprimir: ${(e as Error).message}` })
+      }
+    }
+  }
+
   // ─── Render ───────────────────────────────────────────────────────────────
 
   const stepTitle: Record<Step, string> = {
@@ -616,12 +685,22 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
       size={step === 'preview' ? 'xl' : 'md'}
       dismissable={step !== 'preview'}
       headerActions={step === 'preview' && mainList ? (
-        <button
-          onClick={handlePrint}
-          className="flex items-center gap-1.5 mr-1 px-3 py-1.5 text-sm font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:opacity-90 transition-opacity"
-        >
-          <Printer size={14} /> Imprimir / Exportar PDF
-        </button>
+        <div className="flex items-center gap-2 mr-1">
+          <button
+            onClick={() => { setZebra({ status: 'idle', msg: '' }); setZebraPrompt(true) }}
+            disabled={zebra.status === 'sending'}
+            title="Impresora térmica Zebra (ZPL)"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface2)] text-[var(--text)] hover:border-[var(--accent)] transition-colors disabled:opacity-50"
+          >
+            <Zap size={14} /> Zebra (ZPL)
+          </button>
+          <button
+            onClick={handlePrint}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-[var(--radius-md)] bg-[var(--accent)] text-white hover:opacity-90 transition-opacity"
+          >
+            <Printer size={14} /> Imprimir / Exportar PDF
+          </button>
+        </div>
       ) : undefined}
     >
 
@@ -885,6 +964,66 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
               Pág. {previewPage}/{totalPages} · {labelItems.length} etiquetas
             </span>
           </div>
+
+          {/* Prompt de tamaño: se abre al tocar "Zebra (ZPL)". Recién al confirmar
+              se genera/descarga el ZPL, adaptado a este tamaño (cualquier rollo). */}
+          {zebraPrompt && (
+            <div className="flex flex-col gap-3 px-3 py-3 rounded-[var(--radius-md)] border border-[var(--accent)] bg-[var(--surface2)]">
+              <div className="flex items-center gap-1.5 text-sm font-medium text-[var(--text)]">
+                <Zap size={14} /> Tamaño de la etiqueta Zebra
+              </div>
+              <p className="text-xs text-[var(--text3)]">
+                Medí la etiqueta con una regla e ingresá el tamaño en centímetros. El ZPL se adapta a este tamaño.
+              </p>
+              <div className="flex items-end gap-2">
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] text-[var(--text3)]">Ancho (cm)</label>
+                  <input
+                    type="number" min={1} max={20} step={0.1} inputMode="decimal"
+                    value={zebraWidthCm}
+                    onChange={e => setZebraWidthCm(e.target.value)}
+                    className="w-20 px-2 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                </div>
+                <span className="pb-2 text-[var(--text3)]">×</span>
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] text-[var(--text3)]">Alto (cm)</label>
+                  <input
+                    type="number" min={1} max={20} step={0.1} inputMode="decimal"
+                    value={zebraHeightCm}
+                    onChange={e => setZebraHeightCm(e.target.value)}
+                    className="w-20 px-2 py-1.5 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button onClick={handlePrintZebra} loading={zebra.status === 'sending'}>
+                  <Zap size={14} /> Generar ZPL
+                </Button>
+                <button
+                  onClick={() => setZebraPrompt(false)}
+                  className="px-3 py-1.5 text-sm text-[var(--text2)] hover:text-[var(--text)] transition-colors"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {zebra.status !== 'idle' && (
+            <div
+              className="px-3 py-2 rounded-[var(--radius-md)] text-xs"
+              style={
+                zebra.status === 'ok'
+                  ? { background: 'rgba(34,197,94,0.12)', color: '#15803d', border: '1px solid rgba(34,197,94,0.3)' }
+                  : zebra.status === 'error'
+                  ? { background: 'rgba(239,68,68,0.12)', color: '#b91c1c', border: '1px solid rgba(239,68,68,0.3)' }
+                  : { background: 'rgba(59,130,246,0.12)', color: '#1d4ed8', border: '1px solid rgba(59,130,246,0.3)' }
+              }
+            >
+              {zebra.status === 'sending' ? '⏳ ' : ''}{zebra.msg}
+            </div>
+          )}
 
           {unreadableLabels.length > 0 && (
             <div

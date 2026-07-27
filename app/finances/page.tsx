@@ -17,7 +17,7 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { formatCurrency, formatDate, getPeriodDates, getPaymentMethodLabel } from '@/lib/utils'
 import type { FinanceSummary, Expense, PaginatedResponse, Pagination as PaginationType } from '@/types'
-import { TrendingUp, TrendingDown, DollarSign, Plus, FileCheck, AlertTriangle, Gauge } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Plus, FileCheck, AlertTriangle, Gauge, Package } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell,
 } from 'recharts'
@@ -476,21 +476,22 @@ export default function FinancesPage() {
         {tab === 'balance' && (
           loading && !summary ? <PageLoader /> : (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                 <StatCard title="Ingresos" value={formatCurrency(summary?.revenue ?? 0)} icon={TrendingUp} accent />
+                <StatCard title="Costo de mercadería" value={formatCurrency(summary?.cogs ?? 0)} subtitle="Costo de lo vendido" icon={Package} />
                 <StatCard title="Gastos" value={formatCurrency(summary?.expenses ?? 0)} icon={TrendingDown} />
                 <StatCard title="Ganancia neta" value={formatCurrency(summary?.net ?? 0)} subtitle={`Margen ${summary?.margin_pct ?? 0}%`} icon={DollarSign} />
               </div>
 
               {(summary?.revenue ?? 0) > 0 && (
                 <Card>
-                  <p className="text-xs text-[var(--text3)] mb-2">Gastos vs ingresos</p>
+                  <p className="text-xs text-[var(--text3)] mb-2">Costos vs ingresos</p>
                   <div className="h-2 bg-[var(--surface2)] rounded-full overflow-hidden">
                     <div className="h-full bg-[var(--danger)] rounded-full transition-all"
-                      style={{ width: `${Math.min(((summary?.expenses ?? 0) / (summary?.revenue ?? 1)) * 100, 100)}%` }} />
+                      style={{ width: `${Math.min((((summary?.cogs ?? 0) + (summary?.expenses ?? 0)) / (summary?.revenue ?? 1)) * 100, 100)}%` }} />
                   </div>
                   <div className="flex justify-between mt-1.5 text-xs text-[var(--text3)]">
-                    <span>{Math.round(((summary?.expenses ?? 0) / (summary?.revenue ?? 1)) * 100)}% de los ingresos</span>
+                    <span>{Math.round((((summary?.cogs ?? 0) + (summary?.expenses ?? 0)) / (summary?.revenue ?? 1)) * 100)}% de los ingresos (mercadería + gastos)</span>
                     <span>Margen: {summary?.margin_pct ?? 0}%</span>
                   </div>
                 </Card>

@@ -195,6 +195,8 @@ export interface DashboardStats {
 
 export interface FinanceSummary {
   revenue: number
+  cogs: number
+  gross_profit: number
   expenses: number
   net: number
   margin_pct: number
