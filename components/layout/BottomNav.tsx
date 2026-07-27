@@ -105,6 +105,20 @@ export function BottomNav() {
   // Cerrar drawer al navegar
   useEffect(() => { setDrawerOpen(false) }, [pathname])
 
+  // Auto-recuperación anti-cuelgue: si una navegación client-side queda trabada
+  // (el router del App Router a veces se atasca en mobile cuando un fetch RSC se
+  // cuelga), forzamos una navegación dura al mismo destino en vez de que el usuario
+  // tenga que refrescar a mano. Se cancela solo si la ruta cambia (el efecto de
+  // [pathname] limpia pendingHref y dispara el cleanup).
+  useEffect(() => {
+    if (!pendingHref) return
+    const target = pendingHref
+    const t = setTimeout(() => {
+      if (window.location.pathname !== target) window.location.assign(target)
+    }, 4000)
+    return () => clearTimeout(t)
+  }, [pendingHref])
+
   return (
     <>
       {/* ── Barra inferior ── */}
@@ -126,7 +140,7 @@ export function BottomNav() {
                 const active = pathname === href || pathname.startsWith(href + '/')
                 const pending = pendingHref === href
                 return (
-                  <Link key={href} href={href} prefetch={false}
+                  <Link key={href} href={href}
                     onClick={() => { if (!active) setPendingHref(href) }}
                     className={cn(
                       'relative flex flex-col items-center justify-center gap-0.5 px-3 py-2.5 min-w-0 flex-1 transition-colors',
@@ -205,7 +219,7 @@ export function BottomNav() {
                         const active = pathname === href || pathname.startsWith(href + '/')
                         const pending = pendingHref === href
                         return (
-                          <Link key={href} href={href} prefetch={false}
+                          <Link key={href} href={href}
                             onClick={() => { if (!active) setPendingHref(href) }}
                             className={cn(
                               'flex flex-col items-center gap-1.5 px-2 py-3 rounded-xl transition-all',
