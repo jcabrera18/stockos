@@ -199,6 +199,7 @@ export interface FinanceSummary {
   gross_profit: number
   expenses: number
   net: number
+  units_sold: number
   margin_pct: number
   by_payment: Record<string, number>
   by_expense_category: Record<string, number>

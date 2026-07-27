@@ -215,7 +215,8 @@ export default function PriceListsPage() {
             {lists.map(list => (
               <div
                 key={list.id}
-                className={`bg-[var(--surface)] border rounded-[var(--radius-lg)] p-4 group transition-all hover:shadow-sm ${list.is_default
+                onClick={() => openEdit(list)}
+                className={`bg-[var(--surface)] border rounded-[var(--radius-lg)] p-4 group transition-all hover:shadow-sm cursor-pointer ${list.is_default
                   ? 'border-[var(--accent)]'
                   : 'border-[var(--border)]'
                   }`}
@@ -233,13 +234,13 @@ export default function PriceListsPage() {
                       <p className="text-xs text-[var(--text3)] mt-0.5">{list.description}</p>
                     )}
                   </div>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => openEdit(list)}
+                  <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                    <button onClick={(e) => { e.stopPropagation(); openEdit(list) }}
                       className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors">
                       <Pencil size={13} />
                     </button>
                     {!list.is_default && (
-                      <button onClick={() => { setDeleteList(list); setDeleteModal(true) }}
+                      <button onClick={(e) => { e.stopPropagation(); setDeleteList(list); setDeleteModal(true) }}
                         className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors">
                         <Trash2 size={13} />
                       </button>

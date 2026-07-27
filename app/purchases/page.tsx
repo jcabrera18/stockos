@@ -519,7 +519,7 @@ export default function PurchasesPage() {
                         {supplier.email ?? '—'}
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={() => { setEditSupplier(supplier); setSupplierModal(true) }}
                             className="px-2.5 py-1 text-xs rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface3)] transition-colors"

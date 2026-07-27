@@ -392,7 +392,7 @@ export default function BranchesPage() {
                                 <CreditCard size={13} className="text-[var(--text3)]" />
                                 <span className="text-sm text-[var(--text)]">{reg.name}</span>
                               </div>
-                              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                                 <button onClick={() => openEditRegister(branch, reg)}
                                   className="p-1 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors">
                                   <Pencil size={12} />

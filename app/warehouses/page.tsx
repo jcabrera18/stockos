@@ -531,7 +531,7 @@ export default function WarehousesPage() {
                       </div>
                       {w.address && <p className="text-xs text-[var(--text3)] mt-1">{w.address}</p>}
                     </div>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                       <button onClick={() => openEdit(w)}
                         className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors">
                         <Pencil size={13} />
@@ -787,7 +787,7 @@ export default function WarehousesPage() {
                             <button
                               onClick={() => { setAdjustItem(item); setAdjustModal(true) }}
                               title="Ajustar stock"
-                              className="opacity-0 group-hover:opacity-100 p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all"
+                              className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-all"
                             >
                               <SlidersHorizontal size={14} />
                             </button>

@@ -15,9 +15,9 @@ import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Select } from '@/components/ui/Select'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
-import { formatCurrency, formatDate, getPeriodDates, getPaymentMethodLabel } from '@/lib/utils'
+import { formatCurrency, formatNumber, formatDate, getPeriodDates, getPaymentMethodLabel } from '@/lib/utils'
 import type { FinanceSummary, Expense, PaginatedResponse, Pagination as PaginationType } from '@/types'
-import { TrendingUp, TrendingDown, DollarSign, Plus, FileCheck, AlertTriangle, Gauge, Package } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Plus, FileCheck, AlertTriangle, Gauge, Package, ShoppingCart } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Cell,
 } from 'recharts'
@@ -476,11 +476,12 @@ export default function FinancesPage() {
         {tab === 'balance' && (
           loading && !summary ? <PageLoader /> : (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
                 <StatCard title="Ingresos" value={formatCurrency(summary?.revenue ?? 0)} icon={TrendingUp} accent />
                 <StatCard title="Costo de mercadería" value={formatCurrency(summary?.cogs ?? 0)} subtitle="Costo de lo vendido" icon={Package} />
                 <StatCard title="Gastos" value={formatCurrency(summary?.expenses ?? 0)} icon={TrendingDown} />
                 <StatCard title="Ganancia neta" value={formatCurrency(summary?.net ?? 0)} subtitle={`Margen ${summary?.margin_pct ?? 0}%`} icon={DollarSign} />
+                <StatCard title="Unidades vendidas" value={formatNumber(summary?.units_sold ?? 0)} subtitle="Productos vendidos en el período" icon={ShoppingCart} />
               </div>
 
               {(summary?.revenue ?? 0) > 0 && (
