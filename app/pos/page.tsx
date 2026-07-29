@@ -1399,8 +1399,9 @@ export default function POSPage() {
           <div className="ml-auto flex items-center gap-2">
             {workstation && (
               <>
-                <span className="text-xs text-[var(--text3)] hidden sm:block">
-                  {workstation.branch_name} · {workstation.register_name}
+                <span className="text-xs text-[var(--text3)] hidden sm:flex flex-col leading-tight text-right">
+                  <span>{workstation.branch_name}</span>
+                  <span>{workstation.register_name}</span>
                 </span>
                 <button
                   onClick={() => {
