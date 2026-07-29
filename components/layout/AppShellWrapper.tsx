@@ -8,7 +8,7 @@ import { AuthProvider, useAuthContext } from '@/contexts/AuthContext'
 import { SubscriptionBanner } from './SubscriptionBanner'
 import { SidebarSubscriptionCard } from './SidebarSubscriptionCard'
 import { EmailConfirmBanner } from './EmailConfirmBanner'
-import { SidePanelProvider } from '@/contexts/SidePanelContext'
+import { SidePanelProvider, useSidePanel } from '@/contexts/SidePanelContext'
 import { PlansPaymentProvider } from '@/contexts/PlansPaymentContext'
 
 // Rutas que manejan su propio layout full-screen (no necesitan shell)
@@ -18,6 +18,10 @@ const POS_CART_KEY = 'stockos_pos_cart'
 
 function POSBadge() {
   const router = useRouter()
+  // Cuando hay un panel master-detail abierto (con su propia barra de acciones
+  // sticky abajo), el pill centrado se encoge a un FAB en la esquina para no
+  // tapar botones como Imprimir / Remito / Ver venta.
+  const { collapsed } = useSidePanel()
   const [info, setInfo] = useState<{ items: number; total: number } | null>(null)
 
   useEffect(() => {
@@ -48,6 +52,23 @@ function POSBadge() {
   }, [])
 
   if (!info) return null
+
+  // Panel de detalle abierto: FAB compacto en la esquina, fuera de la barra sticky.
+  if (collapsed) {
+    return (
+      <button
+        onClick={() => router.push('/pos')}
+        aria-label={`Venta en curso · ${info.items} ${info.items === 1 ? 'producto' : 'productos'}`}
+        title="Venta en curso"
+        className="fixed bottom-20 md:bottom-6 right-4 z-50 flex items-center justify-center w-12 h-12 rounded-full bg-[var(--accent)] text-white shadow-lg hover:opacity-90 active:scale-95 transition-all"
+      >
+        <ShoppingCart size={18} />
+        <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 flex items-center justify-center rounded-full bg-[var(--surface)] text-[var(--accent)] text-xs font-bold shadow ring-1 ring-[var(--accent)]">
+          {info.items}
+        </span>
+      </button>
+    )
+  }
 
   return (
     <button

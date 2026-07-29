@@ -1,12 +1,13 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDateTime, getPaymentMethodLabel } from '@/lib/utils'
-import { Printer, CreditCard, Package, User, Calendar, Hash, FileText, Download, Receipt, Ban, MessageCircle, Loader2 } from 'lucide-react'
+import { Printer, CreditCard, Package, User, Calendar, Hash, FileText, Download, Receipt, Ban, MessageCircle, Loader2, ExternalLink } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { toast } from 'sonner'
 import { printFacturaA4 } from '@/lib/printFactura'
@@ -48,6 +49,8 @@ interface SaleDetail {
   sale_items: SaleItem[]
   customer_id?: string
   price_list_id?: string
+  /** Pedido del que nació esta venta (si aplica). El backend lo resuelve en GET /:id. */
+  order_id?: string | null
 }
 
 interface CustomerInfo {
@@ -126,12 +129,18 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
   const sharingRef = useRef(false)
   const [sharing, setSharing] = useState(false)
 
+  const router = useRouter()
   const role = user?.role ?? 'cashier'
   const canVoid = ['owner', 'admin', 'cashier'].includes(role)
   // El cajero sólo puede anular ventas del día; owner/admin sin límite.
   const isToday = sale ? new Date(sale.created_at).toDateString() === new Date().toDateString() : false
   const withinWindow = role === 'owner' || role === 'admin' || isToday
   const isVoided = sale?.status === 'voided'
+  // Venta nacida de un pedido: se gestiona desde el pedido (Cancelar / Cerrar
+  // entrega), no se anula desde acá. `orderId` = abierto desde el pedido;
+  // `sale.order_id` = abierto desde la lista de Ventas.
+  const linkedOrderId = orderId ?? sale?.order_id ?? null
+  const goToOrder = () => { if (linkedOrderId) { onClose(); router.push(`/orders?open=${linkedOrderId}`) } }
 
   const ivaCondition = user?.business?.iva_condition ?? ''
   // MO: solo C · RI: A y B · EX: B y C · sin configurar: todos
@@ -367,7 +376,9 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
       onVoided?.()
       onClose()
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo anular la venta')
+      const msg = err instanceof Error ? err.message : 'No se pudo anular la venta'
+      // Si el backend bloquea por pertenecer a un pedido, ofrecer el link directo.
+      toast.error(msg, sale.order_id ? { action: { label: 'Ver pedido', onClick: goToOrder } } : undefined)
     } finally { setVoiding(false) }
   }
 
@@ -595,8 +606,22 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
                 </Button>
               </div>
 
-              {/* Anular venta — sutil, separado de las acciones positivas */}
-              {canVoid && withinWindow && !isVoided && (
+              {/* Venta nacida de un pedido: no se anula desde acá. Se ofrece ir al
+                  pedido, donde está el flujo correcto (Cancelar / Cerrar entrega)
+                  que respeta el modelo backorder de stock. */}
+              {sale.order_id && !orderId && !isVoided && (
+                <button
+                  onClick={goToOrder}
+                  className="w-full flex items-center justify-center gap-1.5 pt-1 text-xs font-medium text-[var(--accent)] hover:underline"
+                >
+                  <ExternalLink size={13} />
+                  Ver pedido #{sale.order_id.slice(0, 8).toUpperCase()}
+                </button>
+              )}
+
+              {/* Anular venta — sutil, separado de las acciones positivas. Oculto
+                  para ventas de pedido (se gestionan desde el pedido). */}
+              {canVoid && withinWindow && !isVoided && !linkedOrderId && (
                 <button
                   onClick={() => { setVoidReason(''); setVoidModal(true) }}
                   className="w-full flex items-center justify-center gap-1.5 pt-1 text-xs font-medium text-[var(--danger)] hover:underline"

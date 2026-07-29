@@ -204,9 +204,12 @@ export default function BranchesPage() {
     setDeletingBranch(true)
     try {
       await api.delete(`/api/branches/${deleteBranch.id}`)
+      // Removemos localmente en vez de refetchear: el read-after-write puede
+      // pegar en una réplica que todavía no replicó la baja y la sucursal reaparecía.
+      setBranches(prev => prev.filter(b => b.id !== deleteBranch.id))
+      setStats(prev => prev.filter(s => s.branch_id !== deleteBranch.id))
       toast.success('Sucursal eliminada')
       setDeleteBranchModal(false)
-      fetchData()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar')
     } finally { setDeletingBranch(false) }
@@ -264,9 +267,14 @@ export default function BranchesPage() {
     setDeletingRegister(true)
     try {
       await api.delete(`/api/branches/registers/${deleteRegister.id}`)
+      // Removemos localmente en vez de refetchear: el read-after-write puede
+      // pegar en una réplica que todavía no replicó la baja y la caja reaparecía.
+      setBranches(prev => prev.map(b => ({
+        ...b,
+        registers: b.registers.filter(r => r.id !== deleteRegister.id),
+      })))
       toast.success('Caja eliminada')
       setDeleteRegisterModal(false)
-      fetchData()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar')
     } finally { setDeletingRegister(false) }

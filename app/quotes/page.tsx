@@ -21,12 +21,17 @@ import type { PriceList } from '@/app/price-lists/page'
 import {
   Plus, Search, FileText, X, Minus, Trash2, ChevronRight,
   AlertCircle, Printer, RefreshCw, Clock, ShoppingCart, Copy,
+  MessageCircle, Loader2,
 } from 'lucide-react'
+import { shareTicketImage } from '@/lib/shareTicket'
+import { SaleShareCard } from '@/components/modules/SaleShareCard'
 import { useAuth } from '@/hooks/useAuth'
 import { useWorkstation } from '@/hooks/useWorkstation'
 import { usePOSSync } from '@/hooks/usePOSSync'
 import { useCollapseSidebar } from '@/contexts/SidePanelContext'
-import { searchProductsLocal, searchCustomersLocal } from '@/lib/pos-cache'
+import { searchProductsLocal } from '@/lib/pos-cache'
+import { useCustomerSearch } from '@/hooks/useCustomerSearch'
+import { CustomerSearchResults } from '@/components/modules/CustomerSearchResults'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
 import { makeOptimisticState, reconcileList, clearOptimisticState } from '@/lib/optimistic-reconcile'
 import { toast } from 'sonner'
@@ -121,6 +126,11 @@ export default function QuotesPage() {
   const [detail, setDetail] = useState<QuoteDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
 
+  // Compartir el presupuesto como imagen (tarjeta linda para WhatsApp).
+  const shareCardRef = useRef<HTMLDivElement>(null)
+  const sharingImageRef = useRef(false)
+  const [sharingImage, setSharingImage] = useState(false)
+
   // Nuevo presupuesto
   const [newQuoteModal, setNewQuoteModal] = useState(false)
   const [isMac, setIsMac] = useState(true)
@@ -153,11 +163,10 @@ export default function QuotesPage() {
 
   // Cliente (opcional — se permite prospecto suelto)
   const [customerQuery, setCustomerQuery] = useState('')
-  const [customerResults, setCustomerResults] = useState<{ id: string; full_name: string; phone?: string; document?: string; current_balance: number; credit_limit: number }[]>([])
-  const [searchingCustomers, setSearchingCustomers] = useState(false)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
   const [customerHighlight, setCustomerHighlight] = useState(0)
-  const customerSearchRequestRef = useRef(0)
+  const [customerDismissed, setCustomerDismissed] = useState(false)  // Esc cierra el dropdown hasta que cambie el texto
+  const { results: customerResults, searching: searchingCustomers } = useCustomerSearch(customerQuery, { enabled: !selectedCustomerId })
 
   // Anulación
   const [cancelConfirm, setCancelConfirm] = useState<{ id: string; customer_name: string } | null>(null)
@@ -295,36 +304,7 @@ export default function QuotesPage() {
     return () => clearTimeout(timer)
   }, [productQuery, cart, cacheReady])
 
-  // Búsqueda de clientes (cache local + server) para el form nuevo
-  useEffect(() => {
-    const query = customerQuery.trim()
-    if (query.length < 2 || selectedCustomerId) {
-      customerSearchRequestRef.current += 1
-      setCustomerResults([])
-      setSearchingCustomers(false)
-      return
-    }
-    const requestId = ++customerSearchRequestRef.current
-    const timer = setTimeout(async () => {
-      const local = (await searchCustomersLocal(query)).map(c => ({
-        id: c.id, full_name: c.full_name, phone: c.phone, document: c.document,
-        current_balance: c.current_balance, credit_limit: c.credit_limit,
-      }))
-      if (customerSearchRequestRef.current === requestId && local.length > 0) setCustomerResults(local)
-      setSearchingCustomers(true)
-      try {
-        const data = await api.get<{ id: string; full_name: string; phone?: string; document?: string; current_balance: number; credit_limit: number }[]>(
-          `/api/customers/search?q=${encodeURIComponent(query)}`
-        )
-        if (customerSearchRequestRef.current === requestId) setCustomerResults(data)
-      } catch {
-        if (customerSearchRequestRef.current === requestId && local.length === 0) setCustomerResults([])
-      } finally {
-        if (customerSearchRequestRef.current === requestId) setSearchingCustomers(false)
-      }
-    }, 180)
-    return () => clearTimeout(timer)
-  }, [customerQuery, selectedCustomerId])
+  // La búsqueda de clientes (cache local + server) vive en useCustomerSearch.
   useEffect(() => { setCustomerHighlight(0) }, [customerResults])
   useEffect(() => { setProductHighlight(0) }, [productResults])
 
@@ -419,7 +399,7 @@ export default function QuotesPage() {
   const resetForm = () => {
     setCustomerName(''); setCustomerPhone(''); setQuoteNotes(''); setQuoteDiscount('')
     setValidUntil(''); setCart([])
-    setCustomerQuery(''); setCustomerResults([]); setSelectedCustomerId(null)
+    setCustomerQuery(''); setSelectedCustomerId(null); setCustomerDismissed(false)
     setPriceListId(priceLists.find(pl => pl.is_default)?.id ?? priceLists[0]?.id ?? '')
   }
 
@@ -647,16 +627,39 @@ export default function QuotesPage() {
     }
   }
 
+  // ─── Enviar presupuesto como imagen por WhatsApp ─────────
+  // Captura la tarjeta (SaleShareCard en modo presupuesto) como PNG y la comparte:
+  // en mobile/Mac se adjunta directo al chat; en escritorio se descarga y abre WhatsApp.
+  const shareQuoteImage = async (d: QuoteDetail) => {
+    if (!shareCardRef.current || sharingImageRef.current) return
+    sharingImageRef.current = true
+    setSharingImage(true)
+    try {
+      const res = await shareTicketImage(shareCardRef.current, {
+        fileName: `presupuesto-${d.id.slice(0, 8)}.png`,
+        customerPhone: d.customer_phone || d.customers?.phone,
+      })
+      if (res === 'downloaded') {
+        toast.success('Imagen descargada — adjuntala en el chat de WhatsApp', { duration: 6000 })
+      }
+    } catch (err) {
+      toast.error('No se pudo generar la imagen')
+      console.error(err)
+    } finally {
+      sharingImageRef.current = false
+      setSharingImage(false)
+    }
+  }
+
   const sidePanelOpen = detailModal || newQuoteModal
   useCollapseSidebar(sidePanelOpen)
   const trimmedCustomerQuery = customerQuery.trim()
-  const showCustomerDropdown = !selectedCustomerId && trimmedCustomerQuery.length >= 2
+  const showCustomerDropdown = !selectedCustomerId && !customerDismissed && trimmedCustomerQuery.length >= 2
 
   const selectCustomer = (c: { id: string; full_name: string }) => {
     setSelectedCustomerId(c.id)
     setCustomerName(c.full_name)
     setCustomerQuery('')
-    setCustomerResults([])
   }
   // Navegación con teclado del dropdown de clientes (↑/↓ + Enter, Esc para cerrar)
   const handleCustomerKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>) => {
@@ -672,7 +675,7 @@ export default function QuotesPage() {
       const c = customerResults[customerHighlight]
       if (c) selectCustomer(c)
     } else if (e.key === 'Escape') {
-      setCustomerResults([])
+      setCustomerDismissed(true)
     }
   }
 
@@ -956,6 +959,12 @@ export default function QuotesPage() {
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-[var(--radius-md)] text-[var(--text2)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors">
                           <Copy size={14} /> Copiar para WhatsApp
                         </button>
+                        <button
+                          onClick={() => shareQuoteImage(detail)}
+                          disabled={sharingImage}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-[var(--radius-md)] bg-[#25d366] text-white hover:bg-[#20bd5a] transition-colors disabled:opacity-60">
+                          {sharingImage ? <Loader2 size={14} className="animate-spin" /> : <MessageCircle size={14} />} Enviar por WhatsApp
+                        </button>
                         {detail.status === 'draft' && (
                           <button
                             onClick={() => setCancelConfirm({ id: detail.id, customer_name: detail.customer_name })}
@@ -970,6 +979,37 @@ export default function QuotesPage() {
                         </Button>
                       )}
                     </div>
+                  </div>
+
+                  {/* Tarjeta oculta que se captura como imagen para WhatsApp.
+                      Se renderiza fuera de pantalla (con layout real) para que
+                      html-to-image pueda medirla; no es visible para el usuario. */}
+                  <div style={{ position: 'fixed', left: '-10000px', top: 0, pointerEvents: 'none' }} aria-hidden>
+                    <SaleShareCard
+                      ref={shareCardRef}
+                      business={{
+                        name: authUser?.business?.name,
+                        cuit: authUser?.business?.cuit,
+                        address: authUser?.business?.address,
+                        phone: authUser?.business?.phone,
+                      }}
+                      docLabel="Presupuesto"
+                      saleId={detail.id}
+                      createdAt={detail.created_at}
+                      total={detail.total}
+                      discount={detail.discount}
+                      items={(detail.quote_items ?? []).map(i => ({
+                        name: i.products?.name ?? i.product_name ?? '(producto)',
+                        quantity: i.quantity,
+                        unit_price: i.unit_price,
+                        discount: i.discount,
+                      }))}
+                      sellerName={detail.seller_name || detail.users?.full_name}
+                      customerName={detail.customer_name}
+                      validUntil={detail.valid_until}
+                      notes={detail.notes}
+                      footerNote="stockos.digital · Presupuesto sin validez fiscal"
+                    />
                   </div>
                 </div>
               )}
@@ -1009,30 +1049,22 @@ export default function QuotesPage() {
                       )}
                       <input
                         value={customerName}
-                        onChange={e => { setCustomerName(e.target.value); setCustomerQuery(e.target.value) }}
+                        onChange={e => { setCustomerName(e.target.value); setCustomerQuery(e.target.value); setCustomerDismissed(false) }}
                         onKeyDown={handleCustomerKeyDown}
-                        placeholder="Buscar cliente o escribir nombre del prospecto..."
+                        placeholder="Buscar por nombre, razón social, código... o escribir prospecto"
                         className="w-full pl-9 pr-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
                       />
                     </div>
                     <p className="text-[11px] text-[var(--text3)] mt-1">Si no seleccionás un cliente registrado, se cotiza como prospecto.</p>
                     {showCustomerDropdown && customerResults.length > 0 && (
                       <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-20 overflow-hidden">
-                        {customerResults.map((c, idx) => (
-                          <button key={c.id}
-                            onClick={() => selectCustomer(c)}
-                            onMouseEnter={() => setCustomerHighlight(idx)}
-                            className={`w-full flex items-center justify-between px-3 py-2.5 transition-colors text-left border-b border-[var(--border)] last:border-0 ${customerHighlight === idx ? 'bg-[var(--surface2)]' : ''}`}>
-                            <div>
-                              <p className="text-sm font-medium text-[var(--text)]">{c.full_name}</p>
-                              {c.document && <p className="text-xs text-[var(--text3)]">DNI {c.document}</p>}
-                              {c.phone && <p className="text-xs text-[var(--text3)]">{c.phone}</p>}
-                            </div>
-                            {Number(c.current_balance) > 0 && (
-                              <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>
-                            )}
-                          </button>
-                        ))}
+                        <CustomerSearchResults
+                          results={customerResults}
+                          highlight={customerHighlight}
+                          onHover={setCustomerHighlight}
+                          onSelect={selectCustomer}
+                          size="md"
+                        />
                       </div>
                     )}
                   </>

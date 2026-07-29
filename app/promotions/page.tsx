@@ -236,9 +236,12 @@ export default function PromotionsPage() {
     setDeleting(true)
     try {
       await api.delete(`/api/promotions/${deletePromo.id}`)
+      // Marcamos inactiva localmente en vez de refetchear: el read-after-write
+      // puede pegar en una réplica que todavía no replicó la baja y la promo
+      // reaparecía como activa. La lista ya se divide en activas/inactivas.
+      setPromotions(prev => prev.map(p => p.id === deletePromo.id ? { ...p, is_active: false } : p))
       toast.success('Promoción desactivada')
       setDeleteModal(false)
-      fetchAll()
       notifyPOSDataChanged()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error')

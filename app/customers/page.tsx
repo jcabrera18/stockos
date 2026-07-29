@@ -161,10 +161,12 @@ function DeliveryZonesTab() {
     setDeleting(true)
     try {
       await api.delete(`/api/delivery-zones/${deleteZone.id}`)
+      // Removemos localmente en vez de refetchear: el read-after-write puede
+      // pegar en una réplica que todavía no replicó la baja y la zona reaparecía.
+      setZones(prev => prev.filter(z => z.id !== deleteZone.id))
       toast.success('Zona eliminada')
       setDeleteModal(false)
       setDeleteZone(null)
-      fetchZones()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar')
     } finally { setDeleting(false) }
@@ -419,10 +421,12 @@ function ClientCategoriesTab() {
     setDeleting(true)
     try {
       await api.delete(`/api/client-categories/${deleteCategory.id}`)
+      // Removemos localmente en vez de refetchear: el read-after-write puede
+      // pegar en una réplica que todavía no replicó la baja y la categoría reaparecía.
+      setCategories(prev => prev.filter(c => c.id !== deleteCategory.id))
       toast.success('Categoría eliminada')
       setDeleteModal(false)
       setDeleteCategory(null)
-      fetchCategories()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar')
     } finally { setDeleting(false) }
@@ -772,11 +776,16 @@ export default function CustomersPage() {
     setDeleting(true)
     try {
       await api.delete(`/api/customers/${deleteCustomer.id}`)
+      // Actualizamos localmente en vez de refetchear: el read-after-write puede
+      // pegar en una réplica que todavía no replicó la desactivación y el cliente
+      // reaparecía como activo. Si el filtro es "activos", lo sacamos de la lista.
+      setData(prev => statusFilter === 'active'
+        ? prev.filter(c => c.id !== deleteCustomer.id)
+        : prev.map(c => c.id === deleteCustomer.id ? { ...c, is_active: false } : c))
       toast.success('Cliente desactivado')
       setDeleteModal(false)
       setDeleteCustomer(null)
       if (selectedId === deleteCustomer.id) closePanel()
-      fetchCustomers()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al desactivar')
     } finally { setDeleting(false) }
@@ -1046,7 +1055,7 @@ export default function CustomersPage() {
                 <input
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  placeholder="Buscar..."
+                  placeholder="Buscar por nombre, razón social, fantasía, código o documento..."
                   className="w-full pl-7 pr-3 py-1.5 text-xs rounded-full bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
                 />
               </div>
@@ -1091,6 +1100,7 @@ export default function CustomersPage() {
                             </button>
                           </th>
                         )}
+                        {!panelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Razón social / Fantasía</th>}
                         {!panelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Documento</th>}
                         {!panelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden md:table-cell">Teléfono</th>}
                         {!panelOpen && <th className="text-left px-4 py-3 text-xs font-medium text-[var(--text3)] hidden lg:table-cell">Email</th>}
@@ -1138,6 +1148,16 @@ export default function CustomersPage() {
                             {!panelOpen && (
                               <td className="px-4 py-3 hidden sm:table-cell mono text-xs text-[var(--text2)]">
                                 {customer.customer_code ?? '—'}
+                              </td>
+                            )}
+                            {!panelOpen && (
+                              <td className="px-4 py-3 text-xs hidden lg:table-cell min-w-0">
+                                {customer.razon_social || customer.nombre_fantasia ? (
+                                  <div className="min-w-0">
+                                    {customer.razon_social && <p className="truncate text-[var(--text2)]">{customer.razon_social}</p>}
+                                    {customer.nombre_fantasia && <p className="truncate text-[var(--text3)]">{customer.nombre_fantasia}</p>}
+                                  </div>
+                                ) : <span className="text-[var(--text3)]">—</span>}
                               </td>
                             )}
                             {!panelOpen && (

@@ -140,10 +140,13 @@ export default function PriceListsPage() {
     setDeleting(true)
     try {
       await api.delete(`/api/price-lists/${deleteList.id}`)
+      // Removemos localmente en vez de refetchear: el GET filtra is_active=true
+      // pero el read-after-write pega en una réplica que todavía no replicó el
+      // soft-delete, así que la lista reaparecía hasta el próximo refresh.
+      setLists(prev => prev.filter(l => l.id !== deleteList.id))
       toast.success('Lista eliminada')
       setDeleteModal(false)
       setDeleteList(null)
-      fetchLists()
       notifyPOSDataChanged()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar')
@@ -155,11 +158,14 @@ export default function PriceListsPage() {
     setCreatingPresets(true)
     setPresetsModal(false)
     try {
+      const created: PriceList[] = []
       for (const preset of PRESET_LISTS) {
-        await api.post('/api/price-lists', preset)
+        created.push(await api.post<PriceList>('/api/price-lists', preset))
       }
+      // Seteamos desde las respuestas del write en vez de refetchear: el GET
+      // pega en una réplica que puede no haber replicado los inserts todavía.
+      setLists(prev => [...prev, ...created])
       toast.success('Listas creadas correctamente')
-      fetchLists()
       notifyPOSDataChanged()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al crear listas')

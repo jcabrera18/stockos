@@ -27,7 +27,6 @@ import {
   priceForProductList,
   setForcedPriceList,
   searchProductsLocal,
-  searchCustomersLocal,
   cacheProductFromScan,
   syncPromotions,
   getLocalPromotions,
@@ -37,6 +36,8 @@ import {
   type ScanResult,
 } from '@/lib/pos-cache'
 import { onPOSDataChanged } from '@/lib/pos-sync-signal'
+import { useCustomerSearch } from '@/hooks/useCustomerSearch'
+import { CustomerSearchResults, customerCompanyName, customerDocLine } from '@/components/modules/CustomerSearchResults'
 import { queueSale, syncPendingSales, pushSale, getPendingSalesCount, isNetworkError } from '@/lib/sales-queue'
 
 // Mínimo de caracteres para disparar búsqueda de texto (no aplica a códigos de barra)
@@ -179,10 +180,9 @@ export default function POSPage() {
   const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null)
 
   const [customerQuery, setCustomerQuery] = useState('')
-  const [customerResults, setCustomerResults] = useState<CustomerSummary[]>([])
   const [customerActiveIndex, setCustomerActiveIndex] = useState(0)
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerSummary | null>(null)
-  const [searchingCustomer, setSearchingCustomer] = useState(false)
+  const { results: customerResults, searching: searchingCustomer } = useCustomerSearch(customerQuery)
   const [quickCustomerModal, setQuickCustomerModal] = useState(false)
 
   const [priceLists, setPriceLists] = useState<PriceList[]>([])
@@ -841,30 +841,6 @@ export default function POSPage() {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [query, dataVersion]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    const q = customerQuery.trim()
-    if (!q || q.length < 2) { setCustomerResults([]); return }
-    let cancelled = false
-    const timer = setTimeout(async () => {
-      // Cache local primero → resultados instantáneos y soporte offline
-      const local = await searchCustomersLocal(q)
-      if (!cancelled && local.length > 0) setCustomerResults(local)
-
-      setSearchingCustomer(true)
-      try {
-        // Refresca con el server para tener saldos al día
-        const data = await api.get<CustomerSummary[]>(`/api/customers/search?q=${encodeURIComponent(q)}`)
-        if (!cancelled) setCustomerResults(data)
-      } catch {
-        // Sin red → quedarse con los resultados del cache local
-        if (!cancelled && local.length === 0) setCustomerResults([])
-      } finally {
-        if (!cancelled) setSearchingCustomer(false)
-      }
-    }, 250)
-    return () => { cancelled = true; clearTimeout(timer) }
-  }, [customerQuery])
-
   // Al cambiar los resultados, resaltar el primero para que Enter lo elija directo
   useEffect(() => { setCustomerActiveIndex(0) }, [customerResults])
 
@@ -882,7 +858,7 @@ export default function POSPage() {
       e.preventDefault(); e.stopPropagation()
       if (customerActiveIndex < customerResults.length) {
         const c = customerResults[customerActiveIndex]
-        if (c) { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]) }
+        if (c) { setSelectedCustomer(c); setCustomerQuery('') }
       } else {
         setQuickCustomerModal(true)
       }
@@ -1763,7 +1739,7 @@ export default function POSPage() {
         </div>
 
         <QuickCustomerModal open={quickCustomerModal} onClose={() => setQuickCustomerModal(false)}
-          onCreated={(customer) => { setSelectedCustomer(customer); setCustomerQuery(''); setCustomerResults([]) }}
+          onCreated={(customer) => { setSelectedCustomer(customer); setCustomerQuery('') }}
           initialName={customerQuery}
           // Se abre tanto desde el carrito como desde adentro del Drawer "Cobrar"
           // (z-index 50/51). Lo elevamos por encima para que no quede detrás.
@@ -1927,15 +1903,21 @@ export default function POSPage() {
             <div className="relative">
               {selectedCustomer ? (
                 <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)]">
-                  <div>
-                    <p className="text-xs font-semibold text-[var(--accent)]">{selectedCustomer.full_name}</p>
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold text-[var(--accent)] truncate">{selectedCustomer.full_name}</p>
+                    {customerCompanyName(selectedCustomer) && (
+                      <p className="text-xs text-[var(--text2)] truncate">{customerCompanyName(selectedCustomer)}</p>
+                    )}
+                    {customerDocLine(selectedCustomer) && (
+                      <p className="text-xs text-[var(--text3)] truncate">{customerDocLine(selectedCustomer)}</p>
+                    )}
                     <p className="text-xs text-[var(--text3)]">
                       Saldo: {formatCurrency(selectedCustomer.current_balance)}
                       {selectedCustomer.credit_limit > 0 && ` · Límite: ${formatCurrency(selectedCustomer.credit_limit)}`}
                     </p>
                   </div>
                   <button onClick={() => { setSelectedCustomer(null); setCustomerQuery('') }}
-                    className="text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors">✕</button>
+                    className="text-xs text-[var(--text3)] hover:text-[var(--danger)] transition-colors flex-shrink-0 ml-2">✕</button>
                 </div>
               ) : (
                 <div className="relative">
@@ -1947,32 +1929,12 @@ export default function POSPage() {
                   />
                   {customerQuery.length >= 2 && (
                     <div className="absolute bottom-full left-0 right-0 mb-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 overflow-hidden">
-                      {customerResults.length > 0 ? (
-                        <>
-                          {customerResults.map(c => (
-                            <button key={c.id}
-                              onClick={() => { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]) }}
-                              className="w-full flex items-center justify-between px-3 py-2 hover:bg-[var(--surface2)] transition-colors text-left border-b border-[var(--border)] last:border-0">
-                              <div>
-                                <p className="text-xs font-medium text-[var(--text)]">{c.full_name}</p>
-                                {c.document && <p className="text-xs text-[var(--text3)]">{c.document}</p>}
-                              </div>
-                              {Number(c.current_balance) > 0 && <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>}
-                            </button>
-                          ))}
-                          <button onClick={() => setQuickCustomerModal(true)}
-                            className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--accent-subtle)] transition-colors text-left border-t border-[var(--border)]">
-                            <Plus size={12} className="text-[var(--accent)]" />
-                            <span className="text-xs text-[var(--accent)] font-medium">Crear "{customerQuery}"</span>
-                          </button>
-                        </>
-                      ) : (
-                        <button onClick={() => setQuickCustomerModal(true)}
-                          className="w-full flex items-center gap-2 px-3 py-2 hover:bg-[var(--accent-subtle)] transition-colors text-left">
-                          <Plus size={12} className="text-[var(--accent)]" />
-                          <span className="text-xs text-[var(--accent)] font-medium">Crear cliente "{customerQuery}"</span>
-                        </button>
-                      )}
+                      <CustomerSearchResults
+                        results={customerResults}
+                        onSelect={c => { setSelectedCustomer(c); setCustomerQuery('') }}
+                        onCreate={() => setQuickCustomerModal(true)}
+                        createQuery={customerQuery}
+                      />
                     </div>
                   )}
                 </div>
@@ -2438,15 +2400,21 @@ export default function POSPage() {
               </div>
               {selectedCustomer ? (
                 <div className="flex items-center justify-between px-3 py-2 bg-[var(--accent-subtle)] border border-[var(--accent)] rounded-[var(--radius-md)]">
-                  <div>
-                    <p className="text-sm font-semibold text-[var(--accent)]">{selectedCustomer.full_name}</p>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-[var(--accent)] truncate">{selectedCustomer.full_name}</p>
+                    {customerCompanyName(selectedCustomer) && (
+                      <p className="text-xs text-[var(--text2)] truncate">{customerCompanyName(selectedCustomer)}</p>
+                    )}
+                    {customerDocLine(selectedCustomer) && (
+                      <p className="text-xs text-[var(--text3)] truncate">{customerDocLine(selectedCustomer)}</p>
+                    )}
                     <p className="text-xs text-[var(--text3)]">
                       Saldo: {formatCurrency(selectedCustomer.current_balance)}
                       {selectedCustomer.credit_limit > 0 && ` · Límite: ${formatCurrency(selectedCustomer.credit_limit)}`}
                     </p>
                   </div>
                   <button onClick={() => { setSelectedCustomer(null); setCustomerQuery('') }}
-                    className="text-sm text-[var(--text3)] hover:text-[var(--danger)] transition-colors">✕</button>
+                    className="text-sm text-[var(--text3)] hover:text-[var(--danger)] transition-colors flex-shrink-0 ml-2">✕</button>
                 </div>
               ) : (
                 <div className="relative">
@@ -2454,37 +2422,20 @@ export default function POSPage() {
                   {searchingCustomer && <div className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 border-2 border-[var(--border)] border-t-[var(--accent)] rounded-full animate-spin" />}
                   <input ref={customerSearchRef} value={customerQuery} onChange={e => setCustomerQuery(e.target.value)}
                     onKeyDown={handleCustomerKeyDown}
-                    placeholder="Buscar cliente por nombre o documento..."
+                    placeholder="Buscar por nombre, razón social, fantasía, código o documento..."
                     className="w-full pl-9 pr-3 py-2.5 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--warning)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
                   />
                   {customerQuery.length >= 2 && (
                     <div className="absolute bottom-full left-0 right-0 mb-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-10 overflow-hidden max-h-60 overflow-y-auto">
-                      {customerResults.map((c, idx) => {
-                        const active = customerActiveIndex === idx
-                        return (
-                          <button key={c.id}
-                            onMouseEnter={() => setCustomerActiveIndex(idx)}
-                            onClick={() => { setSelectedCustomer(c); setCustomerQuery(''); setCustomerResults([]) }}
-                            className={`w-full flex items-center justify-between px-3 py-2.5 transition-colors text-left border-b border-[var(--border)] last:border-0 ${active ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--surface2)]'}`}>
-                            <div>
-                              <p className={`text-sm font-medium ${active ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>{c.full_name}</p>
-                              {c.document && <p className="text-xs text-[var(--text3)]">{c.document}</p>}
-                            </div>
-                            {Number(c.current_balance) > 0 && <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>}
-                          </button>
-                        )
-                      })}
-                      {(() => {
-                        const createActive = customerActiveIndex === customerResults.length
-                        return (
-                          <button onMouseEnter={() => setCustomerActiveIndex(customerResults.length)}
-                            onClick={() => setQuickCustomerModal(true)}
-                            className={`w-full flex items-center gap-2 px-3 py-2.5 transition-colors text-left ${customerResults.length > 0 ? 'border-t border-[var(--border)]' : ''} ${createActive ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--accent-subtle)]'}`}>
-                            <Plus size={13} className="text-[var(--accent)]" />
-                            <span className="text-sm text-[var(--accent)] font-medium">Crear {customerResults.length > 0 ? `"${customerQuery}"` : `cliente "${customerQuery}"`}</span>
-                          </button>
-                        )
-                      })()}
+                      <CustomerSearchResults
+                        results={customerResults}
+                        highlight={customerActiveIndex}
+                        onHover={setCustomerActiveIndex}
+                        onSelect={c => { setSelectedCustomer(c); setCustomerQuery('') }}
+                        onCreate={() => setQuickCustomerModal(true)}
+                        createQuery={customerQuery}
+                        size="md"
+                      />
                     </div>
                   )}
                 </div>

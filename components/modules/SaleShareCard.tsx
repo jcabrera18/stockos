@@ -48,7 +48,8 @@ export interface SaleShareCardProps {
   total: number
   discount?: number
   shippingAmount?: number
-  paymentMethod: string
+  /** Opcional: los presupuestos no tienen forma de pago, se omite el bloque. */
+  paymentMethod?: string
   installments?: number
   paymentSplits?: Array<{ method: string; amount: number; installments?: number }>
   items: SaleShareItem[]
@@ -57,7 +58,18 @@ export interface SaleShareCardProps {
   customerName?: string
   /** Si la venta está facturada, la tarjeta muestra los datos fiscales de ARCA. */
   invoice?: SaleShareInvoice
+  /** Etiqueta del comprobante (arriba a la derecha). Default: "Comprobante". */
+  docLabel?: string
+  /** Presupuestos: fecha de validez (YYYY-MM-DD) mostrada como aviso. */
+  validUntil?: string | null
+  /** Nota al pie del detalle (ej. observaciones del presupuesto). */
+  notes?: string | null
+  /** Texto chico del pie. Default: "stockos.digital · No válido como factura". */
+  footerNote?: string
 }
+
+const formatShareDate = (iso?: string | null) =>
+  iso ? new Date(iso.slice(0, 10) + 'T00:00:00').toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }) : null
 
 // ── Estilos compartidos ──
 const CARD_STYLE: React.CSSProperties = {
@@ -95,7 +107,7 @@ function ItemRow({ item }: { item: SaleShareItem }) {
 
 function PaymentBlock({
   paymentMethod, installments, paymentSplits,
-}: Pick<SaleShareCardProps, 'paymentMethod' | 'installments' | 'paymentSplits'> & { installments: number }) {
+}: { paymentMethod: string; installments: number; paymentSplits?: SaleShareCardProps['paymentSplits'] }) {
   if (paymentSplits && paymentSplits.length > 1) {
     return (
       <div style={{ fontSize: '13px', color: '#64748b', lineHeight: 1.9 }}>
@@ -136,7 +148,7 @@ export const SaleShareCard = forwardRef<HTMLDivElement, SaleShareCardProps>(func
     discount = 0, shippingAmount = 0,
     paymentMethod, installments = 1, paymentSplits,
     items, branchName, sellerName, customerName,
-    invoice,
+    invoice, docLabel, validUntil, notes, footerNote,
   },
   ref,
 ) {
@@ -237,7 +249,7 @@ export const SaleShareCard = forwardRef<HTMLDivElement, SaleShareCardProps>(func
 
           {/* Forma de pago */}
           <div style={{ marginTop: '10px' }}>
-            <PaymentBlock paymentMethod={paymentMethod} installments={installments} paymentSplits={paymentSplits} />
+            <PaymentBlock paymentMethod={paymentMethod ?? ''} installments={installments} paymentSplits={paymentSplits} />
           </div>
 
           <div style={{ height: '1px', background: '#eef2f6', margin: '18px 0' }} />
@@ -306,7 +318,7 @@ export const SaleShareCard = forwardRef<HTMLDivElement, SaleShareCardProps>(func
           </div>
           <div style={{ textAlign: 'right', flexShrink: 0 }}>
             <div style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              Comprobante
+              {docLabel ?? 'Comprobante'}
             </div>
             <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '3px' }}>
               {formatDateTime(createdAt)}
@@ -361,10 +373,26 @@ export const SaleShareCard = forwardRef<HTMLDivElement, SaleShareCardProps>(func
           <span style={{ fontSize: '28px', fontWeight: 800, color: '#16a34a', letterSpacing: '-0.02em' }}>{formatCurrency(total)}</span>
         </div>
 
-        {/* Forma de pago */}
-        <div style={{ marginTop: '10px' }}>
-          <PaymentBlock paymentMethod={paymentMethod} installments={installments} paymentSplits={paymentSplits} />
-        </div>
+        {/* Forma de pago (las ventas la tienen; los presupuestos no) */}
+        {paymentMethod && (
+          <div style={{ marginTop: '10px' }}>
+            <PaymentBlock paymentMethod={paymentMethod} installments={installments} paymentSplits={paymentSplits} />
+          </div>
+        )}
+
+        {/* Validez (presupuestos) */}
+        {validUntil && (
+          <div style={{ marginTop: '16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px', padding: '10px 14px', fontSize: '12.5px', color: '#92400e', lineHeight: 1.4 }}>
+            Válido hasta el <span style={{ fontWeight: 700 }}>{formatShareDate(validUntil)}</span>. Precios sujetos a modificación luego de esa fecha.
+          </div>
+        )}
+
+        {/* Notas */}
+        {notes && (
+          <div style={{ marginTop: '14px', fontSize: '12.5px', color: '#64748b', lineHeight: 1.45 }}>
+            <span style={{ fontWeight: 600, color: '#334155' }}>Nota: </span>{notes}
+          </div>
+        )}
 
         {/* Footer con logo StockOS */}
         <div style={{ textAlign: 'center', marginTop: '24px' }}>
@@ -378,7 +406,7 @@ export const SaleShareCard = forwardRef<HTMLDivElement, SaleShareCardProps>(func
             </span>
           </div>
           <div style={{ fontSize: '11px', color: '#cbd5e1', marginTop: '5px', letterSpacing: '0.03em' }}>
-            stockos.digital · No válido como factura
+            {footerNote ?? 'stockos.digital · No válido como factura'}
           </div>
         </div>
       </div>

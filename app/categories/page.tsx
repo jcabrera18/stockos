@@ -119,10 +119,12 @@ export default function CategoriesPage() {
     setDeleting(true)
     try {
       await api.delete(`/api/products/categories/${deleteCat.id}`)
+      // Removemos localmente en vez de refetchear: el read-after-write puede
+      // pegar en una réplica que todavía no replicó la baja y la categoría reaparecía.
+      setCategories(prev => prev.filter(c => c.id !== deleteCat.id))
       toast.success('Categoría eliminada')
       setDeleteModal(false)
       setDeleteCat(null)
-      fetchCategories(true)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar')
     } finally { setDeleting(false) }

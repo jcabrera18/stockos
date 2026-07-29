@@ -441,10 +441,12 @@ export default function WarehousesPage() {
     setDeleting(true)
     try {
       await api.delete(`/api/warehouses/${deleteWarehouse.id}`)
+      // Removemos localmente en vez de refetchear: el read-after-write puede
+      // pegar en una réplica que todavía no replicó la baja y el depósito reaparecía.
+      setWarehouses(prev => prev.filter(w => w.id !== deleteWarehouse.id))
       toast.success('Depósito eliminado')
       setDeleteModal(false)
       setDeleteWarehouse(null)
-      fetchWarehouses()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar')
     } finally { setDeleting(false) }

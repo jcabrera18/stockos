@@ -11,7 +11,7 @@ const PLANS = [
     price: 45000,
     popular: false,
     perks: ['1 sucursal', '1 depósito', '1 caja', 'Hasta 2 usuarios'],
-    cta: { label: 'Probar gratis 30 días', href: '/register', primary: false },
+    cta: { label: 'Probar gratis 14 días', href: '/register', primary: false },
   },
   {
     id: 'negocio',
@@ -20,7 +20,7 @@ const PLANS = [
     price: 90000,
     popular: true,
     perks: ['1 sucursal', '1 depósito', 'Hasta 3 cajas', 'Hasta 5 usuarios'],
-    cta: { label: 'Probar gratis 30 días', href: '/register', primary: true },
+    cta: { label: 'Probar gratis 14 días', href: '/register', primary: true },
   },
   {
     id: 'multilocal',
@@ -29,7 +29,7 @@ const PLANS = [
     price: 129000,
     popular: false,
     perks: ['Hasta 2 sucursales', 'Hasta 2 depósitos', 'Hasta 4 cajas', 'Hasta 10 usuarios'],
-    cta: { label: 'Probar gratis 30 días', href: '/register', primary: false },
+    cta: { label: 'Probar gratis 14 días', href: '/register', primary: false },
   },
   {
     id: 'empresa',
@@ -38,7 +38,7 @@ const PLANS = [
     price: 180000,
     popular: false,
     perks: ['Sucursales ilimitadas', 'Depósitos ilimitados', 'Cajas ilimitadas', 'Usuarios ilimitados', 'Soporte dedicado'],
-    cta: { label: 'Hablar con ventas', href: 'https://wa.me/5493438558913', primary: false },
+    cta: { label: 'Probar gratis 14 días', href: '/register', primary: false },
   },
 ]
 
@@ -108,7 +108,7 @@ export function Pricing() {
         <div className="rounded-3xl border border-green-200 bg-gradient-to-br from-green-50 to-emerald-50/40 p-6 sm:p-8 mb-10 flex flex-col md:flex-row md:items-center gap-6 section-fade" style={{ transitionDelay: '60ms' }}>
           <div className="flex-1">
             <h3 className="text-xl sm:text-2xl font-bold text-gray-900 mb-2.5">
-              30 días para configurar y migrar — gratis
+              14 días para configurar y migrar — gratis
             </h3>
             <p className="text-gray-600 text-[14px] leading-relaxed max-w-2xl">
               Te ayudamos a importar tu catálogo del Excel, configurar ARCA y tus cajas. Probás todo sin tarjeta.{' '}
@@ -117,7 +117,7 @@ export function Pricing() {
           </div>
           <div className="flex items-center gap-4 rounded-2xl bg-white border border-green-100 px-6 py-4 shadow-sm shrink-0 self-start md:self-center">
             <div className="text-center">
-              <p className="text-3xl font-bold text-[#16a34a] font-mono leading-none">30</p>
+              <p className="text-3xl font-bold text-[#16a34a] font-mono leading-none">14</p>
               <p className="text-[11px] text-gray-400 mt-1.5 leading-tight">días para<br />configurar</p>
             </div>
             <span className="text-2xl text-gray-300 font-light">+</span>
@@ -213,13 +213,11 @@ export function Pricing() {
                     </span>
                   </div>
 
-                  <div className="mt-4 mb-6 pb-6 border-b border-gray-100" />
+                  <div className="my-5 border-b border-gray-100" />
 
                   {/* CTA */}
                   <Link
                     href={plan.cta.href}
-                    target={plan.id === 'empresa' ? '_blank' : undefined}
-                    rel={plan.id === 'empresa' ? 'noopener noreferrer' : undefined}
                     className={`w-full flex items-center justify-center py-3 rounded-xl text-sm font-semibold transition-all duration-200 mb-6 active:scale-[0.98] ${
                       plan.cta.primary
                         ? 'bg-[#16a34a] hover:bg-[#15803d] text-white hover:shadow-[0_4px_16px_rgba(22,163,74,0.4)]'

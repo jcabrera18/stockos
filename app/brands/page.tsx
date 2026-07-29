@@ -84,10 +84,12 @@ export default function BrandsPage() {
     setDeleting(true)
     try {
       await api.delete(`/api/brands/${deleteBrand.id}`)
+      // Removemos localmente en vez de refetchear: el read-after-write puede
+      // pegar en una réplica que todavía no replicó la baja y la marca reaparecía.
+      setBrands(prev => prev.filter(b => b.id !== deleteBrand.id))
       toast.success('Marca eliminada')
       setDeleteModal(false)
       setDeleteBrand(null)
-      fetchBrands()
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al eliminar')
     } finally { setDeleting(false) }

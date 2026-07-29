@@ -36,7 +36,9 @@ import { useWorkstation } from '@/hooks/useWorkstation'
 import { usePOSSync } from '@/hooks/usePOSSync'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useCollapseSidebar } from '@/contexts/SidePanelContext'
-import { searchProductsLocal, searchCustomersLocal } from '@/lib/pos-cache'
+import { searchProductsLocal } from '@/lib/pos-cache'
+import { useCustomerSearch } from '@/hooks/useCustomerSearch'
+import { CustomerSearchResults } from '@/components/modules/CustomerSearchResults'
 import { printDocument, partiesGrid, totalsBox, highlightBox, fmtARS } from '@/lib/printDocument'
 import { queueOrder, getPendingOrdersCount, syncPendingOrders } from '@/lib/orders-queue'
 import { isNetworkError } from '@/lib/sales-queue'
@@ -183,7 +185,7 @@ function OrdersPageInner() {
   useEffect(() => {
     setIsMac(/Mac|iPhone|iPad|iPod/.test(navigator.platform) || /Mac/.test(navigator.userAgent))
   }, [])
-  const { cacheReady, syncing: cacheSyncing, forceSync } = usePOSSync(null, newOrderModal)
+  const { syncing: cacheSyncing, forceSync } = usePOSSync(null, newOrderModal)
 
   // Lista
   const [orders, setOrders] = useState<OrderSummary[]>([])
@@ -234,6 +236,8 @@ function OrdersPageInner() {
   const [productResults, setProductResults] = useState<Product[]>([])
   const [productHighlight, setProductHighlight] = useState(0)
   const [searchingProducts, setSearchingProducts] = useState(false)
+  // Descarta respuestas del refresh de stock en fondo cuando ya hay una búsqueda más nueva.
+  const productSearchSeqRef = useRef(0)
   // Selector de caja para impactar el efectivo cobrado en el arqueo (opcional).
   const [allRegisters, setAllRegisters] = useState<RegisterWithBranch[]>([])
   const [collectBranchId, setCollectBranchId] = useState<string | null>(null)
@@ -267,8 +271,8 @@ function OrdersPageInner() {
   const [convertInvoiceId, setConvertInvoiceId] = useState<string | null>(null)
   const [detailInvoice, setDetailInvoice] = useState<{ id: string; invoice_type: string; numero: number } | null>(null)
 
-  // Confirmación cancelación
-  const [cancelConfirmOrder, setCancelConfirmOrder] = useState<{ id: string; customer_name: string } | null>(null)
+  // Confirmación cancelación / anulación
+  const [cancelConfirmOrder, setCancelConfirmOrder] = useState<{ id: string; customer_name: string; status: OrderStatus } | null>(null)
   // Confirmación de "Confirmar pedido"
   const [confirmOrder, setConfirmOrder] = useState<{ id: string; customer_name: string; customer_id?: string | null; customer_phone?: string; source?: string } | null>(null)
   // Asignación de cliente al confirmar (necesario para pedidos web sin cliente).
@@ -293,16 +297,14 @@ function OrdersPageInner() {
   const [registeringPayment, setRegisteringPayment] = useState(false)
 
   const [customerQuery, setCustomerQuery] = useState('')
-  const [customerResults, setCustomerResults] = useState<{ id: string; full_name: string; phone?: string; document?: string; current_balance: number; credit_limit: number }[]>([])
-  const [searchingCustomers, setSearchingCustomers] = useState(false)
   const [customerHighlight, setCustomerHighlight] = useState(0)
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null)
+  const { results: customerResults, searching: searchingCustomers } = useCustomerSearch(customerQuery, { enabled: !selectedCustomerId })
   const [selectedCustomerBalance, setSelectedCustomerBalance] = useState<number>(0)
   const [selectedCustomerCreditLimit, setSelectedCustomerCreditLimit] = useState<number>(0)
   const [quickCustomerModal, setQuickCustomerModal] = useState(false)
   const [qcForm, setQcForm] = useState({ full_name: '', document: '', phone: '', credit_limit: '' })
   const [qcSaving, setQcSaving] = useState(false)
-  const customerSearchRequestRef = useRef(0)
   const draftLoadedRef = useRef(false)
 
   // Pedidos offline pendientes de sincronizar
@@ -842,96 +844,57 @@ function OrdersPageInner() {
   }, [cart, selectedCustomerId, customerName, selectedCustomerBalance, selectedCustomerCreditLimit,
     warehouseId, priceListId, orderNotes, orderDiscount, pickupMode])
 
-  // Búsqueda de productos para el pedido
+  // Búsqueda de productos para el pedido — mismo modelo local-first que el POS:
+  // mostramos al instante los resultados del cache local (IndexedDB, con stock del
+  // último sync) y, si hay depósito + stock activo, refrescamos los números de stock
+  // en fondo sin bloquear la UI ni mostrar spinner. El seq descarta respuestas tardías.
   useEffect(() => {
-    if (!productQuery.trim()) { setProductResults([]); return }
+    const trimmed = productQuery.trim()
+    if (!trimmed) { setProductResults([]); return }
 
-    if (warehouseId && stockEnabled) {
-      // Con depósito y stock habilitado: va a la API para obtener stock por depósito
-      const timer = setTimeout(async () => {
-        setSearchingProducts(true)
-        try {
-          const res = await api.get<{ data: { product_id: string; product_name: string; stock_current: number; barcode?: string; cost_price?: number; sell_price?: number }[] }>(
-            `/api/warehouses/${warehouseId}/stock`, { search: productQuery.trim(), limit: 6 }
-          )
-          setProductResults(
-            res.data
-              .filter(s => !cart.find(c => c.product.id === s.product_id))
-              .map(s => ({ id: s.product_id, name: s.product_name, stock_current: s.stock_current, barcode: s.barcode, cost_price: s.cost_price ?? 0, sell_price: s.sell_price ?? 0 } as Product))
-          )
-        } catch {
-          // Sin conexión → fallback al cache local de productos
-          const local = await searchProductsLocal(productQuery.trim(), 8)
-          setProductResults(local.filter(p => !cart.find(c => c.product.id === p.id)))
+    const seq = ++productSearchSeqRef.current
+    let cancelled = false
+
+    ;(async () => {
+      const local = await searchProductsLocal(trimmed, 8)
+      if (cancelled || seq !== productSearchSeqRef.current) return
+
+      if (local.length > 0) {
+        setProductResults(local.filter(p => !cart.find(c => c.product.id === p.id)))
+
+        // Refresh de stock en fondo (solo con depósito + stock activo). No bloquea.
+        if (warehouseId && stockEnabled) {
+          api.get<{ data: Product[] }>('/api/products', {
+            search: trimmed, limit: 8, warehouse_id: warehouseId,
+          }).then(res => {
+            if (cancelled || seq !== productSearchSeqRef.current) return
+            const freshById = new Map(res.data.map(p => [p.id, p]))
+            setProductResults(prev => prev.map(p => freshById.get(p.id) ?? p))
+          }).catch(() => {})
         }
-        finally { setSearchingProducts(false) }
-      }, 300)
-      return () => clearTimeout(timer)
-    }
+        return
+      }
 
-    // Sin depósito: búsqueda local en IndexedDB (instantánea)
-    if (cacheReady) {
-      let cancelled = false
-      searchProductsLocal(productQuery.trim(), 8).then(results => {
-        if (!cancelled) setProductResults(results.filter(p => !cart.find(c => c.product.id === p.id)))
-      })
-      return () => { cancelled = true }
-    }
-
-    // Fallback a API si el cache aún no está listo
-    const timer = setTimeout(async () => {
+      // Cache miss (ej. producto recién creado que aún no sincronizó): fallback a la API.
       setSearchingProducts(true)
       try {
-        const res = await api.get<{ data: Product[] }>('/api/products', { search: productQuery.trim(), limit: 6 })
+        const res = await api.get<{ data: Product[] }>('/api/products', {
+          search: trimmed, limit: 8,
+          ...(warehouseId && stockEnabled ? { warehouse_id: warehouseId } : {}),
+        })
+        if (cancelled || seq !== productSearchSeqRef.current) return
         setProductResults(res.data.filter(p => !cart.find(c => c.product.id === p.id)))
-      } catch { setProductResults([]) }
-      finally { setSearchingProducts(false) }
-    }, 300)
-    return () => clearTimeout(timer)
-  }, [productQuery, cart, warehouseId, cacheReady])
-
-  useEffect(() => {
-    const query = customerQuery.trim()
-    if (query.length < 2) {
-      customerSearchRequestRef.current += 1
-      setCustomerResults([])
-      setSearchingCustomers(false)
-      return
-    }
-
-    const requestId = ++customerSearchRequestRef.current
-    const timer = setTimeout(async () => {
-      // Cache local primero → resultados instantáneos y soporte offline
-      const local = (await searchCustomersLocal(query)).map(c => ({
-        id: c.id, full_name: c.full_name, phone: c.phone, document: c.document,
-        current_balance: c.current_balance, credit_limit: c.credit_limit,
-      }))
-      if (customerSearchRequestRef.current === requestId && local.length > 0) setCustomerResults(local)
-
-      setSearchingCustomers(true)
-      try {
-        // Refresca con el server para tener saldos al día
-        const data = await api.get<{ id: string; full_name: string; phone?: string; document?: string; current_balance: number; credit_limit: number }[]>(
-          `/api/customers/search?q=${encodeURIComponent(query)}`
-        )
-        if (customerSearchRequestRef.current === requestId) {
-          // El server manda saldos al día pero puede no traer phone/document → los
-          // completamos desde el cache local para que no "parpadeen" (aparecer/desaparecer).
-          const localById = new Map(local.map(c => [c.id, c]))
-          setCustomerResults(data.map(c => {
-            const l = localById.get(c.id)
-            return { ...c, phone: c.phone ?? l?.phone, document: c.document ?? l?.document }
-          }))
-        }
       } catch {
-        // Sin red → quedarse con los resultados del cache local
-        if (customerSearchRequestRef.current === requestId && local.length === 0) setCustomerResults([])
+        if (!cancelled && seq === productSearchSeqRef.current) setProductResults([])
       } finally {
-        if (customerSearchRequestRef.current === requestId) setSearchingCustomers(false)
+        if (!cancelled && seq === productSearchSeqRef.current) setSearchingProducts(false)
       }
-    }, 180)
-    return () => clearTimeout(timer)
-  }, [customerQuery])
+    })()
+
+    return () => { cancelled = true }
+  }, [productQuery, cart, warehouseId, stockEnabled])
+
+  // La búsqueda de clientes (cache local + server) vive en useCustomerSearch.
 
   // Modo retiro: historial de retiros parciales del pedido.
   const fetchDeliveries = async (id: string) => {
@@ -1083,7 +1046,7 @@ function OrdersPageInner() {
   const resetOrderForm = () => {
     setOrderNotes(''); setOrderDiscount(''); setCart([])
     setPickupMode(false)
-    setCustomerQuery(''); setCustomerResults([]); setSelectedCustomerId(null)
+    setCustomerQuery(''); setSelectedCustomerId(null)
     setSelectedCustomerBalance(0); setSelectedCustomerCreditLimit(0)
     setCustomerName(''); setQuickCustomerModal(false)
     setQcForm({ full_name: '', document: '', phone: '', credit_limit: '' })
@@ -1124,7 +1087,7 @@ function OrdersPageInner() {
       setCustomerName(customer.full_name)
       setSelectedCustomerBalance(Number(customer.current_balance))
       setSelectedCustomerCreditLimit(Number(customer.credit_limit))
-      setCustomerQuery(''); setCustomerResults([])
+      setCustomerQuery('')
       setQuickCustomerModal(false)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Error al crear el cliente')
@@ -1141,7 +1104,6 @@ function OrdersPageInner() {
     setSelectedCustomerBalance(Number(c.current_balance))
     setSelectedCustomerCreditLimit(Number(c.credit_limit))
     setCustomerQuery('')
-    setCustomerResults([])
   }
   const openQuickCustomerCreate = () => {
     setQcForm({ full_name: trimmedCustomerQuery, document: '', phone: '', credit_limit: '' })
@@ -1163,7 +1125,6 @@ function OrdersPageInner() {
       else openQuickCustomerCreate()
     } else if (e.key === 'Escape') {
       setCustomerQuery('')
-      setCustomerResults([])
     }
   }
   useEffect(() => { setCustomerHighlight(0) }, [customerResults])
@@ -1674,7 +1635,8 @@ function OrdersPageInner() {
         )}
 
         {/* Métricas — franja de cards (todo el negocio). Las clickeables aplican filtro. */}
-        {stats && (
+        {/* Se ocultan cuando hay un drawer abierto para no competir con el panel lateral. */}
+        {stats && !sidePanelOpen && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
             {([
               { key: 'pending',   title: 'Pendientes',      value: String(stats.pending),     valueTitle: undefined,                       money: false, icon: Clock,       subtitle: 'por confirmar',                       filter: 'pending' as const },
@@ -1921,41 +1883,28 @@ function OrdersPageInner() {
                   })
                 })() : (() => {
                   const statuses: OrderStatus[] = ['pending', 'confirmed', 'delivered']
-                  // Envío parcial en curso: 'confirmed' ya alcanzado, 'Entregar'
-                  // (facturar el total) es el próximo paso.
+                  // Breadcrumb solo-lectura (rastreador de progreso). Envío parcial en
+                  // curso cuenta como 'confirmed' alcanzado. Las acciones viven en los
+                  // botones de abajo: "Confirmar pedido" (pending) y la tarjeta de
+                  // despacho ("Registrar despacho" / "Entregar todo" / "Cerrar entrega").
                   const currentIdx = detail.status === 'partially_delivered' ? 1 : statuses.indexOf(detail.status)
-                  const NEXT_LABELS: Partial<Record<OrderStatus, string>> = { confirmed: 'Confirmar', delivered: 'Entregar' }
-                  const advance = (target: OrderStatus) => {
-                    if (target === 'confirmed') openConfirm({ id: detail.id, customer_name: detail.customer_name, customer_id: detail.customer_id, customer_phone: detail.customer_phone, source: detail.source })
-                    else if (target === 'delivered') { setDeliverMode('full'); setDeliverOrderId(detail.id); setDeliverAmount(''); setDeliverNotes(''); setDeliverModal(true) }
-                  }
                   return statuses.map((s, i) => {
                     const done = i < currentIdx
                     const current = i === currentIdx
-                    const isNext = i === currentIdx + 1
                     return (
                       <div key={s} className="flex items-center gap-1 flex-shrink-0">
-                        {isNext ? (
-                          <button
-                            onClick={() => advance(s)}
-                            className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border border-dashed border-[var(--accent)] text-[var(--accent)] hover:bg-[var(--accent)] hover:text-white hover:border-solid transition-colors">
-                            {NEXT_LABELS[s] ?? STATUS_LABELS[s]}
-                            <ChevronRight size={12} />
-                          </button>
-                        ) : (
-                          <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${current ? 'bg-[var(--accent)] text-white' :
-                            done ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' :
-                              'bg-[var(--surface2)] text-[var(--text3)]'
-                            }`}>
-                            {done && (
-                              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                                <path d="M1 4L3.5 6.5L9 1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            )}
-                            {STATUS_LABELS[s]}
-                          </div>
-                        )}
-                        {i < 2 && <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />}
+                        <div className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${current ? 'bg-[var(--accent)] text-white' :
+                          done ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' :
+                            'bg-[var(--surface2)] text-[var(--text3)]'
+                          }`}>
+                          {done && (
+                            <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                              <path d="M1 4L3.5 6.5L9 1" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          )}
+                          {STATUS_LABELS[s]}
+                        </div>
+                        {i < statuses.length - 1 && <ChevronRight size={12} className="text-[var(--text3)] flex-shrink-0" />}
                       </div>
                     )
                   })
@@ -1974,9 +1923,21 @@ function OrdersPageInner() {
                     <CheckCircle size={14} /> Confirmar pedido
                   </Button>
                   <button
-                    onClick={() => setCancelConfirmOrder({ id: detail.id, customer_name: detail.customer_name })}
+                    onClick={() => setCancelConfirmOrder({ id: detail.id, customer_name: detail.customer_name, status: detail.status })}
                     className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--danger)] hover:bg-[var(--danger)]/20 transition-colors">
                     <X size={14} /> Cancelar pedido
+                  </button>
+                </div>
+              )}
+              {/* Anular (devolución total): confirmado / entrega parcial / entregado.
+                  Revierte la venta, repone lo despachado y lo cobrado queda como saldo
+                  a favor del cliente. El backend bloquea short-close y facturas fiscales. */}
+              {['confirmed', 'partially_delivered', 'delivered'].includes(detail.status) && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => setCancelConfirmOrder({ id: detail.id, customer_name: detail.customer_name, status: detail.status })}
+                    className="inline-flex items-center gap-1.5 rounded-[var(--radius-md)] border border-[var(--danger)]/40 bg-[var(--danger)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--danger)] hover:bg-[var(--danger)]/20 transition-colors">
+                    <X size={14} /> Anular pedido
                   </button>
                 </div>
               )}
@@ -2013,6 +1974,13 @@ function OrdersPageInner() {
                       {isPickup && (
                         <Button size="sm" variant="secondary" onClick={() => copyPickupText(detail)}>
                           <Copy size={14} /> <span className="hidden sm:inline">Enviar pendientes</span>
+                        </Button>
+                      )}
+                      {/* Entrega total (facturar el pedido completo). Antes vivía en el
+                          breadcrumb; ahora está junto al resto de acciones de despacho. */}
+                      {!isPickup && (
+                        <Button size="sm" variant="secondary" onClick={() => { setDeliverMode('full'); setDeliverOrderId(detail.id); setDeliverAmount(''); setDeliverNotes(''); setDeliverModal(true) }}>
+                          Entregar todo
                         </Button>
                       )}
                       {canCloseShort && (
@@ -2227,21 +2195,27 @@ function OrdersPageInner() {
                       // Solo mostramos estado de entrega si el pedido tiene seguimiento
                       // de despachos (evita marcar pedidos viejos sin tracking).
                       const hasTracking = detail.order_items?.some(i => (i.quantity_delivered ?? 0) > 0)
+                      // "Saldo a favor" (baja definitiva de lo no entregado) solo aplica cuando
+                      // el pedido está finalizado (short-close deja status 'delivered'). Mientras
+                      // sigue 'partially_delivered' lo no despachado está pendiente, no dado de baja.
+                      const isFinalized = detail.status === 'delivered'
                       return detail.order_items?.map(item => {
                         const qd = item.quantity_delivered ?? 0
-                        const notDelivered = hasTracking && qd === 0
+                        const writtenOff = isFinalized && hasTracking && qd === 0
+                        const pendingItem = !isFinalized && hasTracking && qd === 0
                         const partialItem = hasTracking && qd > 0 && qd < item.quantity
                         return (
-                      <tr key={item.id} className={notDelivered ? 'opacity-50' : ''}>
+                      <tr key={item.id} className={writtenOff ? 'opacity-50' : ''}>
                         <td className="px-3 py-2.5">
-                          <p className={cn('font-medium text-[var(--text)]', notDelivered && 'line-through')}>{item.products?.name ?? item.product_name ?? '(producto eliminado)'}</p>
+                          <p className={cn('font-medium text-[var(--text)]', writtenOff && 'line-through')}>{item.products?.name ?? item.product_name ?? '(producto eliminado)'}</p>
                           {item.products?.barcode && <p className="text-[11px] text-[var(--text3)] mono">{item.products.barcode}</p>}
-                          {notDelivered && <p className="text-[11px] text-[var(--warning,var(--text3))] font-medium">No entregado · saldo a favor</p>}
+                          {writtenOff && <p className="text-[11px] text-[var(--warning,var(--text3))] font-medium">No entregado · saldo a favor</p>}
+                          {pendingItem && <p className="text-[11px] text-[var(--text3)] font-medium">Pendiente de despacho</p>}
                           {partialItem && <p className="text-[11px] text-[var(--text3)] font-medium">Entregado {qd} de {item.quantity}</p>}
                         </td>
-                        <td className={cn('px-3 py-2.5 text-right mono text-[var(--text2)]', notDelivered && 'line-through')}>{item.quantity} {item.products?.unit ?? ''}</td>
+                        <td className={cn('px-3 py-2.5 text-right mono text-[var(--text2)]', writtenOff && 'line-through')}>{item.quantity} {item.products?.unit ?? ''}</td>
                         <td className="px-3 py-2.5 text-right mono text-[var(--text2)]">{formatCurrency(item.unit_price)}</td>
-                        <td className={cn('px-3 py-2.5 text-right mono font-semibold text-[var(--text)]', notDelivered && 'line-through')}>{formatCurrency(item.subtotal)}</td>
+                        <td className={cn('px-3 py-2.5 text-right mono font-semibold text-[var(--text)]', writtenOff && 'line-through')}>{formatCurrency(item.subtotal)}</td>
                       </tr>
                         )
                       })
@@ -2497,40 +2471,22 @@ function OrdersPageInner() {
                         setCustomerName(e.target.value)
                       }}
                       onKeyDown={handleCustomerKeyDown}
-                      placeholder="Buscar y seleccionar cliente..."
+                      placeholder="Buscar por nombre, razón social, código o documento..."
                       className="w-full pl-9 pr-4 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] placeholder:text-[var(--text3)] focus:outline-none focus:border-[var(--accent)]"
                     />
                   </div>
                   {showCustomerDropdown && (
                     <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg z-20 overflow-hidden">
                       {customerResults.length > 0 ? (
-                        <>
-                          {customerResults.map((c, idx) => (
-                            <button key={c.id}
-                              onClick={() => selectCustomer(c)}
-                              onMouseEnter={() => setCustomerHighlight(idx)}
-                              className={`w-full flex items-center justify-between px-3 py-2.5 transition-colors text-left border-b border-[var(--border)] last:border-0 ${customerHighlight === idx ? 'bg-[var(--surface2)]' : ''}`}>
-                              <div>
-                                <p className="text-sm font-medium text-[var(--text)]">{c.full_name}</p>
-                                {(c.phone || c.document) && (
-                                  <p className="text-xs text-[var(--text3)]">
-                                    {[c.document ? `DNI ${c.document}` : null, c.phone ? `Tel ${c.phone}` : null].filter(Boolean).join(' · ')}
-                                  </p>
-                                )}
-                              </div>
-                              {Number(c.current_balance) > 0 && (
-                                <span className="text-xs mono text-[var(--danger)]">{formatCurrency(c.current_balance)}</span>
-                              )}
-                            </button>
-                          ))}
-                          <button
-                            onClick={openQuickCustomerCreate}
-                            onMouseEnter={() => setCustomerHighlight(customerResults.length)}
-                            className={`w-full flex items-center gap-2 px-3 py-2.5 transition-colors text-left border-t border-[var(--border)] ${customerHighlight === customerResults.length ? 'bg-[var(--accent-subtle)]' : 'bg-[var(--surface)]'}`}>
-                            <Plus size={14} className="text-[var(--accent)]" />
-                            <span className="text-sm font-medium text-[var(--accent)]">Crear cliente &quot;{trimmedCustomerQuery}&quot;</span>
-                          </button>
-                        </>
+                        <CustomerSearchResults
+                          results={customerResults}
+                          highlight={customerHighlight}
+                          onHover={setCustomerHighlight}
+                          onSelect={selectCustomer}
+                          onCreate={openQuickCustomerCreate}
+                          createQuery={trimmedCustomerQuery}
+                          size="md"
+                        />
                       ) : !searchingCustomers ? (
                         <div className="p-3">
                           <div className="rounded-[var(--radius-md)] border border-dashed border-[var(--border)] bg-[var(--surface2)] p-3">
@@ -3382,12 +3338,20 @@ function OrdersPageInner() {
       {cancelConfirmOrder && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50" onClick={() => setCancelConfirmOrder(null)} />
+          {(() => {
+            const isPending = cancelConfirmOrder.status === 'pending'
+            const title = isPending ? 'Cancelar pedido' : 'Anular pedido'
+            return (
           <div className="relative bg-[var(--surface)] rounded-[var(--radius-lg)] p-6 w-full max-w-sm shadow-xl">
-            <h3 className="text-base font-semibold text-[var(--text)] mb-2">Cancelar pedido</h3>
+            <h3 className="text-base font-semibold text-[var(--text)] mb-2">{title}</h3>
             <p className="text-sm text-[var(--text2)] mb-1">
-              ¿Confirmas la cancelación del pedido de <span className="font-medium text-[var(--text)]">{cancelConfirmOrder.customer_name}</span>?
+              ¿Confirmás {isPending ? 'la cancelación' : 'la anulación'} del pedido de <span className="font-medium text-[var(--text)]">{cancelConfirmOrder.customer_name}</span>?
             </p>
-            <p className="text-xs text-[var(--text3)] mb-5">El stock reservado será devuelto al depósito.</p>
+            <p className="text-xs text-[var(--text3)] mb-5">
+              {isPending
+                ? 'El pedido se cancela sin generar venta.'
+                : 'Se anula la venta, se repone al depósito lo que se haya despachado y lo cobrado queda como saldo a favor del cliente en su cuenta corriente.'}
+            </p>
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setCancelConfirmOrder(null)}
@@ -3401,10 +3365,12 @@ function OrdersPageInner() {
                   await handleAction(id, 'cancel')
                 }}
                 className="px-4 py-2 text-sm rounded-[var(--radius-md)] font-medium bg-[var(--danger)] text-white hover:opacity-90">
-                Cancelar pedido
+                {title}
               </button>
             </div>
           </div>
+            )
+          })()}
         </div>
       )}
 
