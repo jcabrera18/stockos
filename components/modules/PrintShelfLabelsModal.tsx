@@ -182,6 +182,11 @@ function generateBarcodeSVG(code: string, maxWidthMm: number): { svg: string; fi
 
 const A4_WIDTH_PX = 793.7 // 210mm @ 96dpi
 
+// Umbral de etiquetas (productos × copias) a partir del cual imprimir puede
+// tardar o trabar el navegador: el print materializa TODAS las etiquetas de
+// golpe en un popup. Avisamos y pedimos confirmación por encima de esto.
+const LABELS_WARN_THRESHOLD = 3000
+
 // Lista sintética para comercios que no usan listas de precio (precio fijo).
 // getListPrice() devuelve el sell_price del producto cuando use_fixed_sell_price.
 const FALLBACK_LIST: PriceList = {
@@ -467,11 +472,20 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   const handleLoadProducts = async () => {
     setLoadingProducts(true)
     try {
-      const params: Record<string, string | number> = { limit: 500, page: 1 }
-      if (brandId) params.brand_id = brandId
-
-      const res = await api.get<{ data: ProductRow[] }>('/api/products', params)
-      let filtered = res.data
+      // El backend limita `limit` a 500, así que paginamos hasta traer todos.
+      const PAGE_SIZE = 500
+      const rows: ProductRow[] = []
+      let page = 1
+      while (true) {
+        const params: Record<string, string | number> = { limit: PAGE_SIZE, page }
+        if (brandId) params.brand_id = brandId
+        const res = await api.get<{ data: ProductRow[]; pagination?: { pages: number } }>('/api/products', params)
+        rows.push(...res.data)
+        const totalPages = res.pagination?.pages ?? 1
+        if (page >= totalPages || res.data.length < PAGE_SIZE) break
+        page++
+      }
+      let filtered = rows
 
       if (categoryId) {
         const ids = getAllDescendantIds(catTree, categoryId)
@@ -579,6 +593,11 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
   const handlePrint = () => {
     if (!mainList) return
 
+    if (labelItems.length > LABELS_WARN_THRESHOLD && !window.confirm(
+      `Vas a generar ${labelItems.length.toLocaleString('es-AR')} etiquetas. ` +
+      `Puede tardar varios segundos o trabar el navegador. ¿Continuar?`
+    )) return
+
     const labelsHtml = labelItems
       .map(p => buildLabelHtml(p, mainList, otherLists, showCode, showTiers, columns, uniformSize))
       .join('')
@@ -629,6 +648,9 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
       setZebra({ status: 'error', msg: 'Ingresá un tamaño de etiqueta válido (mínimo 1 cm de lado)' })
       return
     }
+    if (labelItems.length > LABELS_WARN_THRESHOLD && !window.confirm(
+      `Vas a enviar ${labelItems.length.toLocaleString('es-AR')} etiquetas a la impresora. ¿Continuar?`
+    )) return
     const tpl = templateFromCm(wCm, hCm)
     setZebra({ status: 'sending', msg: 'Enviando a la impresora Zebra…' })
     // En Zebra la etiqueta es siempre nombre + precio + código de barras
@@ -764,9 +786,9 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
               <input
                 type="number"
                 min={1}
-                max={10}
+                max={999}
                 value={copies}
-                onChange={e => setCopies(Math.max(1, Math.min(10, Number(e.target.value))))}
+                onChange={e => setCopies(Math.max(1, Math.min(999, Number(e.target.value) || 1)))}
                 className="w-full px-3 py-2 text-sm rounded-[var(--radius-md)] bg-[var(--surface)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
               />
             </div>
@@ -1022,6 +1044,15 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
               }
             >
               {zebra.status === 'sending' ? '⏳ ' : ''}{zebra.msg}
+            </div>
+          )}
+
+          {labelItems.length > LABELS_WARN_THRESHOLD && (
+            <div
+              className="px-3 py-2 rounded-[var(--radius-md)] text-xs"
+              style={{ background: 'rgba(245,158,11,0.12)', color: '#b45309', border: '1px solid rgba(245,158,11,0.3)' }}
+            >
+              ⚠ Son {labelItems.length.toLocaleString('es-AR')} etiquetas ({selectedProducts.length} productos × {copies} {copies === 1 ? 'copia' : 'copias'}). Imprimir esta cantidad puede tardar o trabar el navegador. Si no lo necesitás, bajá las copias o seleccioná menos productos.
             </div>
           )}
 
