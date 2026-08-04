@@ -208,12 +208,12 @@ export function ShareCatalogModal({ open, onClose, lists: listsProp }: Props) {
                         <Button variant="ghost" size="sm" aria-label="Abrir"><ExternalLink size={15} /></Button>
                       </a>
                     </div>
-                    <label className="flex items-center justify-between gap-2 pt-1 cursor-pointer">
+                    <label className="flex items-center gap-2 pt-1 cursor-pointer">
+                      <Toggle checked={cat.accept_orders} onChange={() => toggleAcceptOrders(cat)} />
                       <span className="text-xs text-[var(--text2)]">
                         Recibir pedidos online
                         {cat.accept_orders && <Badge variant="success" className="ml-2">Activo</Badge>}
                       </span>
-                      <Toggle checked={cat.accept_orders} onChange={() => toggleAcceptOrders(cat)} />
                     </label>
                   </div>
                 ))}
