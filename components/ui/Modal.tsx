@@ -16,17 +16,17 @@ interface ModalProps {
   minimized?: boolean
   onMinimize?: () => void
   onRestore?: () => void
-  /** Si es false, el modal solo se cierra con la X (no por click afuera ni Escape) */
+  /** Si es true, el modal también se cierra por click afuera. Por defecto solo se cierra con la X o Escape. */
   dismissable?: boolean
 }
 
-export function Modal({ open, onClose, title, children, footer, headerActions, size = 'md', zIndex, minimizable, minimized, onMinimize, onRestore, dismissable = true }: ModalProps) {
+export function Modal({ open, onClose, title, children, footer, headerActions, size = 'md', zIndex, minimizable, minimized, onMinimize, onRestore, dismissable = false }: ModalProps) {
   useEffect(() => {
-    if (!open || !dismissable) return
+    if (!open) return
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
-  }, [open, onClose, dismissable])
+  }, [open, onClose])
 
   const handleBackdrop = dismissable ? onClose : undefined
 

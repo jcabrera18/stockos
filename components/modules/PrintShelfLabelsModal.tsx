@@ -705,7 +705,6 @@ export function PrintShelfLabelsModal({ open, onClose }: Props) {
       onClose={onClose}
       title={stepTitle[step]}
       size={step === 'preview' ? 'xl' : 'md'}
-      dismissable={step !== 'preview'}
       headerActions={step === 'preview' && mainList ? (
         <div className="flex items-center gap-2 mr-1">
           <button

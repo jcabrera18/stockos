@@ -48,17 +48,20 @@ const PAYMENT_LABELS: Record<string, string> = {
   transferencia: 'Transferencia', qr: 'QR', cuenta_corriente: 'Cta. Cte.',
 }
 
+// Código de tipo de comprobante AFIP (CbteTipo). Es lo que va en el "Cód. NN"
+// debajo de la letra en la factura, NO el punto de venta.
+const COMPROBANTE_COD: Record<string, number> = {
+  A: 1, B: 6, C: 11, R: 91,
+  NCA: 3, NCB: 8, NCC: 13,
+  NDA: 2, NDB: 7, NDC: 12,
+}
+
 function buildAfipQrUrl(invoice: PrintInvoiceData, cuit: string, ptoVta: number): string {
-  const tipoCmpMap: Record<string, number> = {
-    A: 1, B: 6, C: 11, R: 91,
-    NCA: 3, NCB: 8, NCC: 13,
-    NDA: 2, NDB: 7, NDC: 12,
-  }
   const cuitEmisor = Number(cuit.replace(/\D/g, ''))
   const cuitReceptor = invoice.receptor_cuit ? Number(invoice.receptor_cuit.replace(/\D/g, '')) : 0
   const payload = {
     ver: 1, fecha: invoice.fecha, cuit: cuitEmisor, ptoVta,
-    tipoCmp: tipoCmpMap[invoice.invoice_type] ?? 1,
+    tipoCmp: COMPROBANTE_COD[invoice.invoice_type] ?? 1,
     nroCmp: invoice.numero, importe: invoice.total_amount,
     moneda: 'PES', ctz: 1,
     tipoDocRec: invoice.receptor_cuit ? 80 : 99,
@@ -89,6 +92,7 @@ export async function printFacturaA4(
   const typeLabel = TYPE_LABELS[invoice.invoice_type] ?? invoice.invoice_type
   const letra = invoice.invoice_type.charAt(0)
   const ptoVenta = String(biz?.afip_punto_venta ?? 1).padStart(5, '0')
+  const codComprobante = String(COMPROBANTE_COD[invoice.invoice_type] ?? '').padStart(2, '0')
   const numero = String(invoice.numero).padStart(8, '0')
   const isA = invoice.invoice_type === 'A'
   const receptorName = invoice.receptor_name
@@ -201,7 +205,7 @@ export async function printFacturaA4(
     </div>
     <div class="doc-header-center">
       <div class="letter-box"><div class="letter">${letra}</div></div>
-      <div class="letter-sub">Cód. ${ptoVenta}</div>
+      <div class="letter-sub">Cód. ${codComprobante}</div>
     </div>
     <div class="doc-header-right">
       <div class="inv-type-label">${typeLabel}</div>

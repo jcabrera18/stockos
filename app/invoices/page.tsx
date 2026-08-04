@@ -20,6 +20,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { isRestrictedRole } from '@/lib/roles'
 import { printFacturaA4 } from '@/lib/printFactura'
+import { resolveEmisor } from '@/lib/emisor'
 import { allowedInvoiceTypes } from '@/lib/invoiceRules'
 import { makeOptimisticState, reconcileList, clearOptimisticState } from '@/lib/optimistic-reconcile'
 import {
@@ -59,6 +60,12 @@ interface Invoice {
   afip_cae?: string
   afip_cae_vto?: string
   afip_numero?: number
+  // Snapshot del emisor fiscal usado (facturación multi-CUIT por sucursal).
+  // Presente cuando la sucursal factura con su propio CUIT/PtoVta.
+  punto_venta?: number
+  emisor_cuit?: string
+  emisor_name?: string
+  emisor_iva_condition?: string
   afip_status: 'pending' | 'authorized' | 'rejected' | 'not_requested'
   afip_error?: string
   afip_requested: boolean
@@ -401,8 +408,15 @@ function InvoicesPageInner() {
     }
   }
 
+  // Emisor con el que se imprime: si el comprobante trae snapshot de emisor
+  // propio de la sucursal (multi-CUIT), pisa el CUIT/PtoVta del negocio para
+  // que el QR de ARCA y el encabezado reflejen el emisor real. Las facturas
+  // históricas (sin emisor_cuit) siguen usando el emisor del negocio.
+  const emisorBizFor = (invoice: Invoice): TicketBusiness =>
+    resolveEmisor<TicketBusiness>(user?.business ?? {}, invoice) ?? {}
+
   const handlePrintTicket = async (invoice: Invoice) => {
-    const biz: TicketBusiness = user?.business ?? {}
+    const biz: TicketBusiness = emisorBizFor(invoice)
     // Un comprobante fiscal sin CAE no fue autorizado por ARCA: se imprime (y se
     // titula) como Ticket X, no como la factura que todavía no es.
     const CAE_REQUIRED = ['A', 'B', 'C', 'NCA', 'NCB', 'NCC', 'NDA', 'NDB', 'NDC']
@@ -442,7 +456,7 @@ function InvoicesPageInner() {
 
   // ── Factura A4 moderna ───────────────────────────────────────────────────
   const handlePrintFactura = (invoice: Invoice) => {
-    printFacturaA4(invoice, user?.business ?? undefined)
+    printFacturaA4(invoice, emisorBizFor(invoice))
       .catch(err => toast.error(err instanceof Error ? err.message : 'No se pudo imprimir la factura'))
   }
 

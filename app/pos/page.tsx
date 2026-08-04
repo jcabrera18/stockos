@@ -211,6 +211,12 @@ export default function POSPage() {
 
   const [cajaWarning, setCajaWarning] = useState(false)
   const [invoiceModal, setInvoiceModal] = useState(false)
+  useEffect(() => {
+    if (!invoiceModal) return
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setInvoiceModal(false) }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [invoiceModal])
 
   const [branches, setBranches] = useState<{ id: string; name: string; warehouse_id?: string; registers: { id: string; name: string }[] }[]>([])
   const [loadingBranches, setLoadingBranches] = useState(true)
@@ -2449,7 +2455,7 @@ export default function POSPage() {
 
       {/* Modal factura */}
       {invoiceModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }} onClick={() => setInvoiceModal(false)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)' }}>
           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6 max-w-sm w-full">
             <h3 className="text-base font-semibold text-[var(--text)] mb-4">Emitir factura</h3>
             <p className="text-sm text-[var(--text3)] mb-4">Integración ARCA en configuración. Próximamente disponible.</p>

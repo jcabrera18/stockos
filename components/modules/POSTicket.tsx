@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/Input'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { shareTicketImage } from '@/lib/shareTicket'
+import { resolveEmisor } from '@/lib/emisor'
 import { SaleShareCard } from './SaleShareCard'
 import QRCode from 'qrcode'
 import { type PrintSettings, DEFAULT_PRINT_SETTINGS } from '@/hooks/usePrintSettings'
@@ -65,6 +66,12 @@ interface InvoiceInfo {
   net_amount?: number
   iva_amount?: number
   total_amount?: number
+  // Snapshot del emisor fiscal usado (facturación multi-CUIT por sucursal):
+  // presente cuando la sucursal factura con su propio CUIT/PtoVta.
+  punto_venta?: number
+  emisor_cuit?: string
+  emisor_name?: string
+  emisor_iva_condition?: string
   invoice_items?: { id: string; description: string; quantity: number; unit_price: number; iva_rate?: number; subtotal: number }[]
 }
 
@@ -150,8 +157,10 @@ export function POSTicket({
   useEffect(() => {
     if (!invoice || invoice.afip_status !== 'authorized') { setQrDataUrl(''); return }
     const cae = invoice.afip_cae ?? invoice.cae
-    if (!cae || !business?.cuit) { setQrDataUrl(''); return }
-    const url = buildAfipQrUrl({ ...invoice, cae }, business.cuit, business.afip_punto_venta ?? 1)
+    // Emisor del comprobante: snapshot de la sucursal (multi-CUIT) o el del negocio.
+    const emisor = resolveEmisor<BusinessInfo>(business, invoice)
+    if (!cae || !emisor?.cuit) { setQrDataUrl(''); return }
+    const url = buildAfipQrUrl({ ...invoice, cae }, emisor.cuit, emisor.afip_punto_venta ?? 1)
     QRCode.toDataURL(url, { width: 120, margin: 1, errorCorrectionLevel: 'M' })
       .then(setQrDataUrl)
       .catch(() => setQrDataUrl(''))
@@ -167,6 +176,7 @@ export function POSTicket({
   useEffect(() => {
     if (!open || convertModal) return
     const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); onClose(); return }
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.key === 'p' || e.key === 'P') {
@@ -188,7 +198,22 @@ export function POSTicket({
     return () => window.removeEventListener('keydown', handler)
   }, [open, convertModal, invoice, sale]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Escape cierra el modal de conversión a factura.
+  useEffect(() => {
+    if (!convertModal) return
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setConvertModal(false) }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [convertModal])
+
   const isInvoiced = !!(invoice && invoice.afip_status === 'authorized' && (invoice.cae || invoice.afip_cae))
+
+  // Emisor efectivo: si la factura trae snapshot de emisor propio de la sucursal
+  // (multi-CUIT), pisa el CUIT/PtoVta del negocio para el QR de ARCA, el
+  // encabezado y el nº impreso. Si no, usa el emisor por defecto del negocio.
+  const emisorBizFor = (inv?: InvoiceInfo | null): BusinessInfo | undefined =>
+    resolveEmisor<BusinessInfo>(business, inv)
+  const emisorBusiness = emisorBizFor(invoice)
 
   const ivaCondition = business?.iva_condition ?? ''
   // MO: solo C · RI: A y B · EX: B y C · sin configurar: todos
@@ -212,8 +237,9 @@ export function POSTicket({
 
   const handlePrintInvoiceTicket = async (inv: InvoiceInfo) => {
     const cae = inv.afip_cae ?? inv.cae
-    const qrDataUrl = business
-      ? await buildInvoiceQrDataUrl({ ...inv, cae }, business)
+    const emisor = emisorBizFor(inv)
+    const qrDataUrl = emisor
+      ? await buildInvoiceQrDataUrl({ ...inv, cae }, emisor)
       : ''
     const data = toTicketInvoice(
       { ...inv, receptor_name: inv.receptor_name ?? customerName ?? undefined },
@@ -221,9 +247,9 @@ export function POSTicket({
       qrDataUrl,
     )
     const numero = String(inv.numero ?? 0).padStart(8, '0')
-    const ptoVenta = String(business?.afip_punto_venta ?? 1).padStart(5, '0')
+    const ptoVenta = String(emisor?.afip_punto_venta ?? 1).padStart(5, '0')
     const typeLabel = TYPE_LABELS[inv.invoice_type] ?? inv.invoice_type
-    printThermal(`${typeLabel} ${ptoVenta}-${numero}`, buildInvoiceTicketHtml(data, business ?? {}), printSettings)
+    printThermal(`${typeLabel} ${ptoVenta}-${numero}`, buildInvoiceTicketHtml(data, emisor ?? {}), printSettings)
   }
 
   const handleConvert = async () => {
@@ -416,7 +442,7 @@ export function POSTicket({
                 ref={printRef}
                 business={{
                   name: business?.name,
-                  cuit: business?.cuit,
+                  cuit: emisorBusiness?.cuit,
                   ivaConditionLabel: business?.iva_condition ? (IVA_LABELS[business.iva_condition] ?? business.iva_condition) : null,
                   address: business?.address,
                   phone: business?.phone,
@@ -439,7 +465,7 @@ export function POSTicket({
                   typeLabel: invoiceTypeLabel(invoice.invoice_type),
                   invoiceType: invoice.invoice_type,
                   numero: invoice.numero,
-                  ptoVenta: business?.afip_punto_venta ?? 1,
+                  ptoVenta: emisorBusiness?.afip_punto_venta ?? 1,
                   cae: invoice.afip_cae ?? invoice.cae,
                   caeVto: invoice.afip_cae_vto ?? invoice.cae_expiry,
                   qrDataUrl,
@@ -465,11 +491,9 @@ export function POSTicket({
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}
-          onClick={() => setConvertModal(false)}
         >
           <div
             className="w-full max-w-sm bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl overflow-hidden"
-            onClick={e => e.stopPropagation()}
           >
             <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
               <h2 className="text-base font-semibold text-[var(--text)]">Convertir a factura</h2>

@@ -14,6 +14,7 @@ import type { Pagination as PaginationType } from '@/types'
 import { CreditCard, TrendingUp, TrendingDown, SlidersHorizontal, MapPin, Calendar, Printer, MessageCircle, FileText, FilePlus } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { printFacturaA4, type PrintInvoiceData } from '@/lib/printFactura'
+import { resolveEmisor } from '@/lib/emisor'
 import { ConvertInvoiceModal } from '@/components/modules/ConvertInvoiceModal'
 import { SaleDetailModal } from '@/components/modules/SaleDetailModal'
 
@@ -244,8 +245,9 @@ export function CustomerDetailModal({ open, onClose, customer, onPayment, refres
   const handlePrintInvoice = async (invoiceId: string) => {
     setPrintingInvoiceId(invoiceId)
     try {
-      const inv = await api.get<PrintInvoiceData>(`/api/invoices/${invoiceId}`)
-      await printFacturaA4(inv, user?.business ?? undefined, customer?.full_name)
+      const inv = await api.get<PrintInvoiceData & { emisor_cuit?: string; punto_venta?: number }>(`/api/invoices/${invoiceId}`)
+      // Emisor propio de la sucursal (multi-CUIT) si la factura lo trae en su snapshot.
+      await printFacturaA4(inv, resolveEmisor(user?.business, inv), customer?.full_name)
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'No se pudo abrir la factura')
     } finally {

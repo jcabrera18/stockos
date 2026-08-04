@@ -94,6 +94,17 @@ export default function PurchasesPage() {
   const [costPreviewModal, setCostPreviewModal] = useState(false)
   const [previewItems, setPreviewItems]       = useState<CostPreviewItem[]>([])
   const [costDecisions, setCostDecisions]     = useState<Record<string, CostDecision>>({})
+  // Escape cierra los modales custom (detalle de orden / decisión de costos).
+  useEffect(() => {
+    if (!detailModal && !costPreviewModal) return
+    const h = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      if (costPreviewModal) setCostPreviewModal(false)
+      else if (detailModal) setDetailModal(false)
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [detailModal, costPreviewModal])
 
   // Cancelar orden
   const [cancelModal, setCancelModal] = useState(false)
@@ -606,7 +617,6 @@ export default function PurchasesPage() {
         <div
           className="fixed inset-0 z-40 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
-          onClick={e => { if (e.target === e.currentTarget) setDetailModal(false) }}
         >
           <div className="w-full max-w-lg bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
@@ -734,7 +744,6 @@ export default function PurchasesPage() {
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
-          onClick={e => { if (e.target === e.currentTarget) setCostPreviewModal(false) }}
         >
           <div className="w-full max-w-lg bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] shadow-2xl flex flex-col max-h-[90vh]">
             <div className="flex items-start justify-between px-5 py-4 border-b border-[var(--border)]">

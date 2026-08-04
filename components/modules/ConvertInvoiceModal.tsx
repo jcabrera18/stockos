@@ -8,6 +8,7 @@ import { formatCurrency } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
 import { toast } from 'sonner'
 import { printFacturaA4 } from '@/lib/printFactura'
+import { resolveEmisor } from '@/lib/emisor'
 import { allowedInvoiceTypes, IVA_CONDITION_LABELS, type InvoiceLetter } from '@/lib/invoiceRules'
 
 interface InvoiceSummary {
@@ -26,6 +27,9 @@ interface InvoiceSummary {
   receptor_address?: string
   receptor_iva_condition: string
   notes?: string
+  // Snapshot del emisor fiscal usado (facturación multi-CUIT por sucursal).
+  punto_venta?: number
+  emisor_cuit?: string
   invoice_items: { id: string; description: string; quantity: number; unit_price: number; iva_rate?: number; subtotal: number }[]
 }
 
@@ -93,7 +97,8 @@ export function ConvertInvoiceModal({ open, onClose, invoiceId, fallbackCustomer
         const authorized = await api.post<InvoiceSummary>(`/api/invoices/${converted.id}/authorize`, {})
         toast.success(`Factura ${convertType} autorizada — CAE: ${authorized.afip_cae}`, { id: 'afip-auth' })
         const merged = { ...authorized, invoice_items: authorized.invoice_items ?? converted.invoice_items }
-        await printFacturaA4(merged, user?.business ?? undefined, fallbackCustomerName)
+        // Emisor propio de la sucursal (multi-CUIT) si la factura lo trae en su snapshot.
+        await printFacturaA4(merged, resolveEmisor(user?.business, merged), fallbackCustomerName)
       } catch (afipErr: unknown) {
         toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar en ARCA', { id: 'afip-auth' })
       }

@@ -170,6 +170,12 @@ export default function QuotesPage() {
 
   // Anulación
   const [cancelConfirm, setCancelConfirm] = useState<{ id: string; customer_name: string } | null>(null)
+  useEffect(() => {
+    if (!cancelConfirm) return
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setCancelConfirm(null) }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [cancelConfirm])
 
   // Conversión a pedido
   const [convertModal, setConvertModal] = useState(false)
@@ -1342,7 +1348,7 @@ export default function QuotesPage() {
       {/* ── Confirmación anulación ── */}
       {cancelConfirm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setCancelConfirm(null)} />
+          <div className="absolute inset-0 bg-black/50" />
           <div className="relative bg-[var(--surface)] rounded-[var(--radius-lg)] p-6 w-full max-w-sm shadow-xl">
             <h3 className="text-base font-semibold text-[var(--text)] mb-2">Anular presupuesto</h3>
             <p className="text-sm text-[var(--text2)] mb-5">

@@ -11,13 +11,16 @@ import { Printer, CreditCard, Package, User, Calendar, Hash, FileText, Download,
 import { useAuth } from '@/hooks/useAuth'
 import { toast } from 'sonner'
 import { printFacturaA4 } from '@/lib/printFactura'
+import { resolveEmisor } from '@/lib/emisor'
 import { shareTicketImage } from '@/lib/shareTicket'
 import { SaleShareCard } from './SaleShareCard'
+import QRCode from 'qrcode'
 import {
   printThermal,
   buildSaleTicketHtml,
   buildInvoiceTicketHtml,
   buildInvoiceQrDataUrl,
+  buildAfipQrUrl,
   type TicketInvoiceData,
   type TicketBusiness,
 } from '@/lib/printTicket'
@@ -76,6 +79,11 @@ interface InvoiceSummary {
   receptor_address?: string
   receptor_iva_condition: string
   notes?: string
+  // Snapshot del emisor fiscal usado (facturación multi-CUIT por sucursal).
+  punto_venta?: number
+  emisor_cuit?: string
+  emisor_name?: string
+  emisor_iva_condition?: string
   invoice_items: { id: string; description: string; quantity: number; unit_price: number; iva_rate?: number; subtotal: number }[]
 }
 
@@ -128,6 +136,7 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
   const shareCardRef = useRef<HTMLDivElement>(null)
   const sharingRef = useRef(false)
   const [sharing, setSharing] = useState(false)
+  const [qrDataUrl, setQrDataUrl] = useState<string>('')
 
   const router = useRouter()
   const role = user?.role ?? 'cashier'
@@ -192,6 +201,19 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
       .finally(() => setLoadingInvoice(false))
   }, [saleId])
 
+  // QR de ARCA para la tarjeta de WhatsApp (solo si la factura está autorizada).
+  // Emisor: snapshot de la sucursal (multi-CUIT) o el del negocio.
+  useEffect(() => {
+    if (!invoice || invoice.afip_status !== 'authorized') { setQrDataUrl(''); return }
+    const cae = invoice.afip_cae ?? invoice.cae
+    const emisor = resolveEmisor(user?.business, invoice)
+    if (!cae || !emisor?.cuit) { setQrDataUrl(''); return }
+    const url = buildAfipQrUrl({ ...invoice, cae }, emisor.cuit, emisor.afip_punto_venta ?? 1)
+    QRCode.toDataURL(url, { width: 120, margin: 1, errorCorrectionLevel: 'M' })
+      .then(setQrDataUrl)
+      .catch(() => setQrDataUrl(''))
+  }, [invoice, user])
+
   // Keyboard shortcuts
   useEffect(() => {
     if (!open || convertModal) return
@@ -225,7 +247,9 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
 
   const handlePrint = async () => {
     if (!sale) return
-    const biz: TicketBusiness = user?.business ?? {}
+    // Emisor efectivo: si la factura trae snapshot de emisor propio de la sucursal
+    // (multi-CUIT), pisa el CUIT/PtoVta del negocio para el QR y el nº impreso.
+    const biz: TicketBusiness = resolveEmisor<TicketBusiness>(user?.business ?? {}, invoice) ?? {}
     const isInvoiced = !!(invoice && invoice.afip_status === 'authorized' && (invoice.cae || invoice.afip_cae))
 
     if (isInvoiced && invoice) {
@@ -300,7 +324,8 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
 
   const handleDownloadInvoice = () => {
     if (!invoice) return
-    printFacturaA4(invoice, user?.business ?? undefined, customer?.full_name)
+    // Emisor propio de la sucursal (multi-CUIT) si la factura lo trae en su snapshot.
+    printFacturaA4(invoice, resolveEmisor(user?.business, invoice), customer?.full_name)
       .catch(err => toast.error(err instanceof Error ? err.message : 'No se pudo descargar la factura'))
   }
 
@@ -344,7 +369,7 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
         toast.success(`Factura ${convertType} autorizada — CAE: ${authorized.afip_cae ?? authorized.cae}`, { id: 'afip-auth' })
         const merged = { ...authorized, invoice_items: authorized.invoice_items ?? converted.invoice_items }
         setInvoice(merged)
-        await printFacturaA4(merged, user?.business ?? undefined, customer?.full_name)
+        await printFacturaA4(merged, resolveEmisor(user?.business, merged), customer?.full_name)
       } catch (afipErr: unknown) {
         toast.error(afipErr instanceof Error ? afipErr.message : 'Error al autorizar en ARCA', { id: 'afip-auth' })
         setInvoice(converted)
@@ -632,25 +657,60 @@ export function SaleDetailModal({ open, onClose, saleId, orderId, autoConvert, o
               )}
             </div>
 
-            {/* Tarjeta oculta off-screen — solo para capturar la imagen de WhatsApp */}
+            {/* Tarjeta oculta off-screen — solo para capturar la imagen de WhatsApp.
+                Si la venta está facturada en ARCA, se enriquece con los datos
+                fiscales (tipo/nº, receptor, CAE y QR), igual que el POS tras facturar. */}
             <div style={{ position: 'fixed', left: '-10000px', top: 0, pointerEvents: 'none' }} aria-hidden>
-              <SaleShareCard
-                ref={shareCardRef}
-                business={user?.business ?? undefined}
-                saleId={sale.id}
-                createdAt={sale.created_at}
-                total={sale.total}
-                discount={sale.discount}
-                shippingAmount={sale.shipping_amount}
-                paymentMethod={sale.payment_method}
-                installments={sale.installments}
-                paymentSplits={sale.payment_splits}
-                items={sale.sale_items.map(i => ({
-                  name: i.products.name, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount,
-                }))}
-                sellerName={sale.users?.full_name}
-                customerName={customer?.full_name}
-              />
+              {(() => {
+                const isInvoiced = !!(invoice && invoice.afip_status === 'authorized' && (invoice.cae || invoice.afip_cae))
+                // Emisor efectivo: snapshot de la sucursal (multi-CUIT) o el del negocio.
+                const emisor = resolveEmisor(user?.business, invoice)
+                return (
+                  <SaleShareCard
+                    ref={shareCardRef}
+                    business={{
+                      name: user?.business?.name,
+                      cuit: emisor?.cuit,
+                      ivaConditionLabel: user?.business?.iva_condition
+                        ? (IVA_LABELS[user.business.iva_condition] ?? user.business.iva_condition)
+                        : null,
+                      address: user?.business?.address,
+                      phone: user?.business?.phone,
+                    }}
+                    saleId={sale.id}
+                    createdAt={sale.created_at}
+                    total={isInvoiced && invoice ? (invoice.total_amount ?? sale.total) : sale.total}
+                    discount={sale.discount}
+                    shippingAmount={sale.shipping_amount}
+                    paymentMethod={sale.payment_method}
+                    installments={sale.installments}
+                    paymentSplits={sale.payment_splits}
+                    items={sale.sale_items.map(i => ({
+                      name: i.products.name, quantity: i.quantity, unit_price: i.unit_price, discount: i.discount,
+                    }))}
+                    sellerName={sale.users?.full_name}
+                    customerName={customer?.full_name}
+                    invoice={isInvoiced && invoice ? {
+                      typeLabel: TYPE_LABELS[invoice.invoice_type] ?? `Comprobante ${invoice.invoice_type}`,
+                      invoiceType: invoice.invoice_type,
+                      numero: invoice.numero,
+                      ptoVenta: emisor?.afip_punto_venta ?? 1,
+                      cae: invoice.afip_cae ?? invoice.cae,
+                      caeVto: invoice.afip_cae_vto,
+                      qrDataUrl,
+                      receptorName: invoice.receptor_name ?? customer?.full_name ?? undefined,
+                      receptorIvaLabel: IVA_LABELS[invoice.receptor_iva_condition ?? 'CF'] ?? invoice.receptor_iva_condition,
+                      receptorCuit: invoice.receptor_cuit,
+                      receptorAddress: invoice.receptor_address,
+                      netAmount: invoice.net_amount,
+                      ivaAmount: invoice.iva_amount,
+                      items: (invoice.invoice_items ?? []).map(it => ({
+                        name: it.description, quantity: it.quantity, unit_price: it.unit_price, discount: 0,
+                      })),
+                    } : undefined}
+                  />
+                )
+              })()}
             </div>
 
           </div>

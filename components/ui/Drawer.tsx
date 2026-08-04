@@ -12,6 +12,8 @@ interface DrawerProps {
   /** Clase Tailwind de ancho del panel (desktop). El panel es full-width en mobile. */
   width?: string
   zIndex?: number
+  /** Si es true, también se cierra por click afuera. Por defecto solo se cierra con la X o Escape. */
+  dismissable?: boolean
 }
 
 /**
@@ -19,7 +21,7 @@ interface DrawerProps {
  * deja el contenido de fondo visible (backdrop tenue) y usa toda la altura de la
  * pantalla, así el contenido respira y no queda apretado.
  */
-export function Drawer({ open, onClose, title, children, footer, width = 'sm:max-w-[520px]', zIndex }: DrawerProps) {
+export function Drawer({ open, onClose, title, children, footer, width = 'sm:max-w-[520px]', zIndex, dismissable = false }: DrawerProps) {
   useEffect(() => {
     if (!open) return
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -35,7 +37,7 @@ export function Drawer({ open, onClose, title, children, footer, width = 'sm:max
       <div
         className="fixed inset-0"
         style={{ background: 'rgba(0,0,0,0.4)', zIndex: zIndex ?? 50 }}
-        onClick={onClose}
+        onClick={dismissable ? onClose : undefined}
       />
       {/* Panel deslizante anclado a la derecha, altura completa */}
       <div

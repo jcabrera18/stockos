@@ -24,6 +24,8 @@ export interface UserProfile {
     iva_condition:          string
     afip_punto_venta:       number | null
     afip_environment:       string
+    has_cert:               boolean
+    has_key:                boolean
     monotributo_limite_anual: number | null
     stock_enabled:          boolean
     multicurrency_enabled:  boolean

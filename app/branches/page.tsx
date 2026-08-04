@@ -15,7 +15,8 @@ import { formatCurrency, formatCompactCurrency } from '@/lib/utils'
 import { useAuth } from '@/hooks/useAuth'
 import { getPlanLimits } from '@/lib/plans'
 import { PlanLimitBanner } from '@/components/modules/PlanLimitBanner'
-import { Building2, Plus, Pencil, Trash2, Star, CreditCard, TrendingUp, AlertTriangle, Warehouse as WarehouseIcon } from 'lucide-react'
+import { BranchFiscalModal } from '@/components/modules/BranchFiscalModal'
+import { Building2, Plus, Pencil, Trash2, Star, CreditCard, TrendingUp, AlertTriangle, Warehouse as WarehouseIcon, Receipt } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface Register {
@@ -85,6 +86,9 @@ export default function BranchesPage() {
   const [deleteBranch, setDeleteBranch] = useState<Branch | null>(null)
   const [deletingBranch, setDeletingBranch] = useState(false)
 
+  // Configuración fiscal (emisor AFIP) por sucursal
+  const [fiscalBranch, setFiscalBranch] = useState<Branch | null>(null)
+
   // Modal caja
   const [registerModal, setRegisterModal] = useState(false)
   const [registerBranch, setRegisterBranch] = useState<Branch | null>(null)
@@ -116,6 +120,8 @@ export default function BranchesPage() {
 
   // ── Límites por plan ──────────────────────────────────────
   const planLimits      = getPlanLimits(user?.business?.subscription?.plan)
+  // Facturar con CUIT propio por sucursal (multi-CUIT) es feature multilocal+.
+  const canBranchFiscal = ['multilocal', 'empresa'].includes(user?.business?.subscription?.plan ?? '')
   const totalRegisters  = branches.reduce((a, b) => a + b.registers.filter(r => r.is_active).length, 0)
   const atBranchLimit   = planLimits.maxBranches  != null && branches.length  >= planLimits.maxBranches
   const atRegisterLimit = planLimits.maxRegisters != null && totalRegisters   >= planLimits.maxRegisters
@@ -348,18 +354,25 @@ export default function BranchesPage() {
                             </span>
                           )}
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5">
                           <button onClick={() => openCreateRegister(branch)}
-                            title="Agregar caja"
-                            className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors">
-                            <Plus size={14} />
+                            className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors">
+                            <Plus size={13} /> Agregar caja
                           </button>
+                          {canBranchFiscal && (
+                            <button onClick={() => setFiscalBranch(branch)}
+                              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--accent-subtle)] transition-colors">
+                              <Receipt size={13} /> Datos de AFIP
+                            </button>
+                          )}
                           <button onClick={() => openEditBranch(branch)}
+                            title="Editar sucursal"
                             className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--text)] hover:bg-[var(--surface2)] transition-colors">
                             <Pencil size={13} />
                           </button>
                           {!branch.is_main && (
                             <button onClick={() => { setDeleteBranch(branch); setDeleteBranchModal(true) }}
+                              title="Eliminar sucursal"
                               className="p-1.5 rounded text-[var(--text3)] hover:text-[var(--danger)] hover:bg-[var(--danger-subtle)] transition-colors">
                               <Trash2 size={13} />
                             </button>
@@ -664,6 +677,16 @@ export default function BranchesPage() {
         loading={deletingRegister}
         danger
       />
+
+      {fiscalBranch && (
+        <BranchFiscalModal
+          open={!!fiscalBranch}
+          onClose={() => setFiscalBranch(null)}
+          branchId={fiscalBranch.id}
+          branchName={fiscalBranch.name}
+          canUse={canBranchFiscal}
+        />
+      )}
     </AppShell>
   )
 }

@@ -16,7 +16,7 @@ import { getPlanLimits, canUpgradePlan, upgradeWhatsappLink } from '@/lib/plans'
 import { usePlansPayment } from '@/contexts/PlansPaymentContext'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
-import { Shield, Truck, Building2, Receipt, CreditCard, MessageCircle, Printer, Upload } from 'lucide-react'
+import { Shield, Truck, Building2, Receipt, CreditCard, MessageCircle, Printer, Upload, ShieldCheck } from 'lucide-react'
 import { Toggle } from '@/components/ui/Toggle'
 import { usePrintSettings } from '@/hooks/usePrintSettings'
 import { PrintSettingsFields } from '@/components/modules/PrintSettingsModal'
@@ -104,6 +104,8 @@ export default function SettingsPage() {
   const [afipKey, setAfipKey]               = useState('')
   const [afipCertName, setAfipCertName]     = useState('')
   const [afipKeyName, setAfipKeyName]       = useState('')
+  const [hasCert, setHasCert]               = useState(false)
+  const [hasKey, setHasKey]                 = useState(false)
   const [monoLimit, setMonoLimit]           = useState('')
   const [savingAfip, setSavingAfip]         = useState(false)
 
@@ -140,6 +142,8 @@ export default function SettingsPage() {
     setIvaCondition(user.business?.iva_condition ?? 'MO')
     setPtoVenta(user.business?.afip_punto_venta ? String(user.business.afip_punto_venta) : '')
     setAfipEnv(user.business?.afip_environment ?? 'homo')
+    setHasCert(user.business?.has_cert ?? false)
+    setHasKey(user.business?.has_key ?? false)
     setMonoLimit(user.business?.monotributo_limite_anual != null ? String(user.business.monotributo_limite_anual) : '')
     setMcEnabled(user.business?.multicurrency_enabled ?? false)
     setMcSource(user.business?.usd_rate_source ?? 'blue')
@@ -339,6 +343,8 @@ export default function SettingsPage() {
 
       await api.patch('/api/auth/business-settings', payload)
       toast.success('Configuración ARCA guardada')
+      if (afipCert.trim()) setHasCert(true)
+      if (afipKey.trim())  setHasKey(true)
       await refreshUser()
       setAfipCert('')
       setAfipKey('')
@@ -621,14 +627,17 @@ export default function SettingsPage() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <p className="text-xs text-[var(--text3)] mb-1">Certificado digital (.crt / .pem)</p>
+                      <p className="text-xs text-[var(--text3)] mb-1">
+                        Certificado digital (.crt / .pem)
+                        {hasCert && <span className="ml-1 text-[var(--accent)]">· cargado</span>}
+                      </p>
                       <p className="text-xs text-[var(--text3)] mb-2">
                         Subí el archivo .crt descargado de ARCA.
                       </p>
                       <label className="flex flex-col items-center justify-center gap-1 w-full h-[92px] text-xs text-[var(--text3)] bg-[var(--surface2)] border border-dashed border-[var(--border)] rounded-[var(--radius-md)] cursor-pointer hover:border-[var(--accent)] transition-colors">
-                        <Upload size={18} className={afipCertName ? 'text-[var(--accent)]' : ''} />
+                        {hasCert && !afipCertName ? <ShieldCheck size={18} className="text-[var(--accent)]" /> : <Upload size={18} className={afipCertName ? 'text-[var(--accent)]' : ''} />}
                         <span className={afipCertName ? 'text-[var(--accent)] font-medium' : ''}>
-                          {afipCertName || 'Elegir archivo .crt'}
+                          {afipCertName || (hasCert ? 'Reemplazar .crt' : 'Elegir archivo .crt')}
                         </span>
                         <input
                           type="file"
@@ -639,14 +648,17 @@ export default function SettingsPage() {
                       </label>
                     </div>
                     <div>
-                      <p className="text-xs text-[var(--text3)] mb-1">Clave privada (.key)</p>
+                      <p className="text-xs text-[var(--text3)] mb-1">
+                        Clave privada (.key)
+                        {hasKey && <span className="ml-1 text-[var(--accent)]">· cargada</span>}
+                      </p>
                       <p className="text-xs text-[var(--text3)] mb-2">
                         Subí el archivo .key generado con OpenSSL.
                       </p>
                       <label className="flex flex-col items-center justify-center gap-1 w-full h-[92px] text-xs text-[var(--text3)] bg-[var(--surface2)] border border-dashed border-[var(--border)] rounded-[var(--radius-md)] cursor-pointer hover:border-[var(--accent)] transition-colors">
-                        <Upload size={18} className={afipKeyName ? 'text-[var(--accent)]' : ''} />
+                        {hasKey && !afipKeyName ? <ShieldCheck size={18} className="text-[var(--accent)]" /> : <Upload size={18} className={afipKeyName ? 'text-[var(--accent)]' : ''} />}
                         <span className={afipKeyName ? 'text-[var(--accent)] font-medium' : ''}>
-                          {afipKeyName || 'Elegir archivo .key'}
+                          {afipKeyName || (hasKey ? 'Reemplazar .key' : 'Elegir archivo .key')}
                         </span>
                         <input
                           type="file"

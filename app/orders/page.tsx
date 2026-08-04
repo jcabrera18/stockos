@@ -281,6 +281,17 @@ function OrdersPageInner() {
   const [confirmCustomerQuery, setConfirmCustomerQuery] = useState('')
   const [confirmCustomerResults, setConfirmCustomerResults] = useState<{ id: string; full_name: string; phone?: string }[]>([])
   const [confirming, setConfirming] = useState(false)
+  // Escape cierra los diálogos de confirmación (cancelar / confirmar pedido).
+  useEffect(() => {
+    if (!cancelConfirmOrder && !confirmOrder) return
+    const h = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      setCancelConfirmOrder(null)
+      if (!confirming) setConfirmOrder(null)
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [cancelConfirmOrder, confirmOrder, confirming])
   // Carga rápida de cliente desde el modal de confirmar (pedidos web).
   const [confirmQcOpen, setConfirmQcOpen] = useState(false)
   const [confirmQcName, setConfirmQcName] = useState('')
@@ -3337,7 +3348,7 @@ function OrdersPageInner() {
       {/* ── Confirmación cancelación ── */}
       {cancelConfirmOrder && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setCancelConfirmOrder(null)} />
+          <div className="absolute inset-0 bg-black/50" />
           {(() => {
             const isPending = cancelConfirmOrder.status === 'pending'
             const title = isPending ? 'Cancelar pedido' : 'Anular pedido'
@@ -3377,7 +3388,7 @@ function OrdersPageInner() {
       {/* ── Confirmación de confirmar pedido ── */}
       {confirmOrder && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => !confirming && setConfirmOrder(null)} />
+          <div className="absolute inset-0 bg-black/50" />
           <div className="relative bg-[var(--surface)] rounded-[var(--radius-lg)] p-6 w-full max-w-sm shadow-xl">
             <h3 className="text-base font-semibold text-[var(--text)] mb-2">Confirmar pedido</h3>
             {confirmOrder.customer_id ? (
