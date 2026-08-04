@@ -7,6 +7,7 @@ import { evaluatePromo, findApplicablePromo, staticPromoLabel, type Promotion } 
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
+interface PriceTier { min_qty: number; unit_price: number }
 interface Product {
   id: string
   name: string
@@ -15,6 +16,20 @@ interface Product {
   brand_id: string | null
   supplier_id: string | null
   price: number
+  // Presente solo en catálogos "por cantidad": escalera de precios (desde N u.).
+  price_tiers?: PriceTier[]
+}
+
+// Precio unitario según la cantidad, replicando la escalera del POS: se toma el
+// tramo de mayor min_qty que no supere la cantidad. Sin escalera → precio base.
+function unitPriceFor(p: Product, qty: number): number {
+  if (!p.price_tiers || p.price_tiers.length === 0) return p.price
+  let price = p.price_tiers[0].unit_price
+  for (const t of p.price_tiers) {
+    if (qty >= t.min_qty) price = t.unit_price
+    else break
+  }
+  return price
 }
 interface Category { id: string; name: string; product_count: number }
 interface CatalogData {
@@ -142,11 +157,13 @@ export default function PublicCatalogPage() {
       .map(([id, qty]) => {
         const product = productById.get(id)
         if (!product) return null
-        const { discount, promo_label } = evaluatePromo(product, qty, product.price, promotions)
-        const gross = product.price * qty
-        return { product, qty, discount, promo_label, net: gross - discount }
+        // Precio unitario ya escalado por cantidad, y sobre él la promo (mismo orden que el POS).
+        const unit = unitPriceFor(product, qty)
+        const { discount, promo_label } = evaluatePromo(product, qty, unit, promotions)
+        const gross = unit * qty
+        return { product, qty, unit, discount, promo_label, net: gross - discount }
       })
-      .filter((l): l is { product: Product; qty: number; discount: number; promo_label: string; net: number } => !!l),
+      .filter((l): l is { product: Product; qty: number; unit: number; discount: number; promo_label: string; net: number } => !!l),
     [cart, productById, promotions])
 
   const cartCount = cartLines.reduce((a, l) => a + l.qty, 0)
@@ -429,6 +446,11 @@ export default function PublicCatalogPage() {
                   ) : (
                     <p className="text-base font-bold text-[var(--text)] mt-1">${money(p.price)}</p>
                   )}
+                  {p.price_tiers && p.price_tiers.length > 1 && p.price_tiers[p.price_tiers.length - 1].unit_price < p.price && (
+                    <p className="text-[11px] text-[var(--accent)] mt-0.5">
+                      desde {p.price_tiers[p.price_tiers.length - 1].min_qty}u ${money(p.price_tiers[p.price_tiers.length - 1].unit_price)} c/u
+                    </p>
+                  )}
                   {qty === 0 ? (
                     <button
                       onClick={() => setQty(p.id, 1)}
@@ -480,7 +502,8 @@ export default function PublicCatalogPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-[var(--text)] truncate">{l.product.name}</p>
                     <p className="text-xs text-[var(--text2)]">
-                      ${money(l.product.price)} c/u
+                      ${money(l.unit)} c/u
+                      {l.unit < l.product.price && <span className="text-[var(--accent)] font-medium"> · por cantidad</span>}
                       {l.discount > 0 && <span className="text-[var(--accent)] font-medium"> · {l.promo_label}</span>}
                     </p>
                   </div>
@@ -490,7 +513,7 @@ export default function PublicCatalogPage() {
                     <button onClick={() => setQty(l.product.id, l.qty + 1)} className="h-7 w-7 flex items-center justify-center rounded text-[var(--text)]"><Plus size={14} /></button>
                   </div>
                   <div className="w-20 text-right">
-                    {l.discount > 0 && (
+                    {l.net < l.product.price * l.qty && (
                       <div className="text-[11px] text-[var(--text3)] line-through">${money(l.product.price * l.qty)}</div>
                     )}
                     <span className="text-sm font-semibold text-[var(--text)]">${money(l.net)}</span>

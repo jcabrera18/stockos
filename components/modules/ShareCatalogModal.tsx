@@ -16,6 +16,7 @@ interface Catalog {
   id: string
   slug: string
   name: string
+  pricing_mode: 'base' | 'list' | 'quantity'
   price_list_id: string | null
   only_in_stock: boolean
   warehouse_id: string | null
@@ -26,12 +27,17 @@ interface Catalog {
   warehouses?: { name: string } | null
 }
 
+// Valor especial del selector de precio para el modo "escalera por cantidad".
+const QTY_MODE = '__qty__'
+
 interface WarehouseItem { id: string; name: string }
 
 interface Props {
   open: boolean
   onClose: () => void
-  lists: PriceList[]
+  // Listas de precio para el selector. El padre puede pasarlas, pero el modal
+  // también las carga por su cuenta al abrir (en /orders llegan lazy y vacías).
+  lists?: PriceList[]
 }
 
 const emptyForm = {
@@ -48,9 +54,10 @@ function catalogUrl(slug: string): string {
   return `${origin}/c/${slug}`
 }
 
-export function ShareCatalogModal({ open, onClose, lists }: Props) {
+export function ShareCatalogModal({ open, onClose, lists: listsProp }: Props) {
   const [catalogs, setCatalogs] = useState<Catalog[]>([])
   const [warehouses, setWarehouses] = useState<WarehouseItem[]>([])
+  const [lists, setLists] = useState<PriceList[]>(listsProp ?? [])
   const [loading, setLoading] = useState(true)
   const [form, setForm] = useState(emptyForm)
   const [creating, setCreating] = useState(false)
@@ -59,12 +66,14 @@ export function ShareCatalogModal({ open, onClose, lists }: Props) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [cats, whs] = await Promise.all([
+      const [cats, whs, pls] = await Promise.all([
         api.get<Catalog[]>('/api/catalogs'),
         api.get<WarehouseItem[]>('/api/warehouses').catch(() => [] as WarehouseItem[]),
+        api.get<PriceList[]>('/api/price-lists').catch(() => [] as PriceList[]),
       ])
       setCatalogs(cats)
       setWarehouses(whs)
+      if (pls.length) setLists(pls)
     } catch {
       toast.error('No se pudieron cargar los catálogos')
     } finally {
@@ -80,9 +89,12 @@ export function ShareCatalogModal({ open, onClose, lists }: Props) {
     if (!form.name.trim()) { toast.error('Poné un nombre al catálogo'); return }
     setCreating(true)
     try {
+      const sel = form.price_list_id
+      const pricing_mode = sel === '' ? 'base' : sel === QTY_MODE ? 'quantity' : 'list'
       const created = await api.post<Catalog>('/api/catalogs', {
         name: form.name.trim(),
-        price_list_id: form.price_list_id || null,
+        pricing_mode,
+        price_list_id: pricing_mode === 'list' ? sel : null,
         only_in_stock: form.only_in_stock,
         warehouse_id: form.only_in_stock && form.warehouse_id ? form.warehouse_id : null,
         whatsapp_phone: form.whatsapp_phone.trim() || null,
@@ -138,7 +150,8 @@ export function ShareCatalogModal({ open, onClose, lists }: Props) {
 
   const listOptions = [
     { value: '', label: 'Precio de venta (base)' },
-    ...lists.map(l => ({ value: l.id, label: `${l.name} (+${l.margin_pct}%)` })),
+    { value: QTY_MODE, label: 'Automático por cantidad (como el POS)' },
+    ...lists.map(l => ({ value: l.id, label: `${l.name} (+${l.margin_pct}%) · precio fijo` })),
   ]
   const warehouseOptions = [
     { value: '', label: 'Todos los depósitos' },
@@ -171,7 +184,9 @@ export function ShareCatalogModal({ open, onClose, lists }: Props) {
                             : <Badge variant="default">Pausado</Badge>}
                         </div>
                         <div className="text-xs text-[var(--text2)] mt-0.5">
-                          {cat.price_lists?.name ?? 'Precio de venta'}
+                          {cat.pricing_mode === 'quantity'
+                            ? 'Automático por cantidad'
+                            : cat.price_lists?.name ?? 'Precio de venta'}
                           {cat.only_in_stock && ` · Solo con stock${cat.warehouses?.name ? ` (${cat.warehouses.name})` : ''}`}
                         </div>
                       </div>
@@ -214,12 +229,21 @@ export function ShareCatalogModal({ open, onClose, lists }: Props) {
                   value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
                 />
-                <Select
-                  label="Lista de precio"
-                  options={listOptions}
-                  value={form.price_list_id}
-                  onChange={e => setForm({ ...form, price_list_id: e.target.value })}
-                />
+                <div>
+                  <Select
+                    label="Precio del catálogo"
+                    options={listOptions}
+                    value={form.price_list_id}
+                    onChange={e => setForm({ ...form, price_list_id: e.target.value })}
+                  />
+                  <p className="text-xs text-[var(--text2)] mt-1">
+                    {form.price_list_id === QTY_MODE
+                      ? 'El precio baja al sumar unidades, con las mismas reglas del POS (desde 3u, desde 5u…). Las promociones también se aplican.'
+                      : form.price_list_id === ''
+                        ? 'Muestra el precio de venta base de cada producto.'
+                        : 'Muestra esa lista a precio fijo, sin importar la cantidad.'}
+                  </p>
+                </div>
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-sm font-medium text-[var(--text)]">Solo productos con stock</div>
