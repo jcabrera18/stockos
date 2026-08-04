@@ -721,6 +721,11 @@ export default function PublicCatalogPage() {
         )}
       </main>
 
+      {/* Footer de marca: convierte cada catálogo compartido en un anuncio de
+          StockOS. El comprador lo ignora; el comerciante que lo ve es un lead.
+          Respeta el padding del sidebar "Mi pedido" en desktop (lg:pr-[22rem]). */}
+      <StockOSFooter />
+
       {/* Sidebar "Mi pedido" fijo al borde derecho, altura completa (solo desktop) */}
       <aside className="hidden lg:flex fixed top-0 right-0 bottom-0 w-80 flex-col border-l border-[var(--border)] bg-[var(--surface)] z-40">
         <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between shrink-0">
@@ -770,6 +775,30 @@ export default function PublicCatalogPage() {
         </div>
       )}
     </div>
+  )
+}
+
+// Footer de marca al pie del catálogo, discreto tipo pie de comprobante. Cada
+// comercio que comparte su catálogo expone StockOS a sus compradores; una
+// fracción tiene un negocio y es un lead. Sobrio a propósito. Siempre visible.
+function StockOSFooter() {
+  return (
+    <footer className="mt-2 border-t border-[var(--border)] px-4 sm:px-6 py-6 lg:pr-[22rem]">
+      <a
+        href="https://stockos.digital"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mx-auto flex w-fit items-center gap-1.5 text-xs text-[var(--text3)] transition hover:text-[var(--text2)]"
+      >
+        Generado con
+        {/* Mismo isotipo que la home: rayo blanco sobre cuadrado verde. */}
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="14" height="14" aria-hidden>
+          <rect width="32" height="32" rx="8" fill="#16a34a" />
+          <path d="M18 4 L10 18 L15 18 L14 28 L22 14 L17 14 Z" fill="white" />
+        </svg>
+        <span className="font-semibold text-[var(--text2)]">StockOS</span>
+      </a>
+    </footer>
   )
 }
 
