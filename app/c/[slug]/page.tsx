@@ -39,12 +39,14 @@ interface Category {
 }
 // Sección genérica (nivel 1 en la home, nivel 2 dentro de "Ver todos").
 interface RootSection { id: string; name: string; count: number }
+interface Banner { id: string; image_url: string }
 interface CatalogData {
   business: { name: string; logo: string | null; phone: string | null }
   catalog: { name: string; accept_orders?: boolean }
   categories: Category[]
   products: Product[]
   promotions: Promotion[]
+  banners?: Banner[]
 }
 
 const money = (n: number) =>
@@ -636,6 +638,11 @@ export default function PublicCatalogPage() {
       </header>
 
       <main className="px-4 sm:px-6 py-4 lg:pr-[22rem]">
+        {/* Destacados: fila de flyers promocionales (zoom al tocar) — solo en la home */}
+        {!showingProducts && (data.banners?.length ?? 0) > 0 && (
+          <FeaturedBanners banners={data.banners!} />
+        )}
+
         {/* Home: feed de secciones nivel 1 (tipo PedidosYa) */}
         {!showingProducts && roots.length > 0 ? (
           <div className="space-y-7">
@@ -804,6 +811,91 @@ function StockOSFooter() {
 
 // Oculta la barra de scroll de los rails horizontales (Firefox + WebKit).
 const RAIL_SCROLL = '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+
+// Sección "Destacados": fila horizontal de miniaturas de los flyers que sube el
+// comercio. Al tocar una se abre en grande (lightbox con zoom). Decorativos: no
+// llevan a ningún lado.
+function FeaturedBanners({ banners }: { banners: Banner[] }) {
+  const [zoom, setZoom] = useState<number | null>(null)
+  const n = banners.length
+
+  // Navegación del lightbox con teclado (desktop).
+  useEffect(() => {
+    if (zoom === null) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setZoom(null)
+      else if (e.key === 'ArrowRight') setZoom(z => (z === null ? z : (z + 1) % n))
+      else if (e.key === 'ArrowLeft') setZoom(z => (z === null ? z : (z - 1 + n) % n))
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [zoom, n])
+
+  return (
+    <div className="mb-7">
+      <h2 className="text-base font-bold text-[var(--text)] mb-2">Destacados</h2>
+
+      {/* Rail horizontal de miniaturas (portrait, como los flyers) */}
+      <div className={`-mx-4 px-4 flex gap-3 overflow-x-auto pb-1 lg:mx-0 lg:px-0 ${RAIL_SCROLL}`}>
+        {banners.map((b, idx) => (
+          <button
+            key={b.id}
+            onClick={() => setZoom(idx)}
+            className="shrink-0 rounded-xl overflow-hidden border border-[var(--border)] bg-[var(--surface2)] active:scale-95 transition"
+            aria-label={`Ampliar destacado ${idx + 1}`}
+          >
+            <img
+              src={b.image_url}
+              alt=""
+              className="h-52 w-40 sm:h-64 sm:w-48 object-cover"
+              loading="lazy"
+            />
+          </button>
+        ))}
+      </div>
+
+      {/* Lightbox: imagen a pantalla completa con zoom + navegación */}
+      {zoom !== null && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+          onClick={() => setZoom(null)}
+        >
+          <button
+            onClick={() => setZoom(null)}
+            className="absolute top-4 right-4 text-white/80 hover:text-white p-2"
+            aria-label="Cerrar"
+          >
+            <X size={26} />
+          </button>
+          {n > 1 && (
+            <>
+              <button
+                onClick={e => { e.stopPropagation(); setZoom(z => (z! - 1 + n) % n) }}
+                className="absolute left-2 sm:left-4 text-white/70 hover:text-white p-2"
+                aria-label="Anterior"
+              >
+                <ChevronLeft size={32} />
+              </button>
+              <button
+                onClick={e => { e.stopPropagation(); setZoom(z => (z! + 1) % n) }}
+                className="absolute right-2 sm:right-4 text-white/70 hover:text-white p-2"
+                aria-label="Siguiente"
+              >
+                <ChevronRight size={32} />
+              </button>
+            </>
+          )}
+          <img
+            src={banners[zoom].image_url}
+            alt=""
+            className="max-h-[90vh] max-w-full object-contain rounded-lg"
+            onClick={e => e.stopPropagation()}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
 
 // Cuántos productos se muestran en el rail de cada sección antes de "Ver todos".
 const RAIL_LIMIT = 12

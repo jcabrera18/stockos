@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
@@ -7,10 +7,179 @@ import { Select } from '@/components/ui/Select'
 import { Toggle } from '@/components/ui/Toggle'
 import { Badge } from '@/components/ui/Badge'
 import { Spinner } from '@/components/ui/Spinner'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { api } from '@/lib/api'
-import { Plus, Copy, Trash2, ExternalLink, Link2 } from 'lucide-react'
+import { Plus, Copy, Trash2, ExternalLink, Link2, ImageIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import type { PriceList } from '@/app/price-lists/page'
+
+const MAX_BANNERS = 5
+
+interface Banner { id: string; image_url: string; is_active: boolean; sort_order: number }
+
+// Comprime una imagen en el cliente antes de subirla: redimensiona al lado más
+// largo <= 1400px y la exporta a WebP. Los flyers tienen texto/precios, así que
+// no se apreta de más (calidad 0.82). Devuelve un data URL.
+function compressImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      const MAX = 1400
+      let { width, height } = img
+      if (width > MAX || height > MAX) {
+        const scale = MAX / Math.max(width, height)
+        width = Math.round(width * scale)
+        height = Math.round(height * scale)
+      }
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return reject(new Error('no canvas'))
+      ctx.drawImage(img, 0, 0, width, height)
+      resolve(canvas.toDataURL('image/webp', 0.82))
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('no image')) }
+    img.src = url
+  })
+}
+
+// Gestión de banners (flyers promocionales) de un catálogo: subir, activar/
+// desactivar y borrar. La subida va mediada por el backend con compresión previa.
+function BannerManager({ catalogId }: { catalogId: string }) {
+  const [banners, setBanners] = useState<Banner[]>([])
+  const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [confirmBanner, setConfirmBanner] = useState<Banner | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const data = await api.get<Banner[]>(`/api/catalogs/${catalogId}/banners`)
+        if (!cancelled) setBanners(data)
+      } catch {
+        if (!cancelled) toast.error('No se pudieron cargar las imágenes')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [catalogId])
+
+  const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (fileRef.current) fileRef.current.value = '' // permite re-subir el mismo archivo
+    if (!file) return
+    if (!file.type.startsWith('image/')) { toast.error('Elegí un archivo de imagen'); return }
+    if (banners.length >= MAX_BANNERS) { toast.error(`Máximo ${MAX_BANNERS} imágenes`); return }
+    setUploading(true)
+    try {
+      const image = await compressImage(file)
+      const created = await api.post<Banner>(`/api/catalogs/${catalogId}/banners`, { image })
+      setBanners(prev => [...prev, created])
+      toast.success('Imagen agregada')
+    } catch {
+      toast.error('No se pudo subir la imagen')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const toggle = async (b: Banner) => {
+    try {
+      const updated = await api.patch<Banner>(`/api/catalogs/${catalogId}/banners/${b.id}`, { is_active: !b.is_active })
+      setBanners(prev => prev.map(x => (x.id === b.id ? { ...x, ...updated } : x)))
+    } catch {
+      toast.error('No se pudo actualizar')
+    }
+  }
+
+  const remove = async () => {
+    const b = confirmBanner
+    if (!b) return
+    setDeleting(true)
+    try {
+      await api.delete(`/api/catalogs/${catalogId}/banners/${b.id}`)
+      setBanners(prev => prev.filter(x => x.id !== b.id))
+      toast.success('Imagen borrada')
+      setConfirmBanner(null)
+    } catch {
+      toast.error('No se pudo borrar')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <div className="rounded-lg bg-[var(--surface2)] p-3 space-y-3">
+      <p className="text-xs text-[var(--text2)]">
+        Subí flyers o imágenes de oferta para mostrarlas en un carrusel arriba del catálogo.
+        Hasta {MAX_BANNERS} imágenes.
+      </p>
+
+      {loading ? (
+        <div className="flex justify-center py-4"><Spinner /></div>
+      ) : (
+        <>
+          {banners.length > 0 && (
+            <div className="grid grid-cols-3 gap-2">
+              {banners.map(b => (
+                <div key={b.id} className="relative group rounded-lg overflow-hidden border border-[var(--border)]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={b.image_url}
+                    alt=""
+                    className={`w-full h-24 object-cover ${b.is_active ? '' : 'opacity-40'}`}
+                  />
+                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-black/55 px-1.5 py-1">
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <Toggle checked={b.is_active} onChange={() => toggle(b)} />
+                    </label>
+                    <button
+                      onClick={() => setConfirmBanner(b)}
+                      aria-label="Borrar imagen"
+                      className="text-white/90 hover:text-white"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPick} />
+          <Button
+            variant="secondary"
+            size="sm"
+            className="w-full"
+            loading={uploading}
+            disabled={banners.length >= MAX_BANNERS}
+            onClick={() => fileRef.current?.click()}
+          >
+            <Plus size={14} /> {banners.length >= MAX_BANNERS ? `Máximo ${MAX_BANNERS} imágenes` : 'Agregar imagen'}
+          </Button>
+        </>
+      )}
+
+      <ConfirmDialog
+        open={confirmBanner !== null}
+        onClose={() => setConfirmBanner(null)}
+        onConfirm={remove}
+        title="Borrar imagen"
+        message="¿Borrar esta imagen del catálogo? No se puede deshacer."
+        confirmLabel="Borrar"
+        loading={deleting}
+        danger
+      />
+    </div>
+  )
+}
 
 interface Catalog {
   id: string
@@ -62,6 +231,11 @@ export function ShareCatalogModal({ open, onClose, lists: listsProp }: Props) {
   const [form, setForm] = useState(emptyForm)
   const [creating, setCreating] = useState(false)
   const [showForm, setShowForm] = useState(false)
+  // Catálogo cuyo panel de imágenes está abierto (null = ninguno).
+  const [bannersFor, setBannersFor] = useState<string | null>(null)
+  // Catálogo pendiente de confirmar borrado (null = ninguno).
+  const [confirmCat, setConfirmCat] = useState<Catalog | null>(null)
+  const [deletingCat, setDeletingCat] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -131,14 +305,19 @@ export function ShareCatalogModal({ open, onClose, lists: listsProp }: Props) {
     }
   }
 
-  const remove = async (cat: Catalog) => {
-    if (!confirm(`¿Eliminar el catálogo "${cat.name}"? El link dejará de funcionar.`)) return
+  const remove = async () => {
+    const cat = confirmCat
+    if (!cat) return
+    setDeletingCat(true)
     try {
       await api.delete(`/api/catalogs/${cat.id}`)
       setCatalogs(prev => prev.filter(c => c.id !== cat.id))
       toast.success('Catálogo eliminado')
+      setConfirmCat(null)
     } catch {
       toast.error('No se pudo eliminar')
+    } finally {
+      setDeletingCat(false)
     }
   }
 
@@ -192,7 +371,7 @@ export function ShareCatalogModal({ open, onClose, lists: listsProp }: Props) {
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         <Toggle checked={cat.is_active} onChange={() => toggleActive(cat)} />
-                        <Button variant="ghost" size="sm" onClick={() => remove(cat)} aria-label="Eliminar">
+                        <Button variant="ghost" size="sm" onClick={() => setConfirmCat(cat)} aria-label="Eliminar">
                           <Trash2 size={15} />
                         </Button>
                       </div>
@@ -215,6 +394,15 @@ export function ShareCatalogModal({ open, onClose, lists: listsProp }: Props) {
                         {cat.accept_orders && <Badge variant="success" className="ml-2">Activo</Badge>}
                       </span>
                     </label>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full justify-start"
+                      onClick={() => setBannersFor(prev => (prev === cat.id ? null : cat.id))}
+                    >
+                      <ImageIcon size={14} /> {bannersFor === cat.id ? 'Ocultar imágenes' : 'Editar imágenes'}
+                    </Button>
+                    {bannersFor === cat.id && <BannerManager catalogId={cat.id} />}
                   </div>
                 ))}
               </div>
@@ -285,6 +473,17 @@ export function ShareCatalogModal({ open, onClose, lists: listsProp }: Props) {
           </>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmCat !== null}
+        onClose={() => setConfirmCat(null)}
+        onConfirm={remove}
+        title="Eliminar catálogo"
+        message={confirmCat ? `¿Eliminar el catálogo "${confirmCat.name}"? El link dejará de funcionar.` : ''}
+        confirmLabel="Eliminar"
+        loading={deletingCat}
+        danger
+      />
     </Modal>
   )
 }
