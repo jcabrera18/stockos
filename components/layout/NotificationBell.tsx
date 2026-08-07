@@ -39,6 +39,22 @@ export function NotificationBell({ align = 'right', direction = 'down', classNam
   const btnRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
 
+  // Efecto visual al llegar un pedido nuevo: la campana "toca" (se balancea) y late
+  // un halo. Se dispara solo cuando el conteo SUBE (no en la carga inicial).
+  const prevCountRef = useRef<number | null>(null)
+  const [ringNonce, setRingNonce] = useState(0)
+  const [ringing, setRinging] = useState(false)
+  useEffect(() => {
+    const prev = prevCountRef.current
+    prevCountRef.current = count
+    if (prev != null && count > prev) {
+      setRingNonce(n => n + 1)   // key nueva → reinicia la animación aunque ya esté sonando
+      setRinging(true)
+      const t = setTimeout(() => setRinging(false), 900)
+      return () => clearTimeout(t)
+    }
+  }, [count])
+
   // Calcula la posición fija del panel a partir del rect del botón. Se rendea en
   // un portal a <body> para aparecer por encima de cualquier componente (escapa de
   // los stacking contexts del sidebar/main y del overflow).
@@ -163,12 +179,18 @@ export function NotificationBell({ align = 'right', direction = 'down', classNam
         title={count > 0 ? `${count} pedidos web sin confirmar` : 'Notificaciones'}
         className={cn(
           'relative flex items-center justify-center w-9 h-9 rounded-full text-[var(--text2)] hover:bg-[var(--surface2)] hover:text-[var(--text)] transition-colors cursor-pointer',
-          count > 0 && 'text-[var(--accent)]'
+          count > 0 && 'text-[var(--accent)]',
+          ringing && 'bell-pulse'
         )}
       >
-        {count > 0 ? <BellRing size={18} /> : <Bell size={18} />}
+        <span key={ringNonce} className={cn('inline-flex', ringNonce > 0 && 'bell-ring')}>
+          {count > 0 ? <BellRing size={18} /> : <Bell size={18} />}
+        </span>
         {count > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-[var(--danger)] text-white text-[10px] font-bold shadow ring-2 ring-[var(--surface)]">
+          <span className={cn(
+            'absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-[var(--danger)] text-white text-[10px] font-bold shadow ring-2 ring-[var(--surface)]',
+            ringing && 'animate-bounce'
+          )}>
             {count > 9 ? '9+' : count}
           </span>
         )}

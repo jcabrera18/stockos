@@ -1,15 +1,20 @@
 'use client'
 import { useEffect, useState, useSyncExternalStore } from 'react'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
+import { createClient } from '@/lib/supabase/client'
 
 // Roles que pueden actuar sobre un pedido web (confirmarlo / cobrarlo).
 const AUDIENCE = ['owner', 'admin', 'cashier']
 
-// Polling suave: los pedidos web no son urgentes al segundo, pero sí queremos
-// enterarnos sin refrescar. Además refrescamos al volver a la pestaña (focus /
-// visibilitychange) y cuando /orders avisa que cambió algo ('orders-changed').
-const POLL_MS = 60_000
+// Realtime (Supabase) es el mecanismo principal: apenas entra/cambia un pedido web
+// refrescamos al instante en cualquier dispositivo con la app abierta. El polling
+// queda como red de seguridad (reconexión, eventos perdidos, RLS/publication no
+// habilitada). Por eso el intervalo puede ser holgado.
+const POLL_MS = 90_000
+// Coalesce de eventos Realtime: una ráfaga de cambios dispara UN solo re-fetch.
+const RT_DEBOUNCE_MS = 700
 // Throttle corto al volver a la pestaña: suficiente para deduplicar un alt-tab con
 // focus+visibilitychange casi simultáneos, pero permite refrescar al reentrar (el
 // caso "tenía el POS en otra pestaña y no vi el 2º pedido").
@@ -36,11 +41,14 @@ let refCount = 0
 let intervalId: ReturnType<typeof setInterval> | null = null
 let lastCheckAt = 0
 let channel: BroadcastChannel | null = null
+let rtChannel: RealtimeChannel | null = null
+let rtDebounce: ReturnType<typeof setTimeout> | null = null
 
 // Config que depende del usuario (se setea desde el provider).
 let audience = false
 let seenKey: string | null = null
 let lastSeen: number | null = null
+let bizId: string | null = null
 
 function emit() { for (const l of listeners) l() }
 
@@ -119,7 +127,36 @@ function onBroadcast(e: MessageEvent) {
   emit()
 }
 
+// Re-fetch con debounce: los eventos Realtime pueden llegar en ráfaga (un pedido =
+// 1 INSERT en orders + N en order_items, o varios cambios seguidos).
+function schedulePoll() {
+  if (rtDebounce) return
+  rtDebounce = setTimeout(() => { rtDebounce = null; poll() }, RT_DEBOUNCE_MS)
+}
+
+// Suscripción Realtime a los cambios de pedidos web del negocio. Instantáneo en
+// cualquier dispositivo con la app abierta (respeta RLS: el usuario solo recibe
+// eventos de su business). Solo reaccionamos a pedidos source='catalog'.
+function setupRealtime() {
+  if (rtChannel || !bizId || typeof window === 'undefined') return
+  const supabase = createClient()
+  const onRow = (payload: { new?: Record<string, unknown> }) => {
+    if (payload.new?.source === 'catalog') schedulePoll()
+  }
+  rtChannel = supabase
+    .channel(`web-orders-${bizId}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders', filter: `business_id=eq.${bizId}` }, onRow)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `business_id=eq.${bizId}` }, onRow)
+    .subscribe()
+}
+
+function teardownRealtime() {
+  if (rtDebounce) { clearTimeout(rtDebounce); rtDebounce = null }
+  if (rtChannel) { createClient().removeChannel(rtChannel); rtChannel = null }
+}
+
 function startPolling() {
+  setupRealtime()
   if (intervalId != null) return
   poll()
   intervalId = setInterval(poll, POLL_MS)
@@ -133,6 +170,7 @@ function startPolling() {
 }
 
 function stopPolling() {
+  teardownRealtime()
   if (intervalId != null) { clearInterval(intervalId); intervalId = null }
   window.removeEventListener('focus', onReenter)
   document.removeEventListener('visibilitychange', onReenter)
@@ -179,6 +217,9 @@ export function useWebOrderNotifications() {
     } else {
       lastSeen = null
     }
+    // El canal Realtime está vinculado a un business_id. Si cambió (login de otro
+    // negocio), lo re-suscribimos con el nuevo id.
+    if (bizId !== businessId) { teardownRealtime(); bizId = businessId }
     if (isAudience && refCount > 0) startPolling()
     if (!isAudience) { stopPolling(); state = { count: 0, orders: [] }; emit() }
   }, [isAudience, businessId])
