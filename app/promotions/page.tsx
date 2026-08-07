@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -311,14 +311,16 @@ export default function PromotionsPage() {
     <AppShell>
       <PageHeader
         title="Promociones"
+        help={
+          <HelpHint title="¿Cómo funcionan las promociones?">
+            <p>Creá descuentos por producto, marca, categoría, proveedor o globales. Se aplican automáticamente en el POS al momento de cobrar, sin que tengas que cargarlos a mano.</p>
+          </HelpHint>
+        }
         description={`${active.length} activas`}
         action={<Button onClick={openCreate}><Plus size={15} /> Nueva promoción</Button>}
       />
 
       <div className="p-5 space-y-5">
-        <HelpBanner id="promotions" title="¿Cómo funcionan las promociones?">
-          <p>Creá descuentos por producto, marca, categoría, proveedor o globales. Se aplican automáticamente en el POS al momento de cobrar, sin que tengas que cargarlos a mano.</p>
-        </HelpBanner>
         {loading ? <PageLoader /> : promotions.length === 0 ? (
           <EmptyState icon={Percent}
             title="Sin promociones"

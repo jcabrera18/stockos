@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
@@ -485,12 +485,16 @@ export default function SettingsPage() {
 
   return (
     <AppShell>
-      <PageHeader title="Configuración" />
+      <PageHeader
+        title="Configuración"
+        help={
+          <HelpHint title="Configuración del negocio">
+            <p>Ajustá los datos de tu negocio y los valores por defecto, como el costo de envío. Estos valores se usan en todo el sistema.</p>
+          </HelpHint>
+        }
+      />
 
       <div className="p-5 space-y-5">
-        <HelpBanner id="settings" title="Configuración del negocio">
-          <p>Ajustá los datos de tu negocio y los valores por defecto, como el costo de envío. Estos valores se usan en todo el sistema.</p>
-        </HelpBanner>
         <div className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-5 items-start">
 
           {/* ── Columna izquierda ── */}

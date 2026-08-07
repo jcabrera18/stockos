@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Card } from '@/components/ui/Card'
 import { StatCard } from '@/components/ui/StatCard'
 import { Button } from '@/components/ui/Button'
@@ -15,7 +15,7 @@ import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Select } from '@/components/ui/Select'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
-import { formatCurrency, formatNumber, formatDate, getPeriodDates, getPaymentMethodLabel } from '@/lib/utils'
+import { formatCurrency, formatIntCurrency, formatNumber, formatDate, getPeriodDates, getPaymentMethodLabel } from '@/lib/utils'
 import type { FinanceSummary, Expense, PaginatedResponse, Pagination as PaginationType } from '@/types'
 import { TrendingUp, TrendingDown, DollarSign, Plus, FileCheck, AlertTriangle, Gauge, Package, ShoppingCart } from 'lucide-react'
 import {
@@ -236,6 +236,11 @@ export default function FinancesPage() {
     <AppShell>
       <PageHeader
         title="Finanzas"
+        help={
+          <HelpHint title="Finanzas">
+            <p>Seguí tus ingresos y gastos con gráficos de evolución. Cargá y categorizá los gastos del negocio para entender mejor tu rentabilidad.</p>
+          </HelpHint>
+        }
         action={
           <Button onClick={() => setAddModal(true)}>
             <Plus size={15} /> Nuevo gasto
@@ -244,9 +249,6 @@ export default function FinancesPage() {
       />
 
       <div className="p-5 space-y-4">
-        <HelpBanner id="finances" title="Finanzas">
-          <p>Seguí tus ingresos y gastos con gráficos de evolución. Cargá y categorizá los gastos del negocio para entender mejor tu rentabilidad.</p>
-        </HelpBanner>
         {/* Período */}
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex gap-2 flex-wrap">
@@ -394,10 +396,10 @@ export default function FinancesPage() {
             {loading && !afipSummary ? <PageLoader /> : (
               <>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                  <StatCard title="Total facturado" value={formatCurrency(afipSummary?.facturas ?? 0)} subtitle="Facturas A+B+C con CAE" icon={FileCheck} accent />
-                  <StatCard title="Neto gravado" value={formatCurrency(afipSummary?.total_net ?? 0)} subtitle="Base imponible" icon={DollarSign} />
-                  <StatCard title="IVA facturado" value={formatCurrency(afipSummary?.total_iva ?? 0)} subtitle="IVA acumulado" icon={TrendingUp} />
-                  <StatCard title="NC emitidas" value={formatCurrency(afipSummary?.nc_total ?? 0)} subtitle="Notas de crédito" icon={TrendingDown} />
+                  <StatCard title="Total facturado" value={formatIntCurrency(afipSummary?.facturas ?? 0)} valueTitle={formatCurrency(afipSummary?.facturas ?? 0)} subtitle="Facturas A+B+C con CAE" icon={FileCheck} accent />
+                  <StatCard title="Neto gravado" value={formatIntCurrency(afipSummary?.total_net ?? 0)} valueTitle={formatCurrency(afipSummary?.total_net ?? 0)} subtitle="Base imponible" icon={DollarSign} />
+                  <StatCard title="IVA facturado" value={formatIntCurrency(afipSummary?.total_iva ?? 0)} valueTitle={formatCurrency(afipSummary?.total_iva ?? 0)} subtitle="IVA acumulado" icon={TrendingUp} />
+                  <StatCard title="NC emitidas" value={formatIntCurrency(afipSummary?.nc_total ?? 0)} valueTitle={formatCurrency(afipSummary?.nc_total ?? 0)} subtitle="Notas de crédito" icon={TrendingDown} />
                 </div>
 
                 <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
@@ -477,10 +479,10 @@ export default function FinancesPage() {
           loading && !summary ? <PageLoader /> : (
             <div className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
-                <StatCard title="Ingresos" value={formatCurrency(summary?.revenue ?? 0)} icon={TrendingUp} accent />
-                <StatCard title="Costo de mercadería" value={formatCurrency(summary?.cogs ?? 0)} subtitle="Costo de lo vendido" icon={Package} />
-                <StatCard title="Gastos" value={formatCurrency(summary?.expenses ?? 0)} icon={TrendingDown} />
-                <StatCard title="Ganancia neta" value={formatCurrency(summary?.net ?? 0)} subtitle={`Margen ${summary?.margin_pct ?? 0}%`} icon={DollarSign} />
+                <StatCard title="Ingresos" value={formatIntCurrency(summary?.revenue ?? 0)} valueTitle={formatCurrency(summary?.revenue ?? 0)} icon={TrendingUp} accent />
+                <StatCard title="Costo de mercadería" value={formatIntCurrency(summary?.cogs ?? 0)} valueTitle={formatCurrency(summary?.cogs ?? 0)} subtitle="Costo de lo vendido" icon={Package} />
+                <StatCard title="Gastos" value={formatIntCurrency(summary?.expenses ?? 0)} valueTitle={formatCurrency(summary?.expenses ?? 0)} icon={TrendingDown} />
+                <StatCard title="Ganancia neta" value={formatIntCurrency(summary?.net ?? 0)} valueTitle={formatCurrency(summary?.net ?? 0)} subtitle={`Margen ${summary?.margin_pct ?? 0}%`} icon={DollarSign} />
                 <StatCard title="Unidades vendidas" value={formatNumber(summary?.units_sold ?? 0)} subtitle="Productos vendidos en el período" icon={ShoppingCart} />
               </div>
 
@@ -574,9 +576,9 @@ export default function FinancesPage() {
                 Comisión calculada sobre el costo neto del período, usando el porcentaje fijo configurado en cada vendedor.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <StatCard title="Comisiones a pagar" value={formatCurrency(totalCommission)} subtitle={`${sellersWithSales.length} vendedores con ventas`} icon={DollarSign} accent />
-                <StatCard title="Vendido neto" value={formatCurrency(totalSold)} subtitle="Total usado para comisión" icon={TrendingUp} />
-                <StatCard title="Costo c/IVA" value={formatCurrency(totalCostWithVat)} subtitle="Acumulado del período" icon={TrendingDown} />
+                <StatCard title="Comisiones a pagar" value={formatIntCurrency(totalCommission)} valueTitle={formatCurrency(totalCommission)} subtitle={`${sellersWithSales.length} vendedores con ventas`} icon={DollarSign} accent />
+                <StatCard title="Vendido neto" value={formatIntCurrency(totalSold)} valueTitle={formatCurrency(totalSold)} subtitle="Total usado para comisión" icon={TrendingUp} />
+                <StatCard title="Costo c/IVA" value={formatIntCurrency(totalCostWithVat)} valueTitle={formatCurrency(totalCostWithVat)} subtitle="Acumulado del período" icon={TrendingDown} />
               </div>
 
               {commissionRows.length === 0 ? (

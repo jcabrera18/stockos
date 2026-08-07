@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { useCollapseSidebar } from '@/contexts/SidePanelContext'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Button } from '@/components/ui/Button'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Pagination } from '@/components/ui/Pagination'
@@ -556,6 +556,11 @@ export default function ProductsPage() {
       <div className="shrink-0">
         <PageHeader
           title="Productos"
+          help={
+            <HelpHint title="Catálogo de productos">
+              <p>Cargá y editá tus productos: códigos de barra, costo, precio y stock. Usá la actualización masiva para cambiar precios de varios productos a la vez.</p>
+            </HelpHint>
+          }
           description={`${pagination.total} productos`}
           action={
             <Button onClick={openCreate}>
@@ -565,11 +570,6 @@ export default function ProductsPage() {
         />
 
         {/* Info */}
-        <div className="px-5 pt-4">
-          <HelpBanner id="products" title="Catálogo de productos">
-            <p>Cargá y editá tus productos: códigos de barra, costo, precio y stock. Usá la actualización masiva para cambiar precios de varios productos a la vez.</p>
-          </HelpBanner>
-        </div>
 
         {/* Búsqueda + filtros */}
         <div className="px-5 pt-4 pb-4 space-y-3">

@@ -145,3 +145,20 @@ const serwist = new Serwist({
 })
 
 serwist.addEventListeners()
+
+// Click en una notificación (ej. "Nuevo pedido web") → enfoca una pestaña abierta
+// de la app y navega a Pedidos, o abre una nueva si no hay ninguna.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+  const url = (event.notification.data as { url?: string } | undefined)?.url ?? '/orders?status=pending'
+  event.waitUntil((async () => {
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    for (const client of clients) {
+      // Reusar una pestaña ya abierta en el mismo origen.
+      await client.focus()
+      try { await client.navigate(url) } catch { /* algunos navegadores no permiten navigate */ }
+      return
+    }
+    await self.clients.openWindow(url)
+  })())
+})

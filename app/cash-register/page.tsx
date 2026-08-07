@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -14,7 +14,7 @@ import { Pagination } from '@/components/ui/Pagination'
 import { StatCard } from '@/components/ui/StatCard'
 import { PaymentMixBar } from '@/components/ui/PaymentMixBar'
 import { api } from '@/lib/api'
-import { formatCurrency, formatDateTime } from '@/lib/utils'
+import { formatCurrency, formatIntCurrency, formatDateTime } from '@/lib/utils'
 import type { Pagination as PaginationType } from '@/types'
 import { DollarSign, CheckCircle, Clock, TrendingUp, TrendingDown, Minus, RefreshCw, ShoppingCart, Receipt, Scale, AlertTriangle } from 'lucide-react'
 import { toast } from 'sonner'
@@ -373,6 +373,11 @@ export default function CashRegisterPage() {
     <AppShell>
       <PageHeader
         title="Caja"
+        help={
+          <HelpHint title="¿Cómo funciona la caja?">
+            <p>Abrí la caja al empezar el turno y cerrala al terminar para cuadrar el efectivo. Mientras está abierta ves los totales de ventas en tiempo real. Necesitás una caja abierta para poder cobrar en el POS.</p>
+          </HelpHint>
+        }
         description={workstation
           ? `${workstation.branch_name} · ${workstation.register_name}`
           : 'Apertura y cierre de caja'
@@ -390,9 +395,6 @@ export default function CashRegisterPage() {
       />
 
       <div className="p-5 space-y-5">
-        <HelpBanner id="cash-register" title="¿Cómo funciona la caja?">
-          <p>Abrí la caja al empezar el turno y cerrala al terminar para cuadrar el efectivo. Mientras está abierta ves los totales de ventas en tiempo real. Necesitás una caja abierta para poder cobrar en el POS.</p>
-        </HelpBanner>
         {loading ? <PageLoader /> : (
           <>
             {/* ── Cajas abiertas ── */}
@@ -408,13 +410,13 @@ export default function CashRegisterPage() {
                   />
                   <StatCard
                     title="Ticket promedio"
-                    value={formatCurrency(avgTicket)}
+                    value={formatIntCurrency(avgTicket)}
                     valueTitle={formatCurrency(avgTicket)}
                     icon={Receipt}
                   />
                   <StatCard
                     title="Total vendido"
-                    value={formatCurrency(summary.total)}
+                    value={formatIntCurrency(summary.total)}
                     valueTitle={formatCurrency(summary.total)}
                     icon={DollarSign}
                   />

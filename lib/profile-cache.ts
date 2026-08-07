@@ -28,6 +28,7 @@ export interface UserProfile {
     has_key:                boolean
     monotributo_limite_anual: number | null
     stock_enabled:          boolean
+    accepts_web_orders?:    boolean
     multicurrency_enabled:  boolean
     usd_rate:               number | null
     usd_rate_source:        string

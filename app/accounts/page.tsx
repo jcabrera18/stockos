@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Badge } from '@/components/ui/Badge'
 import { Pagination } from '@/components/ui/Pagination'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -45,6 +45,10 @@ export default function AccountsPage() {
   // Señal de refresh + movimiento optimista para el drawer de cuenta.
   const [accountRefreshKey, setAccountRefreshKey] = useState(0)
   const [seedMovement, setSeedMovement] = useState<SavedMovement | null>(null)
+  // Saldo autoritativo del último movimiento (balance_after que devuelve la RPC).
+  // El refetch de /api/customers/:id pega contra un replica que puede ir "una atrás";
+  // usamos este valor para que ese refetch no pise el saldo recién actualizado.
+  const authoritativeBalanceRef = useRef<number | null>(null)
 
   // KPIs de cartera (solo owner/admin). Una sola llamada para las dos secciones.
   const { kpis, loading: kpisLoading } = useCcPortfolioKpis(accountRefreshKey, isAdmin)
@@ -95,6 +99,7 @@ export default function AccountsPage() {
   const openDebtorDetail = useCallback(async (id: string) => {
     try {
       const customer = await api.get<CustomerSummary>(`/api/customers/${id}`)
+      authoritativeBalanceRef.current = null
       setDetailCustomer(customer)
       setDetailModal(true)
     } catch (err) { console.error(err) }
@@ -113,13 +118,15 @@ export default function AccountsPage() {
     <AppShell>
       <PageHeader
         title="Cuentas corrientes"
+        help={
+          <HelpHint title="Cuentas corrientes">
+            <p>Vista rápida de los saldos de tus clientes: quién debe, el estado del crédito y la antigüedad de la deuda. Registrá cobros al instante sin entrar al detalle de cada cliente.</p>
+          </HelpHint>
+        }
         description={`${pagination.total} clientes · Deuda total: ${formatCurrency(totalDebt)}`}
       />
 
       <div className="p-5 space-y-4">
-        <HelpBanner id="accounts" title="Cuentas corrientes">
-          <p>Vista rápida de los saldos de tus clientes: quién debe, el estado del crédito y la antigüedad de la deuda. Registrá cobros al instante sin entrar al detalle de cada cliente.</p>
-        </HelpBanner>
 
         <div className="flex flex-wrap items-center gap-2">
           {tabs.map(t => (
@@ -239,14 +246,24 @@ export default function AccountsPage() {
           if (detailCustomer) {
             api.get<CustomerSummary>(`/api/customers/${detailCustomer.id}`)
               .then(updated => {
-                setDetailCustomer(updated)
+                // El refetch puede ir "una atrás" (lag del replica): si el último
+                // movimiento trae un balance_after autoritativo, priorizarlo para no
+                // reabrir el detalle con el saldo previo al movimiento.
+                const bal = authoritativeBalanceRef.current
+                setDetailCustomer(bal != null ? { ...updated, current_balance: bal } : updated)
                 setDetailModal(true)
               }).catch(() => { })
           }
         }}
         onSaved={mov => {
           fetchCustomers()
-          if (mov) setSeedMovement(mov)
+          if (mov) {
+            setSeedMovement(mov)
+            authoritativeBalanceRef.current = mov.balance_after
+            // Reflejar el saldo autoritativo en el cliente que se pasa a los modales.
+            setDetailCustomer(prev => prev ? { ...prev, current_balance: mov.balance_after } : prev)
+            setPaymentCustomer(prev => prev ? { ...prev, current_balance: mov.balance_after } : prev)
+          }
           setAccountRefreshKey(k => k + 1)
         }}
         customer={paymentCustomer}
@@ -254,7 +271,7 @@ export default function AccountsPage() {
 
       <CustomerDetailModal
         open={detailModal}
-        onClose={() => { setDetailModal(false); setDetailCustomer(null); setSeedMovement(null) }}
+        onClose={() => { setDetailModal(false); setDetailCustomer(null); setSeedMovement(null); authoritativeBalanceRef.current = null }}
         customer={detailCustomer}
         refreshKey={accountRefreshKey}
         seedMovement={seedMovement}

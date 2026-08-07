@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Button } from '@/components/ui/Button'
 import { MoneyInput } from '@/components/ui/MoneyInput'
 import { Badge } from '@/components/ui/Badge'
@@ -192,6 +192,11 @@ export default function SalesPage() {
     <AppShell>
       <PageHeader
         title="Ventas"
+        help={
+          <HelpHint title="Historial de ventas">
+            <p>Consultá todas las ventas con filtros por fecha, sucursal, caja y forma de pago. Tocá una venta para ver el detalle de los productos y, si corresponde, generar su comprobante.</p>
+          </HelpHint>
+        }
         description={loading ? '...' : restricted ? `${pagination.total} ventas hoy` : `${pagination.total} ventas · ${formatCurrency(totalRevenue)}`}
         action={
           <Button onClick={() => router.push('/pos')}>
@@ -201,9 +206,6 @@ export default function SalesPage() {
       />
 
       <div className="p-5 space-y-4">
-        <HelpBanner id="sales" title="Historial de ventas">
-          <p>Consultá todas las ventas con filtros por fecha, sucursal, caja y forma de pago. Tocá una venta para ver el detalle de los productos y, si corresponde, generar su comprobante.</p>
-        </HelpBanner>
         {/* Filtros */}
         <div className="space-y-2">
 

@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef, type KeyboardEvent as ReactKe
 import { useRouter } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
@@ -720,6 +720,11 @@ export default function QuotesPage() {
           <div className="shrink-0">
             <PageHeader
               title="Presupuestos"
+              help={
+                <HelpHint title="¿Cómo funcionan los presupuestos?">
+                  <p>Cotizá productos a un cliente o prospecto sin afectar el stock. Cuando el cliente acepta, <strong>convertí el presupuesto en pedido</strong> con un click — ahí recién se reserva/descuenta el stock.</p>
+                </HelpHint>
+              }
               description={`${pagination.total} presupuestos`}
               action={
                 !newQuoteModal && (
@@ -732,9 +737,6 @@ export default function QuotesPage() {
           </div>
 
           <div className="overflow-y-auto flex-1 p-5 space-y-4">
-            <HelpBanner id="quotes" title="¿Cómo funcionan los presupuestos?">
-              <p>Cotizá productos a un cliente o prospecto sin afectar el stock. Cuando el cliente acepta, <strong>convertí el presupuesto en pedido</strong> con un click — ahí recién se reserva/descuenta el stock.</p>
-            </HelpBanner>
 
             {/* Filtros */}
             <div className="space-y-2">

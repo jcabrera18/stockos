@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef, Suspense, type KeyboardEvent 
 import { useRouter, useSearchParams } from 'next/navigation'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
@@ -16,7 +16,7 @@ import { TableSkeleton } from '@/components/ui/Skeleton'
 import { Pagination } from '@/components/ui/Pagination'
 import { StatCard } from '@/components/ui/StatCard'
 import { api } from '@/lib/api'
-import { formatCurrency, formatDateTime, cn } from '@/lib/utils'
+import { formatCurrency, formatIntCurrency, formatDateTime, cn } from '@/lib/utils'
 import type { Product, Pagination as PaginationType } from '@/types'
 import type { PriceList } from '@/app/price-lists/page'
 import {
@@ -211,6 +211,10 @@ function OrdersPageInner() {
   const [ccPaymentModal, setCcPaymentModal] = useState(false)
   const [ccSeed, setCcSeed] = useState<SavedMovement | null>(null)
   const [ccRefreshKey, setCcRefreshKey] = useState(0)
+  // Saldo autoritativo del último movimiento (balance_after de la RPC). Evita que el
+  // refetch de /api/customers/:id —que puede ir "una atrás" por lag del replica— pise
+  // el saldo recién actualizado al reabrir el drawer o registrar otro movimiento.
+  const ccAuthoritativeBalanceRef = useRef<number | null>(null)
 
   // Nuevo pedido
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
@@ -705,6 +709,9 @@ function OrdersPageInner() {
     try {
       const res = await api.get<OrderStats>('/api/orders/stats')
       setStats(res)
+      // Avisar a la campanita global (NotificationBell) que los pedidos cambiaron
+      // para que el badge de "pedidos web sin confirmar" se refresque al instante.
+      window.dispatchEvent(new Event('orders-changed'))
     } catch (err) { console.error(err) }
   }, [])
 
@@ -949,6 +956,7 @@ function OrdersPageInner() {
     setCcLoading(true)
     try {
       const customer = await api.get<CustomerSummary>(`/api/customers/${customerId}`)
+      ccAuthoritativeBalanceRef.current = null
       setCcCustomer(customer)
     } catch {
       toast.error('No se pudo cargar la cuenta del cliente')
@@ -1592,6 +1600,11 @@ function OrdersPageInner() {
             <PageHeader
               title="Pedidos"
               description={`${pagination.total} pedidos`}
+              help={
+                <HelpHint title="¿Cómo funcionan los pedidos?">
+                  <p>Cargá pedidos manualmente o recibí <strong>pedidos web</strong> desde tu catálogo compartido. Al confirmar un pedido se genera la venta y se <strong>reserva el stock</strong> automáticamente; si lo cancelás, ese stock se libera.</p>
+                </HelpHint>
+              }
               action={
                 <>
                   {!sidePanelOpen && (
@@ -1618,9 +1631,6 @@ function OrdersPageInner() {
           </div>
 
           <div className="overflow-y-auto flex-1 p-5 space-y-4">
-        <HelpBanner id="orders" title="¿Cómo funcionan los pedidos?">
-          <p>Cargá pedidos de tus clientes y seguí su estado. Al confirmar un pedido se <strong>reserva el stock</strong> automáticamente; si lo cancelás, ese stock se libera.</p>
-        </HelpBanner>
         {/* Banner pedidos offline pendientes */}
         {pendingOrdersCount > 0 && (
           <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-300 dark:border-yellow-700">
@@ -1653,8 +1663,8 @@ function OrdersPageInner() {
               { key: 'pending',   title: 'Pendientes',      value: String(stats.pending),     valueTitle: undefined,                       money: false, icon: Clock,       subtitle: 'por confirmar',                       filter: 'pending' as const },
               { key: 'dispatch',  title: 'Por despachar',   value: String(stats.to_dispatch), valueTitle: undefined,                       money: false, icon: Truck,       subtitle: 'confirmados',                         filter: 'confirmed' as const },
               { key: 'delivered', title: 'Entregados',      value: String(stats.delivered),   valueTitle: undefined,                       money: false, icon: CheckCircle, subtitle: 'últimos 30 días',                     filter: 'delivered' as const },
-              { key: 'collect',   title: 'A cobrar',        value: formatCurrency(stats.to_collect), valueTitle: formatCurrency(stats.to_collect), money: true,  icon: DollarSign,  subtitle: 'saldo pendiente',                     filter: null },
-              { key: 'avg',       title: 'Ticket promedio', value: formatCurrency(stats.avg_ticket), valueTitle: formatCurrency(stats.avg_ticket), money: true,  icon: Receipt,     subtitle: `${stats.period_count} pedidos / 30d`, filter: null },
+              { key: 'collect',   title: 'A cobrar',        value: formatIntCurrency(stats.to_collect), valueTitle: formatCurrency(stats.to_collect), money: true,  icon: DollarSign,  subtitle: 'saldo pendiente',                     filter: null },
+              { key: 'avg',       title: 'Ticket promedio', value: formatIntCurrency(stats.avg_ticket), valueTitle: formatCurrency(stats.avg_ticket), money: true,  icon: Receipt,     subtitle: `${stats.period_count} pedidos / 30d`, filter: null },
             ]).map(card => {
               const active = card.filter !== null && statusFilter === card.filter
               const clickable = card.filter !== null
@@ -3314,12 +3324,22 @@ function OrdersPageInner() {
           // Volver al drawer de cuenta con el saldo actualizado.
           if (ccCustomer) {
             api.get<CustomerSummary>(`/api/customers/${ccCustomer.id}`)
-              .then(updated => { setCcCustomer(updated); setCcOpen(true) })
+              .then(updated => {
+                // El refetch puede ir "una atrás" (lag del replica): priorizar el
+                // balance_after autoritativo del último movimiento si lo tenemos.
+                const bal = ccAuthoritativeBalanceRef.current
+                setCcCustomer(bal != null ? { ...updated, current_balance: bal } : updated)
+                setCcOpen(true)
+              })
               .catch(() => {})
           }
         }}
         onSaved={mov => {
-          if (mov) setCcSeed(mov)
+          if (mov) {
+            setCcSeed(mov)
+            ccAuthoritativeBalanceRef.current = mov.balance_after
+            setCcCustomer(prev => prev ? { ...prev, current_balance: mov.balance_after } : prev)
+          }
           setCcRefreshKey(k => k + 1)
           // El saldo mostrado en el pedido también cambió → refrescar el detalle.
           if (detail?.customer_id && detail.customer_id === ccCustomer?.id) {
@@ -3333,7 +3353,7 @@ function OrdersPageInner() {
 
       <CustomerDetailModal
         open={ccOpen && !ccLoading && !!ccCustomer}
-        onClose={() => { setCcOpen(false); setCcCustomer(null); setCcSeed(null) }}
+        onClose={() => { setCcOpen(false); setCcCustomer(null); setCcSeed(null); ccAuthoritativeBalanceRef.current = null }}
         customer={ccCustomer}
         refreshKey={ccRefreshKey}
         seedMovement={ccSeed}

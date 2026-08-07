@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
@@ -478,6 +478,11 @@ export default function WarehousesPage() {
     <AppShell>
       <PageHeader
         title="Depósitos"
+        help={
+          <HelpHint title="Depósitos y stock">
+            <p>Administrá el stock real por depósito y hacé transferencias entre ellos. Cada sucursal tiene un <strong>depósito de venta</strong> (de ahí descuenta el POS); los <strong>depósitos centrales</strong> abastecen a las sucursales vía transferencias.</p>
+          </HelpHint>
+        }
         description={`${warehouses.length} depósitos activos`}
         action={
           tab === 'warehouses' ? (
@@ -491,9 +496,6 @@ export default function WarehousesPage() {
       />
 
       <div className="p-5 space-y-4">
-        <HelpBanner id="warehouses" title="Depósitos y stock">
-          <p>Administrá el stock real por depósito y hacé transferencias entre ellos. Cada sucursal tiene un <strong>depósito de venta</strong> (de ahí descuenta el POS); los <strong>depósitos centrales</strong> abastecen a las sucursales vía transferencias.</p>
-        </HelpBanner>
         {/* Tabs */}
         <div className="flex border-b border-[var(--border)]">
           {tabs.map(t => (

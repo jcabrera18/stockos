@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
@@ -11,7 +11,8 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { PageLoader } from '@/components/ui/Spinner'
 import { api } from '@/lib/api'
-import { formatCurrency, formatCompactCurrency } from '@/lib/utils'
+import { formatCurrency, formatCompactCurrency, formatIntCurrency } from '@/lib/utils'
+import { FitText } from '@/components/ui/FitText'
 import { useAuth } from '@/hooks/useAuth'
 import { getPlanLimits } from '@/lib/plans'
 import { PlanLimitBanner } from '@/components/modules/PlanLimitBanner'
@@ -290,6 +291,11 @@ export default function BranchesPage() {
     <AppShell>
       <PageHeader
         title="Sucursales"
+        help={
+          <HelpHint title="Sucursales y cajas">
+            <p>Administrá tus sucursales y las cajas de cada una. Acá también ves un resumen consolidado de las ventas por sucursal.</p>
+          </HelpHint>
+        }
         description={`${branches.length} sucursales activas`}
         action={
           tab === 'branches' ? (
@@ -299,9 +305,6 @@ export default function BranchesPage() {
       />
 
       <div className="p-5 space-y-4">
-        <HelpBanner id="branches" title="Sucursales y cajas">
-          <p>Administrá tus sucursales y las cajas de cada una. Acá también ves un resumen consolidado de las ventas por sucursal.</p>
-        </HelpBanner>
 
         {/* Tabs */}
         <div className="flex border-b border-[var(--border)]">
@@ -468,21 +471,21 @@ export default function BranchesPage() {
                         <>
                           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 min-w-0">
                             <p className="text-xs text-[var(--text3)] mb-1">Total hoy (todas)</p>
-                            <p className="text-2xl font-bold mono text-[var(--accent)] truncate" title={formatCurrency(totalToday)}>
-                              {formatCompactCurrency(totalToday)}
-                            </p>
+                            <FitText className="text-2xl font-bold mono text-[var(--accent)]" title={formatCurrency(totalToday)}>
+                              {formatIntCurrency(totalToday)}
+                            </FitText>
                           </div>
                           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 min-w-0">
                             <p className="text-xs text-[var(--text3)] mb-1">Total del mes</p>
-                            <p className="text-2xl font-bold mono text-[var(--text)] truncate" title={formatCurrency(totalMonth)}>
-                              {formatCompactCurrency(totalMonth)}
-                            </p>
+                            <FitText className="text-2xl font-bold mono text-[var(--text)]" title={formatCurrency(totalMonth)}>
+                              {formatIntCurrency(totalMonth)}
+                            </FitText>
                           </div>
                           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 min-w-0">
                             <p className="text-xs text-[var(--text3)] mb-1">Inventario (a costo)</p>
-                            <p className="text-2xl font-bold mono text-[var(--text)] truncate" title={formatCurrency(totalInventory)}>
-                              {formatCompactCurrency(totalInventory)}
-                            </p>
+                            <FitText className="text-2xl font-bold mono text-[var(--text)]" title={formatCurrency(totalInventory)}>
+                              {formatIntCurrency(totalInventory)}
+                            </FitText>
                           </div>
                           <div className="bg-[var(--surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-4 min-w-0">
                             <p className="text-xs text-[var(--text3)] mb-1">Cajas abiertas ahora</p>

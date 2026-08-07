@@ -14,6 +14,7 @@ import { api } from '@/lib/api'
 import { useWorkstation } from '@/hooks/useWorkstation'
 import { useSidePanel } from '@/contexts/SidePanelContext'
 import { SidebarSubscriptionCard } from './SidebarSubscriptionCard'
+import { NotificationBell } from './NotificationBell'
 
 export function Sidebar() {
   const pathname = usePathname()
@@ -155,11 +156,15 @@ export function Sidebar() {
         collapsed ? 'w-16' : 'w-56'
       )}>
         {/* Logo */}
-        <div className={cn('flex items-center gap-2.5 py-5 border-b border-[var(--border)]', collapsed ? 'justify-center px-2' : 'px-4')}>
+        <div className={cn('flex items-center gap-2.5 py-5 border-b border-[var(--border)]', collapsed ? 'flex-col justify-center px-2' : 'px-4')}>
           <div className="w-7 h-7 rounded-lg bg-[var(--accent)] flex items-center justify-center flex-shrink-0">
             <Zap size={14} className="text-white" />
           </div>
-          {!collapsed && <span className="text-sm font-bold text-[var(--text)] tracking-tight">StockOS</span>}
+          {!collapsed && <span className="text-sm font-bold text-[var(--text)] tracking-tight flex-1">StockOS</span>}
+          {/* El dropdown abre hacia la derecha (sobre el contenido): el sidebar es
+              angosto (224px) y con align="right" un panel de 320px se saldría de
+              pantalla por la izquierda. */}
+          <NotificationBell align="left" />
         </div>
 
         {/* Nav */}

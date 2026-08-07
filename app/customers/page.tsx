@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { useCollapseSidebar } from '@/contexts/SidePanelContext'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
@@ -972,6 +972,11 @@ export default function CustomersPage() {
       <div className="shrink-0">
         <PageHeader
           title="Clientes"
+          help={
+            <HelpHint title="Clientes y cuentas corrientes">
+              <p>Gestioná tus clientes y sus cuentas corrientes. Registrá cobros, pagos y ajustes, y consultá el saldo y los movimientos de cada uno desde su detalle.</p>
+            </HelpHint>
+          }
           description={
             activeTab === 'customers'
               ? `${pagination.total} clientes`
@@ -1066,12 +1071,7 @@ export default function CustomersPage() {
 
       {/* Contenido — scrollable */}
       <div className={cn('overflow-y-auto flex-1', panelOpen ? 'px-3 pb-4' : 'px-5 pb-5')}>
-        <div className="pt-4 mb-4">
-          <HelpBanner id="customers" title="Clientes y cuentas corrientes">
-            <p>Gestioná tus clientes y sus cuentas corrientes. Registrá cobros, pagos y ajustes, y consultá el saldo y los movimientos de cada uno desde su detalle.</p>
-          </HelpBanner>
-        </div>
-
+        <div className="pt-4" />
         {/* Tab: Clientes */}
         {activeTab === 'customers' && (
           <>

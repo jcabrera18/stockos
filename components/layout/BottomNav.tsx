@@ -12,11 +12,13 @@ import { useState, useEffect } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { useTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
+import { useWebOrderNotifications } from '@/hooks/useWebOrderNotifications'
 
 export function BottomNav() {
   const pathname = usePathname()
   const { theme, toggle } = useTheme()
   const { signOut, user, loading } = useAuth()
+  const { count: webOrderCount } = useWebOrderNotifications()
   const role = (user?.role as string) ?? 'cashier'
   const [dynamicBottom, setDynamicBottom] = useState(0)
 
@@ -171,7 +173,14 @@ export function BottomNav() {
                 {drawerOpen && (
                   <span className="absolute top-0 left-1/2 -translate-x-1/2 w-6 h-0.5 bg-[var(--accent)] rounded-full" />
                 )}
-                <Menu size={20} strokeWidth={drawerOpen ? 2.5 : 1.8} />
+                <span className="relative">
+                  <Menu size={20} strokeWidth={drawerOpen ? 2.5 : 1.8} />
+                  {webOrderCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2 min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full bg-[var(--danger)] text-white text-[9px] font-bold ring-2 ring-[var(--surface)]">
+                      {webOrderCount > 9 ? '9+' : webOrderCount}
+                    </span>
+                  )}
+                </span>
                 <span className="text-[10px] font-medium">Más</span>
               </button>
             </>
@@ -218,15 +227,21 @@ export function BottomNav() {
                       {visibleItems.map(({ href, label, icon: Icon }) => {
                         const active = pathname === href || pathname.startsWith(href + '/')
                         const pending = pendingHref === href
+                        const badge = href === '/orders' && webOrderCount > 0
                         return (
                           <Link key={href} href={href}
                             onClick={() => { if (!active) setPendingHref(href) }}
                             className={cn(
-                              'flex flex-col items-center gap-1.5 px-2 py-3 rounded-xl transition-all',
+                              'relative flex flex-col items-center gap-1.5 px-2 py-3 rounded-xl transition-all',
                               active || pending
                                 ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
                                 : 'bg-[var(--surface2)] text-[var(--text2)] active:scale-95'
                             )}>
+                            {badge && (
+                              <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 flex items-center justify-center rounded-full bg-[var(--danger)] text-white text-[9px] font-bold">
+                                {webOrderCount > 9 ? '9+' : webOrderCount}
+                              </span>
+                            )}
                             {pending ? (
                               <span className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
                             ) : (

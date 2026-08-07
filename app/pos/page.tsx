@@ -9,9 +9,10 @@ import type { PriceList } from '@/app/price-lists/page'
 import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle, RefreshCw, Truck, Banknote, CreditCard, ArrowRightLeft, QrCode, BookOpen, Pencil, Trash2, Check, Info, Printer, Layers } from 'lucide-react'
 import { toast } from 'sonner'
 import { POSTicket } from '@/components/modules/POSTicket'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { PrintSettingsModal } from '@/components/modules/PrintSettingsModal'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
+import { NotificationBell } from '@/components/layout/NotificationBell'
 import { useWorkstation } from '@/hooks/useWorkstation'
 import { usePrintSettings } from '@/hooks/usePrintSettings'
 import { useAuth } from '@/hooks/useAuth'
@@ -1488,6 +1489,11 @@ export default function POSPage() {
         {/* Cantidad + Buscador */}
         <div className="px-4 py-3 border-b border-[var(--border)]">
           <div className="flex gap-2">
+            <div className="flex items-center flex-shrink-0">
+              <HelpHint title="¿Cómo cobrar en el POS?">
+                <p>Escaneá el código de barras o buscá el producto para sumarlo al ticket. Aplicá descuentos y promociones, elegí la forma de pago (efectivo, tarjeta o cuenta corriente) y cobrá. Necesitás una caja abierta para registrar la venta.</p>
+              </HelpHint>
+            </div>
             <div className="relative flex-shrink-0 group">
               <input ref={qtyRef} type="number" min="1" max="999" value={pendingQty}
                 onChange={e => { const val = Math.max(1, Number(e.target.value) || 1); setPendingQty(val); pendingQtyRef.current = val }}
@@ -1648,11 +1654,6 @@ export default function POSPage() {
           absolute top-full left-0 right-0 z-30 max-h-[65vh] bg-[var(--surface)] border-b border-[var(--border)] shadow-xl
           sm:static sm:z-auto sm:max-h-none sm:shadow-none sm:border-0 sm:flex-1
           ${!query.trim() && results.length === 0 ? 'hidden sm:block' : 'block'}`}>
-          <div className="mb-3 hidden sm:block">
-            <HelpBanner id="pos" title="¿Cómo cobrar en el POS?">
-              <p>Escaneá el código de barras o buscá el producto para sumarlo al ticket. Aplicá descuentos y promociones, elegí la forma de pago (efectivo, tarjeta o cuenta corriente) y cobrá. Necesitás una caja abierta para registrar la venta.</p>
-            </HelpBanner>
-          </div>
           {results.length > 0 ? (
             <div className="space-y-1">
               {results.map((product, index) => (
@@ -1731,6 +1732,7 @@ export default function POSPage() {
                 <span className="text-xs text-[var(--text3)]">{selectedList?.name ?? priceLists[0].name}</span>
               ) : null}
             </div>
+            <NotificationBell align="right" className="flex-shrink-0" />
             <button
               onClick={handleSync}
               disabled={cacheSyncing}

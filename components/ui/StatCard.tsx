@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils'
 import type { LucideIcon } from 'lucide-react'
 import { ArrowUpRight, ArrowDownRight } from 'lucide-react'
+import { FitText } from './FitText'
 
 interface StatCardProps {
   title:      string
@@ -29,16 +30,16 @@ export function StatCard({ title, value, valueTitle, valueClassName, subtitle, i
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-[var(--text3)] mb-1 truncate">{title}</p>
-          <p
+          <FitText
             title={valueTitle}
             className={cn(
-              'font-semibold mono tabular-nums truncate',
+              'font-semibold mono tabular-nums',
               valueClassName ?? 'text-2xl',
               danger ? 'text-[var(--danger)]' : warning ? 'text-[var(--warning)]' : accent ? 'text-[var(--accent)]' : 'text-[var(--text)]'
             )}
           >
             {value}
-          </p>
+          </FitText>
           {delta && (
             <div className={cn(
               'flex items-center gap-1 mt-1.5 text-xs font-medium',

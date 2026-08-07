@@ -75,6 +75,8 @@ export default function PublicCatalogPage() {
   const [preferredTime, setPreferredTime] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  // Modal de repaso: el cliente revisa el pedido antes de confirmar el envío.
+  const [confirmOpen, setConfirmOpen] = useState(false)
   const [receipt, setReceipt] = useState<{
     code: string
     date: string
@@ -283,6 +285,22 @@ export default function PublicCatalogPage() {
   // ── Enviar pedido al comercio (crea un pedido pendiente en /orders) ──────
   const acceptOrders = data?.catalog.accept_orders ?? false
 
+  // Texto legible del "cuándo" (fecha dd/mm + franja horaria), reutilizado en el
+  // modal de repaso y en el comprobante final.
+  const confirmWhen = useMemo(() =>
+    [preferredDate ? preferredDate.split('-').reverse().join('/') : '', preferredTime].filter(Boolean).join(' '),
+    [preferredDate, preferredTime])
+
+  // Valida los datos y abre el modal de repaso en vez de enviar directo, para
+  // que el cliente dé un último vistazo a lo que pidió.
+  const openConfirm = useCallback(() => {
+    if (cartLines.length === 0) { toast.error('Tu carrito está vacío'); return }
+    if (!buyerName.trim()) { toast.error('Ingresá tu nombre'); return }
+    if (buyerPhone.trim().length < 4) { toast.error('Ingresá un teléfono de contacto'); return }
+    if (deliveryMethod === 'delivery' && !address.trim()) { toast.error('Ingresá la dirección de envío'); return }
+    setConfirmOpen(true)
+  }, [cartLines.length, buyerName, buyerPhone, deliveryMethod, address])
+
   const sendOrder = useCallback(async () => {
     if (cartLines.length === 0) { toast.error('Tu carrito está vacío'); return }
     if (!buyerName.trim()) { toast.error('Ingresá tu nombre'); return }
@@ -324,6 +342,7 @@ export default function PublicCatalogPage() {
         lines:   cartLines.map(l => ({ name: l.product.name, qty: l.qty, net: l.net })),
         total:   cartTotal,
       })
+      setConfirmOpen(false)
       setSubmitted(true)
       setCart({})
       try { localStorage.removeItem(cartKey(slug)) } catch { /* ignore */ }
@@ -481,8 +500,9 @@ export default function PublicCatalogPage() {
       {acceptOrders && (
         <input
           value={buyerPhone}
-          onChange={e => setBuyerPhone(e.target.value)}
+          onChange={e => setBuyerPhone(e.target.value.replace(/[^\d+\s()-]/g, ''))}
           inputMode="tel"
+          type="tel"
           placeholder="Tu teléfono (para que te contacten)"
           className="w-full px-3 py-2 text-sm rounded-md bg-[var(--surface2)] border border-[var(--border)] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]"
         />
@@ -554,11 +574,11 @@ export default function PublicCatalogPage() {
       {acceptOrders ? (
         <>
           <button
-            onClick={sendOrder}
+            onClick={openConfirm}
             disabled={cartLines.length === 0 || submitting}
             className="w-full flex items-center justify-center gap-2 py-3 rounded-lg bg-[var(--accent)] text-white font-semibold active:scale-95 transition disabled:opacity-50"
           >
-            <ShoppingCart size={17} /> {submitting ? 'Enviando…' : 'Enviar pedido'}
+            <ShoppingCart size={17} /> Enviar pedido
           </button>
           <button
             onClick={copyOrder}
@@ -778,6 +798,85 @@ export default function PublicCatalogPage() {
             </div>
 
             <div className="border-t border-[var(--border)] px-4 py-3 space-y-3">{cartForm}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de repaso: mismo detalle que el comprobante, para que el cliente
+          confirme antes de que el pedido se envíe al comercio. */}
+      {confirmOpen && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end sm:justify-center sm:items-center">
+          <div className="absolute inset-0 bg-black/50" onClick={() => { if (!submitting) setConfirmOpen(false) }} />
+          <div className="relative bg-[var(--surface)] w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)] shrink-0">
+              <h2 className="font-semibold text-[var(--text)]">Revisá tu pedido</h2>
+              <button onClick={() => { if (!submitting) setConfirmOpen(false) }} className="text-[var(--text2)]"><X size={20} /></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+              {/* Datos del comprador + entrega */}
+              <div className="space-y-1 text-sm">
+                <p className="text-[var(--text)]"><span className="text-[var(--text3)]">Cliente:</span> {buyerName.trim()}</p>
+                <p className="text-[var(--text)]"><span className="text-[var(--text3)]">Tel:</span> {buyerPhone.trim()}</p>
+                <p className="flex items-center gap-1.5 text-[var(--text)]">
+                  {deliveryMethod === 'delivery'
+                    ? <><Truck size={14} className="text-[var(--accent)]" /> Envío a domicilio</>
+                    : <><Store size={14} className="text-[var(--accent)]" /> Retira en el local</>}
+                </p>
+                {deliveryMethod === 'delivery' && address.trim() && (
+                  <p className="flex items-start gap-1.5 text-[var(--text2)] text-xs">
+                    <MapPin size={13} className="mt-0.5 shrink-0" /> {address.trim()}
+                  </p>
+                )}
+                {confirmWhen && (
+                  <p className="flex items-center gap-1.5 text-[var(--text2)] text-xs">
+                    <Clock size={13} className="shrink-0" /> {deliveryMethod === 'delivery' ? 'Entregar' : 'Retirar'}: {confirmWhen}
+                  </p>
+                )}
+              </div>
+
+              {/* Detalle de ítems */}
+              <div className="border-t border-dashed border-[var(--border)] pt-3 space-y-2">
+                {cartLines.map(l => (
+                  <div key={l.product.id} className="flex items-start justify-between gap-3 text-sm">
+                    <span className="text-[var(--text)] flex-1 min-w-0">
+                      <span className="text-[var(--text3)] mr-1">{l.qty}×</span>{l.product.name}
+                    </span>
+                    <span className="font-medium text-[var(--text)] whitespace-nowrap">${money(l.net)}</span>
+                  </div>
+                ))}
+              </div>
+
+              {cartDiscount > 0 && (
+                <div className="flex items-center justify-between text-sm text-[var(--accent)] border-t border-dashed border-[var(--border)] pt-3">
+                  <span>Descuento promociones</span>
+                  <span className="font-medium">-${money(cartDiscount)}</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between border-t border-dashed border-[var(--border)] pt-3">
+                <span className="text-sm font-medium text-[var(--text2)]">Total</span>
+                <span className="text-lg font-bold text-[var(--text)]">${money(cartTotal)}</span>
+              </div>
+              <p className="text-[11px] text-[var(--text3)]">El total es a confirmar por el comercio.</p>
+            </div>
+
+            <div className="border-t border-[var(--border)] px-4 py-3 space-y-2 shrink-0">
+              <button
+                onClick={sendOrder}
+                disabled={submitting}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-lg bg-[var(--accent)] text-white font-semibold active:scale-95 transition disabled:opacity-50"
+              >
+                <CheckCircle2 size={17} /> {submitting ? 'Enviando…' : 'Confirmar pedido'}
+              </button>
+              <button
+                onClick={() => setConfirmOpen(false)}
+                disabled={submitting}
+                className="w-full py-2 rounded-lg border border-[var(--border)] text-[var(--text2)] text-sm font-medium active:scale-95 transition disabled:opacity-50"
+              >
+                Seguir editando
+              </button>
+            </div>
           </div>
         </div>
       )}

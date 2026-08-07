@@ -3,13 +3,14 @@ import { useEffect, useState, useCallback } from 'react'
 import { StatCard } from '@/components/ui/StatCard'
 import { AgingBar } from '@/components/ui/AgingBar'
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card'
+import { AllDebtorsModal } from '@/components/modules/AllDebtorsModal'
 import { api } from '@/lib/api'
 import { formatCurrency, formatIntCurrency } from '@/lib/utils'
 import { BUCKET_STYLE, formatDebtAge, type CcPortfolioKpis } from '@/lib/cc-aging'
 import { buildCcInsights, type CcInsightTone } from '@/lib/cc-insights'
 import {
   Wallet, Users, HandCoins, AlertTriangle, Sparkles,
-  TrendingUp, TrendingDown, CheckCircle2, Info,
+  TrendingUp, TrendingDown, CheckCircle2, Info, ArrowRight,
 } from 'lucide-react'
 
 const INSIGHT_STYLE: Record<CcInsightTone, { Icon: typeof Info; color: string; bg: string }> = {
@@ -127,6 +128,7 @@ export function CCPortfolioTop({ kpis, loading }: { kpis: CcPortfolioKpis | null
 export function CCPortfolioBottom({
   kpis, onSelectDebtor,
 }: { kpis: CcPortfolioKpis | null; onSelectDebtor?: (id: string) => void }) {
+  const [allDebtorsOpen, setAllDebtorsOpen] = useState(false)
   if (!kpis) return null
   const insights = buildCcInsights(kpis)
 
@@ -168,13 +170,22 @@ export function CCPortfolioBottom({
 
       {/* Top deudores */}
       <Card padding="none" className="flex flex-col">
-        <CardHeader className="px-4 pt-4 pb-3">
+        <CardHeader className="px-4 pt-4 pb-3 flex items-center justify-between gap-2">
           <CardTitle>
             <span className="flex items-center gap-1.5">
               <TrendingDown size={15} className="text-[var(--danger)]" />
               Top deudores
             </span>
           </CardTitle>
+          {kpis.customers_with_debt > 0 && (
+            <button
+              onClick={() => setAllDebtorsOpen(true)}
+              className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline"
+            >
+              Ver todos
+              <ArrowRight size={13} />
+            </button>
+          )}
         </CardHeader>
         {kpis.top_debtors.length === 0 ? (
           <div className="px-4 pb-5 text-xs text-[var(--text3)]">No hay clientes con deuda.</div>
@@ -219,6 +230,12 @@ export function CCPortfolioBottom({
           </div>
         )}
       </Card>
+
+      <AllDebtorsModal
+        open={allDebtorsOpen}
+        onClose={() => setAllDebtorsOpen(false)}
+        onSelectDebtor={onSelectDebtor}
+      />
     </div>
   )
 }

@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { HelpBanner } from '@/components/ui/HelpBanner'
+import { HelpHint } from '@/components/ui/HelpHint'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Modal } from '@/components/ui/Modal'
@@ -99,6 +99,11 @@ export default function BrandsPage() {
     <AppShell>
       <PageHeader
         title="Marcas"
+        help={
+          <HelpHint title="Marcas">
+            <p>Registrá las marcas de tus productos para poder filtrarlos por marca y aplicarles promociones específicas.</p>
+          </HelpHint>
+        }
         description={`${brands.length} marcas`}
         action={
           <Button onClick={openCreate}><Plus size={15} /> Nueva marca</Button>
@@ -106,9 +111,6 @@ export default function BrandsPage() {
       />
 
       <div className="p-5 space-y-4">
-        <HelpBanner id="brands" title="Marcas">
-          <p>Registrá las marcas de tus productos para poder filtrarlos por marca y aplicarles promociones específicas.</p>
-        </HelpBanner>
 
         {/* Buscador */}
         <div className="relative max-w-xs">
