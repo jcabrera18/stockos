@@ -11,19 +11,20 @@ import { PageLoader } from '@/components/ui/Spinner'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { PurchaseOrderModal } from '@/components/modules/PurchaseOrderModal'
 import { SupplierModal } from '@/components/modules/SupplierModal'
+import { PurchaseWishlist } from '@/components/modules/PurchaseWishlist'
 import { api } from '@/lib/api'
 import { formatCurrency, formatDate } from '@/lib/utils'
 import { printDocument, partiesGrid, totalsBox, fmtARS } from '@/lib/printDocument'
 import { makeOptimisticState, reconcileList, clearOptimisticState } from '@/lib/optimistic-reconcile'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useAuth } from '@/hooks/useAuth'
-import type { PurchaseOrder, Supplier, PaginatedResponse, Pagination as PaginationType } from '@/types'
-import { Plus, Truck, Building2, Search, X } from 'lucide-react'
+import type { PurchaseOrder, Supplier, PaginatedResponse, Pagination as PaginationType, Product } from '@/types'
+import { Plus, Truck, Building2, Search, X, ShoppingCart } from 'lucide-react'
 import { toast } from 'sonner'
 
 const ORDERS_PER_PAGE = 10
 
-type Tab          = 'orders' | 'suppliers'
+type Tab          = 'orders' | 'suppliers' | 'wishlist'
 type StatusFilter = 'all' | 'pending' | 'received' | 'cancelled'
 type CostDecision = 'keep' | 'new_price' | 'weighted' | 'highest'
 
@@ -81,6 +82,10 @@ export default function PurchasesPage() {
   const [orderPage, setOrderPage]     = useState(1)
   const [loadingOrders, setLoadingOrders] = useState(true)
   const [orderModal, setOrderModal]   = useState(false)
+  // Conversión lista de compras → orden: ítems precargados + ids a marcar comprados.
+  const [orderInitialItems, setOrderInitialItems] = useState<{ product: Product; quantity?: number }[]>([])
+  const [pendingWishlistIds, setPendingWishlistIds] = useState<string[]>([])
+  const [wishlistKey, setWishlistKey] = useState(0)  // bump para refrescar el tab tras convertir
 
   // Detalle orden
   const [detailOrder, setDetailOrder]     = useState<PurchaseOrder | null>(null)
@@ -343,8 +348,10 @@ export default function PurchasesPage() {
         }
         action={
           tab === 'orders'
-            ? <Button onClick={() => setOrderModal(true)}><Plus size={15} /> Nueva orden</Button>
-            : <Button onClick={() => { setEditSupplier(null); setSupplierModal(true) }}><Plus size={15} /> Nuevo proveedor</Button>
+            ? <Button onClick={() => { setOrderInitialItems([]); setPendingWishlistIds([]); setOrderModal(true) }}><Plus size={15} /> Nueva orden</Button>
+            : tab === 'suppliers'
+            ? <Button onClick={() => { setEditSupplier(null); setSupplierModal(true) }}><Plus size={15} /> Nuevo proveedor</Button>
+            : null
         }
       />
 
@@ -354,6 +361,7 @@ export default function PurchasesPage() {
           {[
             { key: 'orders',    label: 'Órdenes de compra', icon: Truck },
             { key: 'suppliers', label: 'Proveedores',        icon: Building2 },
+            { key: 'wishlist',  label: 'Lista de compras',   icon: ShoppingCart },
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
@@ -554,13 +562,34 @@ export default function PurchasesPage() {
             </div>
           )
         )}
+
+        {/* ── TAB: LISTA DE COMPRAS ────────────────────── */}
+        {tab === 'wishlist' && (
+          <PurchaseWishlist
+            key={wishlistKey}
+            onCreateOrder={(items, ids) => {
+              setOrderInitialItems(items)
+              setPendingWishlistIds(ids)
+              setOrderModal(true)
+            }}
+          />
+        )}
       </div>
 
       {/* Modal nueva orden */}
       <PurchaseOrderModal
         open={orderModal}
-        onClose={() => setOrderModal(false)}
-        onSaved={fetchOrders}
+        initialItems={orderInitialItems}
+        onClose={() => { setOrderModal(false); setOrderInitialItems([]); setPendingWishlistIds([]) }}
+        onSaved={async () => {
+          fetchOrders()
+          // Si la orden salió de la lista de compras, marcamos esos ítems como comprados.
+          if (pendingWishlistIds.length) {
+            try { await api.post('/api/purchases/wishlist/mark-done', { ids: pendingWishlistIds }) } catch { /* noop */ }
+            setPendingWishlistIds([])
+            setWishlistKey(k => k + 1)
+          }
+        }}
       />
 
       {/* Modal proveedor */}

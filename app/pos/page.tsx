@@ -6,11 +6,10 @@ import { formatCurrency } from '@/lib/utils'
 import type { Product } from '@/types'
 import type { CustomerSummary } from '@/app/customers/page'
 import type { PriceList } from '@/app/price-lists/page'
-import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle, RefreshCw, Truck, Banknote, CreditCard, ArrowRightLeft, QrCode, BookOpen, Pencil, Trash2, Check, Info, Printer, Layers } from 'lucide-react'
+import { Search, Plus, Minus, X, ShoppingCart, Zap, ChevronLeft, Users, AlertTriangle, RefreshCw, Truck, Banknote, CreditCard, ArrowRightLeft, QrCode, BookOpen, Pencil, Trash2, Check, Info, Layers, Store } from 'lucide-react'
 import { toast } from 'sonner'
 import { POSTicket } from '@/components/modules/POSTicket'
 import { HelpHint } from '@/components/ui/HelpHint'
-import { PrintSettingsModal } from '@/components/modules/PrintSettingsModal'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
 import { NotificationBell } from '@/components/layout/NotificationBell'
 import { useWorkstation } from '@/hooks/useWorkstation'
@@ -226,7 +225,6 @@ export default function POSPage() {
 
   const { workstation, setWorkstation, loaded } = useWorkstation()
   const { settings: printSettings } = usePrintSettings()
-  const [showPrintSettings, setShowPrintSettings] = useState(false)
   const { user } = useAuth()
   const stockEnabled    = user?.business?.stock_enabled ?? false
   const stockEnabledRef = useRef(stockEnabled)
@@ -1404,30 +1402,23 @@ export default function POSPage() {
           <span className="text-sm font-bold text-[var(--text)]">StockOS POS</span>
           <div className="ml-auto flex items-center gap-2">
             {workstation && (
-              <>
-                <span className="text-xs text-[var(--text3)] hidden sm:flex flex-col leading-tight text-right">
-                  <span>{workstation.branch_name}</span>
-                  <span>{workstation.register_name}</span>
+              <button
+                onClick={() => {
+                  setTempBranchId(workstation.branch_id)
+                  setTempRegisterId(workstation.register_id)
+                  setSelectingWorkstation(true)
+                }}
+                title="Cambiar sucursal / caja"
+                className="group flex items-center gap-1.5 pl-2 pr-2 py-1 max-w-[220px] rounded-full border border-[var(--border)] hover:border-[var(--accent)] hover:bg-[var(--surface2)] transition-colors"
+              >
+                <Store size={14} className="text-[var(--text3)] group-hover:text-[var(--accent)] transition-colors flex-shrink-0" />
+                <span className="flex flex-col leading-tight text-left min-w-0">
+                  <span className="text-xs font-semibold text-[var(--text)] truncate">{workstation.branch_name}</span>
+                  <span className="text-[10px] text-[var(--text3)] truncate">{workstation.register_name}</span>
                 </span>
-                <button
-                  onClick={() => {
-                    setTempBranchId(workstation.branch_id)
-                    setTempRegisterId(workstation.register_id)
-                    setSelectingWorkstation(true)
-                  }}
-                  className="text-xs text-[var(--text3)] hover:text-[var(--accent)] underline transition-colors"
-                >
-                  Cambiar
-                </button>
-              </>
+                <Pencil size={11} className="text-[var(--text3)] group-hover:text-[var(--accent)] transition-colors flex-shrink-0 ml-0.5" />
+              </button>
             )}
-            <button
-              onClick={() => setShowPrintSettings(true)}
-              title="Configuración de impresión"
-              className="p-1.5 rounded-[var(--radius-md)] text-[var(--text3)] hover:text-[var(--accent)] hover:bg-[var(--surface2)] transition-colors"
-            >
-              <Printer size={16} />
-            </button>
           </div>
         </div>
 
@@ -2612,8 +2603,6 @@ export default function POSPage() {
         sellerName={user?.full_name}
         printSettings={printSettings}
       />
-
-      <PrintSettingsModal open={showPrintSettings} onClose={() => setShowPrintSettings(false)} />
 
     </div>
   )

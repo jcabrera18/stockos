@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Modal } from '@/components/ui/Modal'
 import { Input } from '@/components/ui/Input'
 import { MoneyInput } from '@/components/ui/MoneyInput'
@@ -58,9 +58,13 @@ interface PurchaseOrderModalProps {
   open: boolean
   onClose: () => void
   onSaved: () => void
+  // Ítems precargados al abrir (ej: convertir una lista de compras en orden).
+  initialItems?: { product: Product; quantity?: number }[]
+  // Proveedor preseleccionado.
+  initialSupplierId?: string
 }
 
-export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModalProps) {
+export function PurchaseOrderModal({ open, onClose, onSaved, initialItems, initialSupplierId }: PurchaseOrderModalProps) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [supplierId, setSupplierId] = useState('')
@@ -110,6 +114,28 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
       setCurrency('ARS')
     }
   }, [open])
+
+  // Precarga de ítems / proveedor al abrir (conversión desde lista de compras).
+  // Se corre una sola vez por apertura para no pisar ediciones del usuario.
+  const seededRef = useRef(false)
+  useEffect(() => {
+    if (!open) { seededRef.current = false; return }
+    if (seededRef.current) return
+    seededRef.current = true
+    if (initialSupplierId) setSupplierId(initialSupplierId)
+    if (initialItems && initialItems.length) {
+      setItems(initialItems.map(({ product, quantity }) => ({
+        product,
+        quantity: quantity && quantity > 0 ? String(quantity) : '',
+        unit_cost_net: (product.cost_price_net ?? product.cost_price)
+          ? String(product.cost_price_net ?? product.cost_price)
+          : '',
+        vat_rate: 0,
+        extra_mode: 'pct' as const,
+        extra_value: '',
+      })))
+    }
+  }, [open, initialItems, initialSupplierId])
 
   // Búsqueda de productos
   useEffect(() => {
