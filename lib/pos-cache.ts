@@ -224,32 +224,70 @@ export async function resolveBarcode(
 // ── Búsqueda local ────────────────────────────────────────────────────────────
 
 /**
+ * Límite compartido de resultados para todos los buscadores de productos
+ * (POS, pedidos, compras). Un solo lugar para tunearlo. El buscador rankea por
+ * relevancia, así que el correcto casi siempre entra dentro de este tope.
+ */
+export const SEARCH_RESULT_LIMIT = 12
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Parte la query en tokens normalizados (sin acentos/mayúsculas).
+ * "abraz hierro" → ["abraz", "hierro"]. Vacío si la query no tiene texto útil.
+ */
+function queryTokens(query: string): string[] {
+  return normalizeText(query).trim().split(/\s+/).filter(Boolean)
+}
+
+/**
  * Búsqueda de texto en el catálogo local.
+ *
+ * Búsqueda por tokens (AND): cada palabra de la query debe aparecer en algún
+ * campo (nombre, SKU o barcode), sin importar el orden ni la posición. Así
+ * "abraz hierro" encuentra "ABRAZADERA DE ACELERADOR (HIERRO)" y "mini 12"
+ * encuentra "ABRAZADERA MINI 12-22 MM", cosa que la búsqueda por prefijo no hacía.
+ *
+ * Los resultados se rankean por relevancia para que, dentro del límite, aparezcan
+ * primero los más probables (nombre exacto > empieza con > tokens al inicio de
+ * palabra > match suelto).
+ *
  * Retorna array vacío si el cache está vacío → el caller puede hacer fallback al server.
  */
 export async function searchProductsLocal(query: string, limit = 8): Promise<Product[]> {
   try {
-    // Sin acentos ni mayúsculas: "bri" encuentra "Brío", "cafe" → "Café".
-    const q = normalizeText(query)
-    const matches = await posDB.products
-      .filter(
-        p =>
-          p.is_active !== false &&
-          (normalizeText(p.name).includes(q) ||
-            (p.barcode ?? '').includes(q) ||
-            normalizeText(p.sku ?? '').includes(q)),
+    const q = normalizeText(query).trim()
+    const tokens = queryTokens(query)
+    if (!tokens.length) return []
+
+    const all = await posDB.products.filter(p => p.is_active !== false).toArray()
+
+    const scored: { p: Product; score: number }[] = []
+    for (const p of all) {
+      const name = normalizeText(p.name)
+      const sku = normalizeText(p.sku ?? '')
+      const barcode = p.barcode ?? ''
+      // Cada token tiene que estar en nombre, SKU o barcode (búsqueda AND).
+      const allMatch = tokens.every(
+        t => name.includes(t) || sku.includes(t) || barcode.includes(t),
       )
-      .toArray()
-    // Relevancia: primero los productos cuyo nombre EMPIEZA con la query
-    // (lo más probable que el usuario busca), luego orden alfabético. Sin esto,
-    // con pocas letras el producto deseado podía quedar fuera del límite.
-    matches.sort((a, b) => {
-      const aStarts = normalizeText(a.name).startsWith(q) ? 0 : 1
-      const bStarts = normalizeText(b.name).startsWith(q) ? 0 : 1
-      if (aStarts !== bStarts) return aStarts - bStarts
-      return a.name.localeCompare(b.name)
-    })
-    return matches.slice(0, limit)
+      if (!allMatch) continue
+
+      // Relevancia: menor score = más arriba.
+      let rank = 4
+      if (name === q) rank = 0 // nombre exacto
+      else if (name.startsWith(q)) rank = 1 // empieza con toda la query
+      else if (sku === q || barcode === q) rank = 2 // SKU/barcode exacto
+      else if (tokens.every(t => new RegExp(`\\b${escapeRegex(t)}`).test(name)))
+        rank = 3 // todos los tokens al inicio de una palabra del nombre
+      // Desempate: nombres más cortos (más específicos al término) primero.
+      scored.push({ p, score: rank * 10000 + name.length })
+    }
+
+    scored.sort((a, b) => a.score - b.score || a.p.name.localeCompare(b.p.name))
+    return scored.slice(0, limit).map(s => s.p)
   } catch {
     return []
   }
@@ -275,18 +313,22 @@ export async function getVariablePriceProducts(): Promise<Product[]> {
  */
 export async function searchCustomersLocal(query: string, limit = 8): Promise<CustomerSummary[]> {
   try {
-    const q = normalizeText(query)
+    const tokens = queryTokens(query)
+    if (!tokens.length) return []
     return posDB.customers
-      .filter(
-        c =>
-          c.is_active !== false &&
-          (normalizeText(c.full_name).includes(q) ||
-            normalizeText(c.razon_social ?? '').includes(q) ||
-            normalizeText(c.nombre_fantasia ?? '').includes(q) ||
-            (c.document ?? '').includes(q) ||
-            (c.phone ?? '').includes(q) ||
-            normalizeText(c.customer_code ?? '').includes(q)),
-      )
+      .filter(c => {
+        if (c.is_active === false) return false
+        const fields = [
+          normalizeText(c.full_name),
+          normalizeText(c.razon_social ?? ''),
+          normalizeText(c.nombre_fantasia ?? ''),
+          c.document ?? '',
+          c.phone ?? '',
+          normalizeText(c.customer_code ?? ''),
+        ]
+        // Cada token debe aparecer en algún campo (búsqueda AND, cualquier orden).
+        return tokens.every(t => fields.some(f => f.includes(t)))
+      })
       .limit(limit)
       .toArray()
   } catch {

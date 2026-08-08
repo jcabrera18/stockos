@@ -33,6 +33,7 @@ import {
   getLocalPromotions,
   getLastSyncTime,
   getVariablePriceProducts,
+  SEARCH_RESULT_LIMIT,
   type PricingResult,
   type ScanResult,
 } from '@/lib/pos-cache'
@@ -43,8 +44,6 @@ import { queueSale, syncPendingSales, pushSale, getPendingSalesCount, isNetworkE
 
 // Mínimo de caracteres para disparar búsqueda de texto (no aplica a códigos de barra)
 const MIN_SEARCH_LEN = 3
-// Tope de resultados mostrados en la búsqueda del POS
-const SEARCH_RESULT_LIMIT = 8
 
 interface CartItem {
   product: Product

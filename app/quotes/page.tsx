@@ -29,7 +29,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useWorkstation } from '@/hooks/useWorkstation'
 import { usePOSSync } from '@/hooks/usePOSSync'
 import { useCollapseSidebar } from '@/contexts/SidePanelContext'
-import { searchProductsLocal } from '@/lib/pos-cache'
+import { searchProductsLocal, SEARCH_RESULT_LIMIT } from '@/lib/pos-cache'
 import { useCustomerSearch } from '@/hooks/useCustomerSearch'
 import { CustomerSearchResults } from '@/components/modules/CustomerSearchResults'
 import { QuickCustomerModal } from '@/components/modules/QuickCustomerModal'
@@ -293,7 +293,7 @@ export default function QuotesPage() {
 
     if (cacheReady) {
       let cancelled = false
-      searchProductsLocal(productQuery.trim(), 8).then(results => {
+      searchProductsLocal(productQuery.trim(), SEARCH_RESULT_LIMIT).then(results => {
         if (!cancelled) setProductResults(results.filter(p => !cart.find(c => c.product.id === p.id)))
       })
       return () => { cancelled = true }

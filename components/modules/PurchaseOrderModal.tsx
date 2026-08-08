@@ -12,7 +12,7 @@ import { Search, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/useAuth'
 import { usePOSSync } from '@/hooks/usePOSSync'
-import { searchProductsLocal } from '@/lib/pos-cache'
+import { searchProductsLocal, SEARCH_RESULT_LIMIT } from '@/lib/pos-cache'
 
 interface Warehouse { id: string; name: string; is_default: boolean }
 
@@ -118,7 +118,7 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
     // Con el cache listo: búsqueda local en IndexedDB (instantánea, sin acentos).
     if (cacheReady) {
       let cancelled = false
-      searchProductsLocal(query.trim(), 6).then(local => {
+      searchProductsLocal(query.trim(), SEARCH_RESULT_LIMIT).then(local => {
         if (!cancelled) setResults(local.filter(p => !items.find(i => i.product.id === p.id)))
       })
       return () => { cancelled = true }
@@ -129,7 +129,7 @@ export function PurchaseOrderModal({ open, onClose, onSaved }: PurchaseOrderModa
       setSearching(true)
       try {
         const res = await api.get<{ data: Product[] }>('/api/products', {
-          search: query.trim(), limit: 6,
+          search: query.trim(), limit: SEARCH_RESULT_LIMIT,
         })
         setResults(res.data.filter(p => !items.find(i => i.product.id === p.id)))
       } catch { setResults([]) }

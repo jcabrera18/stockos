@@ -36,7 +36,7 @@ import { useWorkstation } from '@/hooks/useWorkstation'
 import { usePOSSync } from '@/hooks/usePOSSync'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useCollapseSidebar } from '@/contexts/SidePanelContext'
-import { searchProductsLocal } from '@/lib/pos-cache'
+import { searchProductsLocal, SEARCH_RESULT_LIMIT } from '@/lib/pos-cache'
 import { useCustomerSearch } from '@/hooks/useCustomerSearch'
 import { CustomerSearchResults } from '@/components/modules/CustomerSearchResults'
 import { printDocument, partiesGrid, totalsBox, highlightBox, fmtARS } from '@/lib/printDocument'
@@ -874,7 +874,7 @@ function OrdersPageInner() {
     let cancelled = false
 
     ;(async () => {
-      const local = await searchProductsLocal(trimmed, 8)
+      const local = await searchProductsLocal(trimmed, SEARCH_RESULT_LIMIT)
       if (cancelled || seq !== productSearchSeqRef.current) return
 
       if (local.length > 0) {
@@ -883,7 +883,7 @@ function OrdersPageInner() {
         // Refresh de stock en fondo (solo con depósito + stock activo). No bloquea.
         if (warehouseId && stockEnabled) {
           api.get<{ data: Product[] }>('/api/products', {
-            search: trimmed, limit: 8, warehouse_id: warehouseId,
+            search: trimmed, limit: SEARCH_RESULT_LIMIT, warehouse_id: warehouseId,
           }).then(res => {
             if (cancelled || seq !== productSearchSeqRef.current) return
             const freshById = new Map(res.data.map(p => [p.id, p]))
@@ -897,7 +897,7 @@ function OrdersPageInner() {
       setSearchingProducts(true)
       try {
         const res = await api.get<{ data: Product[] }>('/api/products', {
-          search: trimmed, limit: 8,
+          search: trimmed, limit: SEARCH_RESULT_LIMIT,
           ...(warehouseId && stockEnabled ? { warehouse_id: warehouseId } : {}),
         })
         if (cancelled || seq !== productSearchSeqRef.current) return
